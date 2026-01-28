@@ -1,5 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { locationsRouter } from './routes/locations.js';
+import { productsRouter } from './routes/products.js';
+import { stockItemsRouter } from './routes/stock-items.js';
 
 const app = express();
 
@@ -17,11 +19,8 @@ app.get('/health', (_req: Request, res: Response) => {
 
 // Mount routes
 app.use('/locations', locationsRouter);
-
-// Placeholder for other routes
-app.get('/api/stock', (_req: Request, res: Response) => {
-  res.json({ message: 'Stock endpoint - coming soon' });
-});
+app.use('/products', productsRouter);
+app.use('/stock-items', stockItemsRouter);
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
