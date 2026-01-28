@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import { locationsRouter } from './routes/locations.js';
 import { productsRouter } from './routes/products.js';
 import { stockItemsRouter } from './routes/stock-items.js';
+import { stockMovementsRouter } from './routes/stock-movements.js';
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.get('/health', (_req: Request, res: Response) => {
 app.use('/locations', locationsRouter);
 app.use('/products', productsRouter);
 app.use('/stock-items', stockItemsRouter);
+app.use('/stock-movements', stockMovementsRouter);
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
