@@ -1,34 +1,66 @@
 services:
   postgres:
-    extends:
-      file: docker-compose.yml
-      service: postgres
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-copio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-copio_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-copio}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-copio}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
-    extends:
-      file: docker-compose.yml
-      service: redis
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  # Inventory service placeholder - uncomment when ready
-  # inventory:
-  #   build:
-  #     context: ./services/inventory
-  #     dockerfile: Dockerfile
-  #   environment:
-  #     DATABASE_URL: ${DATABASE_URL}
-  #     REDIS_URL: ${REDIS_URL}
-  #     PORT: ${PORT:-3001}
-  #     NODE_ENV: development
-  #   ports:
-  #     - "${PORT:-3001}:${PORT:-3001}"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./services/inventory:/app
-  #     - /app/node_modules
+  api:
+    build:
+      context: .
+      dockerfile: packages/inventory-service/Dockerfile.dev
+    ports:
+      - "3002:3002"
+    environment:
+      DATABASE_URL: postgresql://copio:copio_dev@postgres:5432/copio
+      REDIS_URL: redis://redis:6379
+      PORT: "3002"
+      NODE_ENV: development
+    volumes:
+      - ./packages/inventory-service/src:/app/packages/inventory-service/src
+      - ./packages/core/src:/app/packages/core/src
+      - ./packages/core/prisma:/app/packages/core/prisma
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile.dev
+    ports:
+      - "3000:3000"
+    environment:
+      API_URL: http://api:3002
+    volumes:
+      - ./packages/web/src:/app/packages/web/src
+      - ./packages/web/public:/app/packages/web/public
+    depends_on:
+      - api
 
 volumes:
   postgres_data:

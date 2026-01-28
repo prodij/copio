@@ -203,7 +203,12 @@ router.get('/', async (req: Request, res: Response) => {
   const movements = await prisma.stockMovement.findMany({
     where: stockItemId ? { stockItemId: stockItemId as string } : undefined,
     include: {
-      stockItem: true,
+      stockItem: {
+        include: {
+          product: true,
+          location: true,
+        },
+      },
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -215,7 +220,12 @@ router.get('/:id', async (req: Request, res: Response) => {
   const movement = await prisma.stockMovement.findUnique({
     where: { id: req.params.id },
     include: {
-      stockItem: true,
+      stockItem: {
+        include: {
+          product: true,
+          location: true,
+        },
+      },
     },
   });
 

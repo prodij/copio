@@ -1,6 +1,7 @@
 import axios from "axios";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3002";
+// Use /api proxy in production/docker, direct URL for local dev
+const API_BASE = typeof window !== 'undefined' ? '/api' : (process.env.API_URL || 'http://localhost:3002');
 
 // Axios instance for React Query hooks
 export const api = axios.create({
@@ -29,7 +30,9 @@ api.interceptors.response.use(
 
 // Legacy fetch wrapper (kept for backward compatibility)
 export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${endpoint}`, {
+  // Remove leading slash from endpoint if API_BASE ends with one
+  const url = endpoint.startsWith('/') ? `${API_BASE}${endpoint}` : `${API_BASE}/${endpoint}`;
+  const res = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",

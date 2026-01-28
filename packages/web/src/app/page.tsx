@@ -1,66 +1,47 @@
-"use client";
-
 import Link from "next/link";
 import { Package, MapPin, Layers, AlertTriangle, ArrowDown, ArrowUp, RefreshCw, ArrowLeftRight } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useDashboardStats } from "@/hooks/use-dashboard";
-import type { MovementType, StockMovement } from "@/lib/api";
-import type { StockItem } from "@/hooks/use-stock-items";
 
-function StatCardSkeleton() {
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <div className="h-4 w-24 bg-muted animate-pulse rounded" />
-      </CardHeader>
-      <CardContent>
-        <div className="h-8 w-16 bg-muted animate-pulse rounded mb-1" />
-        <div className="h-3 w-32 bg-muted animate-pulse rounded" />
-      </CardContent>
-    </Card>
-  );
+const API_URL = process.env.API_URL || 'http://localhost:3002';
+
+async function getProducts() {
+  const res = await fetch(`${API_URL}/products`, { cache: 'no-store' });
+  return res.json();
 }
 
-function TableRowSkeleton() {
-  return (
-    <tr className="border-b">
-      <td className="p-4"><div className="h-4 w-16 bg-muted animate-pulse rounded" /></td>
-      <td className="p-4"><div className="h-4 w-24 bg-muted animate-pulse rounded" /></td>
-      <td className="p-4"><div className="h-4 w-20 bg-muted animate-pulse rounded" /></td>
-      <td className="p-4 text-right"><div className="h-4 w-12 bg-muted animate-pulse rounded ml-auto" /></td>
-      <td className="p-4 text-right"><div className="h-4 w-20 bg-muted animate-pulse rounded ml-auto" /></td>
-    </tr>
-  );
+async function getLocations() {
+  const res = await fetch(`${API_URL}/locations`, { cache: 'no-store' });
+  return res.json();
 }
 
-function MovementTypeIcon({ type }: { type: MovementType }) {
-  const iconProps = { className: "h-4 w-4" };
-  
-  switch (type) {
-    case "RECEIVE":
-      return <ArrowDown {...iconProps} className="h-4 w-4 text-green-600" />;
-    case "SHIP":
-      return <ArrowUp {...iconProps} className="h-4 w-4 text-blue-600" />;
-    case "ADJUST":
-      return <RefreshCw {...iconProps} className="h-4 w-4 text-orange-600" />;
-    case "TRANSFER":
-      return <ArrowLeftRight {...iconProps} className="h-4 w-4 text-purple-600" />;
-    default:
-      return null;
-  }
+async function getStockItems() {
+  const res = await fetch(`${API_URL}/stock-items`, { cache: 'no-store' });
+  return res.json();
 }
 
-function MovementTypeBadge({ type }: { type: MovementType }) {
-  const colors: Record<MovementType, string> = {
+async function getMovements() {
+  const res = await fetch(`${API_URL}/stock-movements`, { cache: 'no-store' });
+  return res.json();
+}
+
+function MovementTypeBadge({ type }: { type: string }) {
+  const colors: Record<string, string> = {
     RECEIVE: "bg-green-100 text-green-800",
     SHIP: "bg-blue-100 text-blue-800",
     ADJUST: "bg-orange-100 text-orange-800",
     TRANSFER: "bg-purple-100 text-purple-800",
   };
 
+  const icons: Record<string, React.ReactNode> = {
+    RECEIVE: <ArrowDown className="h-3 w-3" />,
+    SHIP: <ArrowUp className="h-3 w-3" />,
+    ADJUST: <RefreshCw className="h-3 w-3" />,
+    TRANSFER: <ArrowLeftRight className="h-3 w-3" />,
+  };
+
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${colors[type]}`}>
-      <MovementTypeIcon type={type} />
+    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${colors[type] || "bg-gray-100"}`}>
+      {icons[type]}
       {type}
     </span>
   );
@@ -76,8 +57,16 @@ function formatDate(dateString: string) {
   });
 }
 
-export default function DashboardPage() {
-  const { isLoading, stats, lowStockItems, recentMovements } = useDashboardStats();
+export default async function DashboardPage() {
+  const [products, locations, stockItems, movements] = await Promise.all([
+    getProducts(),
+    getLocations(),
+    getStockItems(),
+    getMovements(),
+  ]);
+
+  const totalUnits = stockItems.reduce((sum: number, item: any) => sum + item.quantityAvailable, 0);
+  const lowStockItems = stockItems.filter((item: any) => item.quantityAvailable < 10);
 
   return (
     <div className="space-y-6">
@@ -90,60 +79,49 @@ export default function DashboardPage() {
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {isLoading ? (
-          <>
-            <StatCardSkeleton />
-            <StatCardSkeleton />
-            <StatCardSkeleton />
-            <StatCardSkeleton />
-          </>
-        ) : (
-          <>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Products</CardTitle>
-                <Package className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.totalProducts}</div>
-                <p className="text-xs text-muted-foreground">Unique SKUs in catalog</p>
-              </CardContent>
-            </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Products</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{products.length}</div>
+            <p className="text-xs text-muted-foreground">Unique SKUs in catalog</p>
+          </CardContent>
+        </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Units</CardTitle>
-                <Layers className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.totalUnits.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">Units in inventory</p>
-              </CardContent>
-            </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Units</CardTitle>
+            <Layers className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalUnits.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground">Units in inventory</p>
+          </CardContent>
+        </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Locations</CardTitle>
-                <MapPin className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.totalLocations}</div>
-                <p className="text-xs text-muted-foreground">Active warehouses</p>
-              </CardContent>
-            </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Locations</CardTitle>
+            <MapPin className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{locations.length}</div>
+            <p className="text-xs text-muted-foreground">Active warehouses</p>
+          </CardContent>
+        </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Low Stock</CardTitle>
-                <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.lowStockCount}</div>
-                <p className="text-xs text-muted-foreground">Items need attention</p>
-              </CardContent>
-            </Card>
-          </>
-        )}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Low Stock</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{lowStockItems.length}</div>
+            <p className="text-xs text-muted-foreground">Items need attention</p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Recent Activity */}
@@ -153,24 +131,7 @@ export default function DashboardPage() {
           <CardDescription>Latest inventory movements and updates.</CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b">
-                  <th className="p-4 text-left text-sm font-medium text-muted-foreground">Type</th>
-                  <th className="p-4 text-left text-sm font-medium text-muted-foreground">Product</th>
-                  <th className="p-4 text-left text-sm font-medium text-muted-foreground">Location</th>
-                  <th className="p-4 text-right text-sm font-medium text-muted-foreground">Qty</th>
-                  <th className="p-4 text-right text-sm font-medium text-muted-foreground">Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                <TableRowSkeleton />
-                <TableRowSkeleton />
-                <TableRowSkeleton />
-              </tbody>
-            </table>
-          ) : recentMovements.length === 0 ? (
+          {movements.length === 0 ? (
             <p className="text-sm text-muted-foreground">No recent activity to display.</p>
           ) : (
             <table className="w-full">
@@ -184,13 +145,13 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {recentMovements.slice(0, 10).map((movement: StockMovement) => (
+                {movements.slice(0, 10).map((movement: any) => (
                   <tr key={movement.id} className="border-b">
                     <td className="p-4">
                       <MovementTypeBadge type={movement.type} />
                     </td>
                     <td className="p-4 text-sm">
-                      {movement.stockItem?.product?.name ?? movement.stockItem?.product?.sku ?? "—"}
+                      {movement.stockItem?.product?.name ?? "—"}
                     </td>
                     <td className="p-4 text-sm text-muted-foreground">
                       {movement.stockItem?.location?.name ?? "—"}
@@ -224,12 +185,7 @@ export default function DashboardPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
-            <div className="space-y-2">
-              <div className="h-10 bg-muted animate-pulse rounded" />
-              <div className="h-10 bg-muted animate-pulse rounded" />
-            </div>
-          ) : lowStockItems.length === 0 ? (
+          {lowStockItems.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               🎉 All items are well stocked!
             </p>
@@ -243,10 +199,10 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {lowStockItems.slice(0, 5).map((item: StockItem) => (
+                {lowStockItems.slice(0, 5).map((item: any) => (
                   <tr key={item.id} className="border-b">
                     <td className="p-4 text-sm font-medium">
-                      {item.product?.name ?? item.product?.sku ?? "Unknown"}
+                      {item.product?.name ?? "Unknown"}
                     </td>
                     <td className="p-4 text-sm text-muted-foreground">
                       {item.location?.name ?? "Unknown"}
