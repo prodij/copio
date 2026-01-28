@@ -1,0 +1,198 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id         String   @id @default(uuid())
+  sku        String   @unique
+  name       String
+  brand      String?
+  category   String?
+  attributes Json     @default("{}")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  listings   ChannelListing[]
+  stockItems StockItem[]
+  orderLines OrderLine[]
+  poLines    POLine[]
+}
+
+model ChannelListing {
+  id          String        @id @default(uuid())
+  productId   String
+  channel     Channel
+  channelSku  String
+  channelData Json          @default("{}")
+  status      ListingStatus @default(ACTIVE)
+  syncedAt    DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  product     Product       @relation(fields: [productId], references: [id])
+
+  @@unique([channel, channelSku])
+  @@index([productId])
+}
+
+enum Channel {
+  AMAZON
+  SHOPIFY
+  WALMART
+}
+
+enum ListingStatus {
+  ACTIVE
+  INACTIVE
+  SUPPRESSED
+}
+
+model Location {
+  id             String          @id @default(uuid())
+  name           String
+  type           LocationType
+  channel        Channel?
+  address        Json            @default("{}")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  stockItems     StockItem[]
+  purchaseOrders PurchaseOrder[]
+  orderLines     OrderLine[]
+}
+
+enum LocationType {
+  WAREHOUSE
+  FBA
+  THREEPEL
+}
+
+model StockItem {
+  id                String          @id @default(uuid())
+  productId         String
+  locationId        String
+  quantityAvailable Int             @default(0)
+  quantityReserved  Int             @default(0)
+  quantityInbound   Int             @default(0)
+  costBasis         Decimal?        @db.Decimal(10, 2)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  product           Product         @relation(fields: [productId], references: [id])
+  location          Location        @relation(fields: [locationId], references: [id])
+  movements         StockMovement[]
+
+  @@unique([productId, locationId])
+  @@index([locationId])
+}
+
+model StockMovement {
+  id          String       @id @default(uuid())
+  stockItemId String
+  type        MovementType
+  quantity    Int
+  reference   String?
+  notes       String?
+  createdAt   DateTime     @default(now())
+  stockItem   StockItem    @relation(fields: [stockItemId], references: [id])
+
+  @@index([stockItemId])
+  @@index([createdAt])
+}
+
+enum MovementType {
+  RECEIVE
+  SHIP
+  ADJUST
+  TRANSFER
+}
+
+model Order {
+  id             String      @id @default(uuid())
+  channel        Channel
+  channelOrderId String
+  status         OrderStatus @default(PENDING)
+  customer       Json        @default("{}")
+  totals         Json        @default("{}")
+  placedAt       DateTime
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  lines          OrderLine[]
+
+  @@unique([channel, channelOrderId])
+  @@index([status])
+  @@index([placedAt])
+}
+
+enum OrderStatus {
+  PENDING
+  ALLOCATED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model OrderLine {
+  id              String    @id @default(uuid())
+  orderId         String
+  productId       String
+  channelSku      String
+  quantity        Int
+  unitPrice       Decimal   @db.Decimal(10, 2)
+  allocatedFromId String?
+  order           Order     @relation(fields: [orderId], references: [id])
+  product         Product   @relation(fields: [productId], references: [id])
+  allocatedFrom   Location? @relation(fields: [allocatedFromId], references: [id])
+
+  @@index([orderId])
+}
+
+model Vendor {
+  id             String          @id @default(uuid())
+  name           String
+  contact        Json            @default("{}")
+  leadTimeDays   Int             @default(14)
+  terms          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  purchaseOrders PurchaseOrder[]
+}
+
+model PurchaseOrder {
+  id            String    @id @default(uuid())
+  vendorId      String
+  destinationId String
+  status        POStatus  @default(DRAFT)
+  notes         String?
+  expectedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  vendor        Vendor    @relation(fields: [vendorId], references: [id])
+  destination   Location  @relation(fields: [destinationId], references: [id])
+  lines         POLine[]
+
+  @@index([vendorId])
+  @@index([status])
+}
+
+enum POStatus {
+  DRAFT
+  SUBMITTED
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+model POLine {
+  id               String        @id @default(uuid())
+  poId             String
+  productId        String
+  quantityOrdered  Int
+  quantityReceived Int           @default(0)
+  unitCost         Decimal       @db.Decimal(10, 2)
+  purchaseOrder    PurchaseOrder @relation(fields: [poId], references: [id])
+  product          Product       @relation(fields: [productId], references: [id])
+
+  @@index([poId])
+}
