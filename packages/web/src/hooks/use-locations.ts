@@ -8,7 +8,7 @@ export interface Location {
   name: string;
   type: "WAREHOUSE" | "FBA" | "THREEPEL";
   channel: string | null;
-  address?: Record<string, unknown>;
+  address: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
