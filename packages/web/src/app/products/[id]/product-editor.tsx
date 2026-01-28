@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { VendorProductDialog } from "@/components/vendor-product-dialog";
 
 interface VendorProduct {
   id: string;
@@ -671,9 +672,7 @@ export function ProductEditor({ product }: { product: Product }) {
                 <CardTitle>Vendor Sourcing</CardTitle>
                 <CardDescription>Where you buy this product (procurement side)</CardDescription>
               </div>
-              <Button variant="outline" size="sm">
-                <Plus className="h-4 w-4 mr-2" /> Add Vendor
-              </Button>
+              <VendorProductDialog productId={product.id} />
             </CardHeader>
             <CardContent>
               {product.vendors && product.vendors.length > 0 ? (
@@ -715,7 +714,10 @@ export function ProductEditor({ product }: { product: Product }) {
                           {vp.leadTimeDays || vp.vendor.leadTimeDays} days
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="sm">Edit</Button>
+                          <VendorProductDialog
+                            existingData={vp}
+                            trigger={<Button variant="ghost" size="sm">Edit</Button>}
+                          />
                         </TableCell>
                       </TableRow>
                     ))}

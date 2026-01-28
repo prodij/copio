@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { VendorProductDialog } from "@/components/vendor-product-dialog";
 
 const API_URL = process.env.API_URL || "http://localhost:3002";
 
@@ -20,7 +21,9 @@ interface VendorProduct {
   leadTimeDays: number | null;
   isPreferred: boolean;
   isActive: boolean;
+  notes: string | null;
   product: { id: string; sku: string; name: string };
+  vendor?: { id: string; name: string; code: string | null; leadTimeDays: number };
 }
 
 interface Vendor {
@@ -172,9 +175,7 @@ export default async function VendorDetailPage({
             <CardTitle>Products from this Vendor</CardTitle>
             <CardDescription>Products you source from {vendor.name}</CardDescription>
           </div>
-          <Button variant="outline" size="sm">
-            Add Product
-          </Button>
+          <VendorProductDialog vendorId={vendor.id} />
         </CardHeader>
         <CardContent>
           {vendor.products.length > 0 ? (
