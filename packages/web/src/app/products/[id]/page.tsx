@@ -68,7 +68,32 @@ interface Product {
     id: string;
     channel: string;
     channelSku: string;
+    channelProductId: string | null;
+    title: string | null;
+    description: string | null;
+    bulletPoints: string[];
+    price: number | null;
+    compareAtPrice: number | null;
+    fulfillmentChannel: string;
+    bufferStock: number;
+    maxQuantity: number | null;
+    handlingDays: number | null;
     status: string;
+    listingUrl: string | null;
+  }>;
+  vendors: Array<{
+    id: string;
+    vendorSku: string;
+    vendorProductName: string | null;
+    unitCost: number;
+    currency: string;
+    minOrderQty: number;
+    orderMultiple: number;
+    casePackQty: number | null;
+    leadTimeDays: number | null;
+    isPreferred: boolean;
+    isActive: boolean;
+    vendor: { id: string; name: string; code: string | null; leadTimeDays: number };
   }>;
   parent: { id: string; sku: string; name: string } | null;
   variations: Array<{

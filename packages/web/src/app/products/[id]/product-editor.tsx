@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Save, Loader2, Plus, X, ImageIcon } from "lucide-react";
+import { Save, Loader2, Plus, X, ImageIcon, Star, Truck, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -17,6 +18,39 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
+interface VendorProduct {
+  id: string;
+  vendorSku: string;
+  vendorProductName: string | null;
+  unitCost: number;
+  currency: string;
+  minOrderQty: number;
+  orderMultiple: number;
+  casePackQty: number | null;
+  leadTimeDays: number | null;
+  isPreferred: boolean;
+  isActive: boolean;
+  vendor: { id: string; name: string; code: string | null; leadTimeDays: number };
+}
+
+interface ChannelListing {
+  id: string;
+  channel: string;
+  channelSku: string;
+  channelProductId: string | null;
+  title: string | null;
+  description: string | null;
+  bulletPoints: string[];
+  price: number | null;
+  compareAtPrice: number | null;
+  fulfillmentChannel: string;
+  bufferStock: number;
+  maxQuantity: number | null;
+  handlingDays: number | null;
+  status: string;
+  listingUrl: string | null;
+}
 
 interface Product {
   id: string;
@@ -59,7 +93,45 @@ interface Product {
   msrp: number | null;
   images: Array<{ id: string; url: string; altText: string | null; position: number }>;
   attributes: Array<{ id: string; name: string; value: string; group: string | null }>;
-  listings: Array<{ id: string; channel: string; channelSku: string; status: string }>;
+  listings: ChannelListing[];
+  vendors: VendorProduct[];
+}
+
+function ChannelBadge({ channel }: { channel: string }) {
+  const colors: Record<string, string> = {
+    AMAZON: "bg-orange-100 text-orange-800",
+    SHOPIFY: "bg-green-100 text-green-800",
+    WALMART: "bg-blue-100 text-blue-800",
+    EBAY: "bg-yellow-100 text-yellow-800",
+  };
+  return <Badge className={`${colors[channel] || "bg-gray-100"}`}>{channel}</Badge>;
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    DRAFT: "bg-gray-100 text-gray-800",
+    PENDING: "bg-yellow-100 text-yellow-800",
+    ACTIVE: "bg-green-100 text-green-800",
+    INACTIVE: "bg-gray-100 text-gray-600",
+    SUPPRESSED: "bg-red-100 text-red-800",
+    ERROR: "bg-red-100 text-red-800",
+  };
+  return <Badge className={colors[status] || "bg-gray-100"} variant="outline">{status}</Badge>;
+}
+
+function FulfillmentBadge({ channel }: { channel: string }) {
+  const labels: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+    MERCHANT: { label: "Merchant", color: "bg-blue-100 text-blue-800", icon: <Store className="h-3 w-3" /> },
+    MARKETPLACE: { label: "FBA/WFS", color: "bg-purple-100 text-purple-800", icon: <Truck className="h-3 w-3" /> },
+    DROPSHIP: { label: "Dropship", color: "bg-orange-100 text-orange-800", icon: <Truck className="h-3 w-3" /> },
+    THREEPEL: { label: "3PL", color: "bg-teal-100 text-teal-800", icon: <Truck className="h-3 w-3" /> },
+  };
+  const { label, color, icon } = labels[channel] || { label: channel, color: "bg-gray-100", icon: null };
+  return (
+    <Badge className={`${color} flex items-center gap-1`} variant="outline">
+      {icon} {label}
+    </Badge>
+  );
 }
 
 export function ProductEditor({ product }: { product: Product }) {
@@ -192,12 +264,14 @@ export function ProductEditor({ product }: { product: Product }) {
       </div>
 
       <Tabs defaultValue="basic" className="w-full">
-        <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger value="basic">Basic Info</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-8">
+          <TabsTrigger value="basic">Basic</TabsTrigger>
           <TabsTrigger value="content">Content</TabsTrigger>
           <TabsTrigger value="physical">Physical</TabsTrigger>
-          <TabsTrigger value="identifiers">Identifiers</TabsTrigger>
+          <TabsTrigger value="identifiers">IDs</TabsTrigger>
           <TabsTrigger value="compliance">Compliance</TabsTrigger>
+          <TabsTrigger value="vendors">Vendors</TabsTrigger>
+          <TabsTrigger value="channels">Channels</TabsTrigger>
           <TabsTrigger value="media">Media</TabsTrigger>
         </TabsList>
 
@@ -421,9 +495,7 @@ export function ProductEditor({ product }: { product: Product }) {
                       value={formData.weightUnit}
                       onValueChange={(value) => setFormData({ ...formData, weightUnit: value })}
                     >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="lb">lb</SelectItem>
                         <SelectItem value="oz">oz</SelectItem>
@@ -434,33 +506,18 @@ export function ProductEditor({ product }: { product: Product }) {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="lengthValue">Length</Label>
-                    <Input
-                      id="lengthValue"
-                      type="number"
-                      step="0.01"
-                      value={formData.lengthValue}
-                      onChange={(e) => setFormData({ ...formData, lengthValue: e.target.value })}
-                    />
+                    <Input id="lengthValue" type="number" step="0.01" value={formData.lengthValue}
+                      onChange={(e) => setFormData({ ...formData, lengthValue: e.target.value })} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="widthValue">Width</Label>
-                    <Input
-                      id="widthValue"
-                      type="number"
-                      step="0.01"
-                      value={formData.widthValue}
-                      onChange={(e) => setFormData({ ...formData, widthValue: e.target.value })}
-                    />
+                    <Input id="widthValue" type="number" step="0.01" value={formData.widthValue}
+                      onChange={(e) => setFormData({ ...formData, widthValue: e.target.value })} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="heightValue">Height</Label>
-                    <Input
-                      id="heightValue"
-                      type="number"
-                      step="0.01"
-                      value={formData.heightValue}
-                      onChange={(e) => setFormData({ ...formData, heightValue: e.target.value })}
-                    />
+                    <Input id="heightValue" type="number" step="0.01" value={formData.heightValue}
+                      onChange={(e) => setFormData({ ...formData, heightValue: e.target.value })} />
                   </div>
                 </div>
               </div>
@@ -470,23 +527,14 @@ export function ProductEditor({ product }: { product: Product }) {
                 <div className="grid grid-cols-5 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="pkgWeightValue">Weight</Label>
-                    <Input
-                      id="pkgWeightValue"
-                      type="number"
-                      step="0.001"
-                      value={formData.pkgWeightValue}
-                      onChange={(e) => setFormData({ ...formData, pkgWeightValue: e.target.value })}
-                    />
+                    <Input id="pkgWeightValue" type="number" step="0.001" value={formData.pkgWeightValue}
+                      onChange={(e) => setFormData({ ...formData, pkgWeightValue: e.target.value })} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="pkgWeightUnit">Unit</Label>
-                    <Select
-                      value={formData.pkgWeightUnit}
-                      onValueChange={(value) => setFormData({ ...formData, pkgWeightUnit: value })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
+                    <Select value={formData.pkgWeightUnit}
+                      onValueChange={(value) => setFormData({ ...formData, pkgWeightUnit: value })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="lb">lb</SelectItem>
                         <SelectItem value="oz">oz</SelectItem>
@@ -497,33 +545,18 @@ export function ProductEditor({ product }: { product: Product }) {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="pkgLengthValue">Length</Label>
-                    <Input
-                      id="pkgLengthValue"
-                      type="number"
-                      step="0.01"
-                      value={formData.pkgLengthValue}
-                      onChange={(e) => setFormData({ ...formData, pkgLengthValue: e.target.value })}
-                    />
+                    <Input id="pkgLengthValue" type="number" step="0.01" value={formData.pkgLengthValue}
+                      onChange={(e) => setFormData({ ...formData, pkgLengthValue: e.target.value })} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="pkgWidthValue">Width</Label>
-                    <Input
-                      id="pkgWidthValue"
-                      type="number"
-                      step="0.01"
-                      value={formData.pkgWidthValue}
-                      onChange={(e) => setFormData({ ...formData, pkgWidthValue: e.target.value })}
-                    />
+                    <Input id="pkgWidthValue" type="number" step="0.01" value={formData.pkgWidthValue}
+                      onChange={(e) => setFormData({ ...formData, pkgWidthValue: e.target.value })} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="pkgHeightValue">Height</Label>
-                    <Input
-                      id="pkgHeightValue"
-                      type="number"
-                      step="0.01"
-                      value={formData.pkgHeightValue}
-                      onChange={(e) => setFormData({ ...formData, pkgHeightValue: e.target.value })}
-                    />
+                    <Input id="pkgHeightValue" type="number" step="0.01" value={formData.pkgHeightValue}
+                      onChange={(e) => setFormData({ ...formData, pkgHeightValue: e.target.value })} />
                   </div>
                 </div>
               </div>
@@ -542,48 +575,33 @@ export function ProductEditor({ product }: { product: Product }) {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="upc">UPC</Label>
-                  <Input
-                    id="upc"
-                    value={formData.upc}
+                  <Input id="upc" value={formData.upc}
                     onChange={(e) => setFormData({ ...formData, upc: e.target.value })}
-                    placeholder="Universal Product Code"
-                  />
+                    placeholder="Universal Product Code" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="ean">EAN</Label>
-                  <Input
-                    id="ean"
-                    value={formData.ean}
+                  <Input id="ean" value={formData.ean}
                     onChange={(e) => setFormData({ ...formData, ean: e.target.value })}
-                    placeholder="European Article Number"
-                  />
+                    placeholder="European Article Number" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="gtin">GTIN</Label>
-                  <Input
-                    id="gtin"
-                    value={formData.gtin}
+                  <Input id="gtin" value={formData.gtin}
                     onChange={(e) => setFormData({ ...formData, gtin: e.target.value })}
-                    placeholder="Global Trade Item Number"
-                  />
+                    placeholder="Global Trade Item Number" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="asin">ASIN</Label>
-                  <Input
-                    id="asin"
-                    value={formData.asin}
+                  <Input id="asin" value={formData.asin}
                     onChange={(e) => setFormData({ ...formData, asin: e.target.value })}
-                    placeholder="Amazon Standard Identification Number"
-                  />
+                    placeholder="Amazon Standard Identification Number" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="mpn">MPN</Label>
-                  <Input
-                    id="mpn"
-                    value={formData.mpn}
+                  <Input id="mpn" value={formData.mpn}
                     onChange={(e) => setFormData({ ...formData, mpn: e.target.value })}
-                    placeholder="Manufacturer Part Number"
-                  />
+                    placeholder="Manufacturer Part Number" />
                 </div>
               </div>
             </CardContent>
@@ -601,22 +619,15 @@ export function ProductEditor({ product }: { product: Product }) {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="countryOfOrigin">Country of Origin</Label>
-                  <Input
-                    id="countryOfOrigin"
-                    value={formData.countryOfOrigin}
+                  <Input id="countryOfOrigin" value={formData.countryOfOrigin}
                     onChange={(e) => setFormData({ ...formData, countryOfOrigin: e.target.value })}
-                    placeholder="e.g., China, USA, Germany"
-                  />
+                    placeholder="e.g., China, USA, Germany" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="ageRestriction">Age Restriction</Label>
-                  <Input
-                    id="ageRestriction"
-                    type="number"
-                    value={formData.ageRestriction}
+                  <Input id="ageRestriction" type="number" value={formData.ageRestriction}
                     onChange={(e) => setFormData({ ...formData, ageRestriction: e.target.value })}
-                    placeholder="Minimum age (leave empty if none)"
-                  />
+                    placeholder="Minimum age (leave empty if none)" />
                 </div>
               </div>
 
@@ -633,12 +644,9 @@ export function ProductEditor({ product }: { product: Product }) {
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <Input
-                    value={newCert}
-                    onChange={(e) => setNewCert(e.target.value)}
+                  <Input value={newCert} onChange={(e) => setNewCert(e.target.value)}
                     placeholder="Add certification (e.g., FDA, CE, FCC)"
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCert())}
-                  />
+                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCert())} />
                   <Button type="button" variant="outline" onClick={addCert}>
                     <Plus className="h-4 w-4" />
                   </Button>
@@ -647,14 +655,140 @@ export function ProductEditor({ product }: { product: Product }) {
 
               <div className="space-y-2">
                 <Label htmlFor="warrantyInfo">Warranty Information</Label>
-                <Textarea
-                  id="warrantyInfo"
-                  value={formData.warrantyInfo}
+                <Textarea id="warrantyInfo" value={formData.warrantyInfo}
                   onChange={(e) => setFormData({ ...formData, warrantyInfo: e.target.value })}
-                  placeholder="Warranty terms and duration"
-                  rows={3}
-                />
+                  placeholder="Warranty terms and duration" rows={3} />
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Vendors Tab */}
+        <TabsContent value="vendors">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Vendor Sourcing</CardTitle>
+                <CardDescription>Where you buy this product (procurement side)</CardDescription>
+              </div>
+              <Button variant="outline" size="sm">
+                <Plus className="h-4 w-4 mr-2" /> Add Vendor
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {product.vendors && product.vendors.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Vendor</TableHead>
+                      <TableHead>Vendor SKU</TableHead>
+                      <TableHead className="text-right">Unit Cost</TableHead>
+                      <TableHead className="text-center">MOQ</TableHead>
+                      <TableHead className="text-center">Case Pack</TableHead>
+                      <TableHead className="text-center">Lead Time</TableHead>
+                      <TableHead></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {product.vendors.map((vp) => (
+                      <TableRow key={vp.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {vp.isPreferred && <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />}
+                            <div>
+                              <div className="font-medium">{vp.vendor.name}</div>
+                              {vp.vendor.code && (
+                                <div className="text-xs text-muted-foreground">{vp.vendor.code}</div>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">{vp.vendorSku}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          ${Number(vp.unitCost).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-center">{vp.minOrderQty}</TableCell>
+                        <TableCell className="text-center">
+                          {vp.casePackQty ? `${vp.casePackQty} units` : "—"}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {vp.leadTimeDays || vp.vendor.leadTimeDays} days
+                        </TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="sm">Edit</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>No vendors linked to this product yet.</p>
+                  <p className="text-sm">Add a vendor to track sourcing costs and lead times.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Channels Tab */}
+        <TabsContent value="channels">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Channel Listings</CardTitle>
+                <CardDescription>Where you sell this product (marketplace side)</CardDescription>
+              </div>
+              <Button variant="outline" size="sm">
+                <Plus className="h-4 w-4 mr-2" /> Add Channel
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {product.listings && product.listings.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Channel</TableHead>
+                      <TableHead>Channel SKU</TableHead>
+                      <TableHead>Title</TableHead>
+                      <TableHead className="text-right">Price</TableHead>
+                      <TableHead>Fulfillment</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {product.listings.map((listing) => (
+                      <TableRow key={listing.id}>
+                        <TableCell>
+                          <ChannelBadge channel={listing.channel} />
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">{listing.channelSku}</TableCell>
+                        <TableCell className="max-w-[200px] truncate">
+                          {listing.title || <span className="text-muted-foreground italic">Using default</span>}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {listing.price ? `$${Number(listing.price).toFixed(2)}` : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <FulfillmentBadge channel={listing.fulfillmentChannel} />
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={listing.status} />
+                        </TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="sm">Edit</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>No channel listings yet.</p>
+                  <p className="text-sm">Add a channel to start selling on marketplaces.</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -672,9 +806,7 @@ export function ProductEditor({ product }: { product: Product }) {
                   {product.images.map((image) => (
                     <div key={image.id} className="relative aspect-square rounded-lg border overflow-hidden">
                       <img src={image.url} alt={image.altText || ""} className="object-cover w-full h-full" />
-                      {image.position === 0 && (
-                        <Badge className="absolute top-2 left-2">Main</Badge>
-                      )}
+                      {image.position === 0 && <Badge className="absolute top-2 left-2">Main</Badge>}
                     </div>
                   ))}
                 </div>

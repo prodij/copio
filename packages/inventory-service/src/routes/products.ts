@@ -192,6 +192,12 @@ router.get('/:id', async (req: Request, res: Response) => {
           images: { take: 1, orderBy: { position: 'asc' } },
         },
       },
+      vendors: {
+        include: {
+          vendor: { select: { id: true, name: true, code: true, leadTimeDays: true } },
+        },
+        orderBy: [{ isPreferred: 'desc' }, { createdAt: 'asc' }],
+      },
     },
   });
   if (!product) {
