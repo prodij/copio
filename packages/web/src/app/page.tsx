@@ -4,7 +4,8 @@ import Link from "next/link";
 import { Package, MapPin, Layers, AlertTriangle, ArrowDown, ArrowUp, RefreshCw, ArrowLeftRight } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDashboardStats } from "@/hooks/use-dashboard";
-import type { MovementType, StockItem, StockMovement } from "@/lib/api";
+import type { MovementType, StockMovement } from "@/lib/api";
+import type { StockItem } from "@/hooks/use-stock-items";
 
 function StatCardSkeleton() {
   return (

@@ -1,33 +1,16 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { apiFetch, type Product, type Location, type StockItem, type StockMovement } from "@/lib/api";
-
-export function useProducts() {
-  return useQuery({
-    queryKey: ["products"],
-    queryFn: () => apiFetch<Product[]>("/products"),
-  });
-}
-
-export function useLocations() {
-  return useQuery({
-    queryKey: ["locations"],
-    queryFn: () => apiFetch<Location[]>("/locations"),
-  });
-}
-
-export function useStockItems() {
-  return useQuery({
-    queryKey: ["stock-items"],
-    queryFn: () => apiFetch<StockItem[]>("/stock-items"),
-  });
-}
+import { apiFetch, type StockMovement } from "@/lib/api";
+import { useProducts } from "./use-products";
+import { useLocations } from "./use-locations";
+import { useStockItems, type StockItem } from "./use-stock-items";
 
 export function useRecentMovements(limit: number = 10) {
   return useQuery({
     queryKey: ["stock-movements", "recent", limit],
-    queryFn: () => apiFetch<StockMovement[]>(`/stock-movements?limit=${limit}`),
+    queryFn: () => apiFetch<StockMovement[]>(`/stock-movements`),
+    select: (data) => data.slice(0, limit),
   });
 }
 
@@ -46,7 +29,7 @@ export function useDashboardStats() {
   const totalUnits = stockItems.data?.reduce((sum, item) => sum + item.quantityAvailable, 0) ?? 0;
 
   const LOW_STOCK_THRESHOLD = 10;
-  const lowStockItems = stockItems.data?.filter((item) => item.quantityAvailable < LOW_STOCK_THRESHOLD) ?? [];
+  const lowStockItems: StockItem[] = stockItems.data?.filter((item) => item.quantityAvailable < LOW_STOCK_THRESHOLD) ?? [];
 
   return {
     isLoading,
