@@ -6,6 +6,7 @@ import { stockItemsRouter } from './routes/stock-items.js';
 import { stockMovementsRouter } from './routes/stock-movements.js';
 import { vendorsRouter } from './routes/vendors.js';
 import { vendorProductsRouter } from './routes/vendor-products.js';
+import { purchaseOrdersRouter } from './routes/purchase-orders.js';
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use('/stock-items', stockItemsRouter);
 app.use('/stock-movements', stockMovementsRouter);
 app.use('/vendors', vendorsRouter);
 app.use('/vendor-products', vendorProductsRouter);
+app.use('/purchase-orders', purchaseOrdersRouter);
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
