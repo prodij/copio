@@ -13,6 +13,7 @@ describe('Products API', () => {
   });
 
   beforeEach(async () => {
+    await prisma.stockItem.deleteMany();
     await prisma.channelListing.deleteMany();
     await prisma.product.deleteMany();
   });
