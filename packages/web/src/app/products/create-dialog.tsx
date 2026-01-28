@@ -14,6 +14,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Plus, Loader2, AlertCircle } from "lucide-react";
 
 export function CreateProductDialog() {
@@ -25,7 +33,12 @@ export function CreateProductDialog() {
     name: "",
     sku: "",
     brand: "",
-    category: "",
+    manufacturer: "",
+    shortDescription: "",
+    upc: "",
+    costPrice: "",
+    msrp: "",
+    status: "DRAFT",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -34,15 +47,22 @@ export function CreateProductDialog() {
     setError(null);
 
     try {
+      const payload = {
+        name: formData.name,
+        sku: formData.sku,
+        status: formData.status,
+        brand: formData.brand || undefined,
+        manufacturer: formData.manufacturer || undefined,
+        shortDescription: formData.shortDescription || undefined,
+        upc: formData.upc || undefined,
+        costPrice: formData.costPrice ? parseFloat(formData.costPrice) : undefined,
+        msrp: formData.msrp ? parseFloat(formData.msrp) : undefined,
+      };
+
       const res = await fetch("/api/products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
-          sku: formData.sku,
-          brand: formData.brand || undefined,
-          category: formData.category || undefined,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -50,9 +70,20 @@ export function CreateProductDialog() {
         throw new Error(data.error || "Failed to create product");
       }
 
-      setFormData({ name: "", sku: "", brand: "", category: "" });
+      const product = await res.json();
+      setFormData({
+        name: "",
+        sku: "",
+        brand: "",
+        manufacturer: "",
+        shortDescription: "",
+        upc: "",
+        costPrice: "",
+        msrp: "",
+        status: "DRAFT",
+      });
       setOpen(false);
-      router.refresh();
+      router.push(`/products/${product.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create product");
     } finally {
@@ -68,50 +99,117 @@ export function CreateProductDialog() {
           New Product
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[600px]">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Create Product</DialogTitle>
-            <DialogDescription>Add a new product to your catalog.</DialogDescription>
+            <DialogDescription>
+              Add a new product to your catalog. You can add more details after creation.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="name" className="text-right">Name</Label>
-              <Input
-                id="name"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="col-span-3"
-                required
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Product Name *</Label>
+                <Input
+                  id="name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="e.g., Wireless Bluetooth Headphones"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sku">SKU *</Label>
+                <Input
+                  id="sku"
+                  value={formData.sku}
+                  onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+                  placeholder="e.g., WBH-001"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="brand">Brand</Label>
+                <Input
+                  id="brand"
+                  value={formData.brand}
+                  onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
+                  placeholder="e.g., Acme"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="manufacturer">Manufacturer</Label>
+                <Input
+                  id="manufacturer"
+                  value={formData.manufacturer}
+                  onChange={(e) => setFormData({ ...formData, manufacturer: e.target.value })}
+                  placeholder="e.g., Acme Corp"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="upc">UPC</Label>
+                <Input
+                  id="upc"
+                  value={formData.upc}
+                  onChange={(e) => setFormData({ ...formData, upc: e.target.value })}
+                  placeholder="e.g., 012345678901"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="shortDescription">Short Description</Label>
+              <Textarea
+                id="shortDescription"
+                value={formData.shortDescription}
+                onChange={(e) => setFormData({ ...formData, shortDescription: e.target.value })}
+                placeholder="Brief product summary..."
+                rows={2}
               />
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="sku" className="text-right">SKU</Label>
-              <Input
-                id="sku"
-                value={formData.sku}
-                onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                className="col-span-3"
-                required
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="brand" className="text-right">Brand</Label>
-              <Input
-                id="brand"
-                value={formData.brand}
-                onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="category" className="text-right">Category</Label>
-              <Input
-                id="category"
-                value={formData.category}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                className="col-span-3"
-              />
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="costPrice">Cost Price ($)</Label>
+                <Input
+                  id="costPrice"
+                  type="number"
+                  step="0.01"
+                  value={formData.costPrice}
+                  onChange={(e) => setFormData({ ...formData, costPrice: e.target.value })}
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="msrp">MSRP ($)</Label>
+                <Input
+                  id="msrp"
+                  type="number"
+                  step="0.01"
+                  value={formData.msrp}
+                  onChange={(e) => setFormData({ ...formData, msrp: e.target.value })}
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="status">Status</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value) => setFormData({ ...formData, status: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="DRAFT">Draft</SelectItem>
+                    <SelectItem value="ACTIVE">Active</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
           {error && (
@@ -121,9 +219,12 @@ export function CreateProductDialog() {
             </div>
           )}
           <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
             <Button type="submit" disabled={loading}>
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create Product
+              Create & Edit
             </Button>
           </DialogFooter>
         </form>

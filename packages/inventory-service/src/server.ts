@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import { categoriesRouter } from './routes/categories.js';
 import { locationsRouter } from './routes/locations.js';
 import { productsRouter } from './routes/products.js';
 import { stockItemsRouter } from './routes/stock-items.js';
@@ -19,6 +20,7 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // Mount routes
+app.use('/categories', categoriesRouter);
 app.use('/locations', locationsRouter);
 app.use('/products', productsRouter);
 app.use('/stock-items', stockItemsRouter);

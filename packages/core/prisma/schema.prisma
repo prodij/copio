@@ -7,66 +7,278 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// =============================================================================
+// PRODUCT CATALOG
+// =============================================================================
+
 model Product {
-  id         String   @id @default(uuid())
-  sku        String   @unique
-  name       String
-  brand      String?
-  category   String?
-  attributes Json     @default("{}")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  listings   ChannelListing[]
-  stockItems StockItem[]
-  orderLines OrderLine[]
-  poLines    POLine[]
+  id            String        @id @default(uuid())
+  sku           String        @unique
+  productType   ProductType   @default(SIMPLE)
+  status        ProductStatus @default(DRAFT)
+
+  // Parent/Child Variation Hierarchy
+  parentId      String?
+  parent        Product?      @relation("ProductVariations", fields: [parentId], references: [id])
+  variations    Product[]     @relation("ProductVariations")
+  variationType String?       // e.g., "Color", "Size" - what this variation represents
+  variationValue String?      // e.g., "Red", "Large" - the specific value
+
+  // Core Identity
+  name          String
+  brand         String?
+  manufacturer  String?
+  modelNumber   String?
+
+  // Identifiers
+  upc           String?       // Universal Product Code
+  ean           String?       // European Article Number
+  gtin          String?       // Global Trade Item Number
+  asin          String?       // Amazon Standard Identification Number
+  mpn           String?       // Manufacturer Part Number
+
+  // AI-Generated Listing Content
+  shortDescription  String?   @db.Text
+  longDescription   String?   @db.Text
+  bulletPoints      String[]  // Key features/selling points
+  searchTerms       String[]  // Backend keywords for search
+  seoTitle          String?
+  seoDescription    String?   @db.Text
+
+  // Physical Attributes
+  weightValue       Decimal?  @db.Decimal(10, 3)
+  weightUnit        String?   @default("lb") // lb, kg, oz, g
+  lengthValue       Decimal?  @db.Decimal(10, 2)
+  widthValue        Decimal?  @db.Decimal(10, 2)
+  heightValue       Decimal?  @db.Decimal(10, 2)
+  dimensionUnit     String?   @default("in") // in, cm, mm
+
+  // Package Dimensions (for shipping)
+  pkgWeightValue    Decimal?  @db.Decimal(10, 3)
+  pkgWeightUnit     String?   @default("lb")
+  pkgLengthValue    Decimal?  @db.Decimal(10, 2)
+  pkgWidthValue     Decimal?  @db.Decimal(10, 2)
+  pkgHeightValue    Decimal?  @db.Decimal(10, 2)
+  pkgDimensionUnit  String?   @default("in")
+
+  // Compliance & Safety
+  countryOfOrigin   String?
+  hazmat            Boolean   @default(false)
+  hazmatInfo        Json?     // UN number, class, packing group
+  ageRestriction    Int?      // Minimum age (null = none)
+  certifications    String[]  // e.g., "FDA", "CE", "FCC"
+  warrantyInfo      String?
+
+  // Pricing (base/default)
+  costPrice         Decimal?  @db.Decimal(10, 2)
+  msrp              Decimal?  @db.Decimal(10, 2)
+
+  // Timestamps
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  images        ProductImage[]
+  attributes    ProductAttribute[]
+  categories    ProductCategory[]
+  listings      ChannelListing[]
+  stockItems    StockItem[]
+  orderLines    OrderLine[]
+  poLines       POLine[]
+  vendors       VendorProduct[]   // Vendor sourcing options
+
+  @@index([parentId])
+  @@index([brand])
+  @@index([status])
+  @@index([upc])
+  @@index([asin])
 }
+
+enum ProductType {
+  SIMPLE      // Standalone product
+  PARENT      // Parent of variations (not sellable itself)
+  VARIATION   // Child variation (sellable)
+  // FUTURE: BUNDLE, COMBO - for kits and multi-product packs
+}
+
+enum ProductStatus {
+  DRAFT       // Being created/edited
+  ACTIVE      // Ready for listing
+  ARCHIVED    // No longer sold
+}
+
+model ProductImage {
+  id          String   @id @default(uuid())
+  productId   String
+  url         String   // S3/CDN URL
+  altText     String?
+  position    Int      @default(0) // 0 = main image
+  width       Int?
+  height      Int?
+  sizeBytes   Int?
+  mimeType    String?  @default("image/jpeg")
+  createdAt   DateTime @default(now())
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([position])
+}
+
+model ProductAttribute {
+  id          String   @id @default(uuid())
+  productId   String
+  name        String   // e.g., "Material", "Color", "Size"
+  value       String   // e.g., "Cotton", "Blue", "XL"
+  group       String?  // Optional grouping: "Physical", "Technical", etc.
+  createdAt   DateTime @default(now())
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, name])
+  @@index([productId])
+  @@index([name])
+}
+
+// =============================================================================
+// CATEGORY / TAXONOMY
+// =============================================================================
+
+model Category {
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
+  parentId      String?
+  parent        Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children      Category[] @relation("CategoryHierarchy")
+  description   String?
+  
+  // Channel-specific category mappings
+  amazonBrowseNode    String?  // Amazon browse node ID
+  shopifyProductType  String?  // Shopify product type
+  walmartCategoryId   String?  // Walmart category ID
+  googleCategoryId    String?  // Google product category (for feeds)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  products      ProductCategory[]
+
+  @@index([parentId])
+  @@index([slug])
+}
+
+model ProductCategory {
+  id          String   @id @default(uuid())
+  productId   String
+  categoryId  String
+  isPrimary   Boolean  @default(false) // Primary category for the product
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, categoryId])
+  @@index([productId])
+  @@index([categoryId])
+}
+
+// =============================================================================
+// CHANNEL LISTINGS
+// =============================================================================
 
 model ChannelListing {
   id          String        @id @default(uuid())
   productId   String
   channel     Channel
-  channelSku  String
-  channelData Json          @default("{}")
-  status      ListingStatus @default(ACTIVE)
-  syncedAt    DateTime?
+  channelSku  String        // ASIN, Shopify variant ID, Walmart item ID
+  
+  // Channel-specific identifiers (marketplace may have multiple IDs)
+  channelProductId  String?   // Platform's internal product ID
+  channelVariantId  String?   // For platforms with separate variant IDs
+  externalId        String?   // Any additional external reference
+  
+  // Channel-specific content overrides (null = use product defaults)
+  title           String?
+  description     String?   @db.Text
+  bulletPoints    String[]
+  searchTerms     String[]  // Channel-specific keywords
+  
+  // Pricing (channel-specific)
+  price           Decimal?  @db.Decimal(10, 2)
+  compareAtPrice  Decimal?  @db.Decimal(10, 2) // "Was" price / MSRP display
+  minPrice        Decimal?  @db.Decimal(10, 2) // MAP or minimum allowed
+  maxPrice        Decimal?  @db.Decimal(10, 2) // Maximum allowed
+  
+  // Fulfillment
+  fulfillmentChannel  FulfillmentChannel @default(MERCHANT)
+  handlingDays        Int?              // Days to process before shipping
+  
+  // Inventory settings (channel-specific)
+  bufferStock         Int     @default(0)   // Safety stock to hold back
+  maxQuantity         Int?                  // Max to show/sell on this channel
+  
+  // Listing metadata
+  listingUrl      String?
+  channelData     Json      @default("{}") // Fees, restrictions, extra data
+  status          ListingStatus @default(DRAFT)
+  syncedAt        DateTime?
+  lastError       String?
+  
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
   product     Product       @relation(fields: [productId], references: [id])
 
   @@unique([channel, channelSku])
   @@index([productId])
+  @@index([status])
+  @@index([channel, status])
+}
+
+enum FulfillmentChannel {
+  MERCHANT    // Seller fulfills (MFN, FBM)
+  MARKETPLACE // Marketplace fulfills (FBA, WFS, SFN)
+  DROPSHIP    // Drop ship from vendor
+  THREEPEL    // 3PL fulfillment
 }
 
 enum Channel {
   AMAZON
   SHOPIFY
   WALMART
+  EBAY
 }
 
 enum ListingStatus {
-  ACTIVE
-  INACTIVE
-  SUPPRESSED
+  DRAFT       // Not yet submitted
+  PENDING     // Submitted, awaiting approval
+  ACTIVE      // Live on channel
+  INACTIVE    // Paused/disabled
+  SUPPRESSED  // Channel blocked it
+  ERROR       // Sync error
 }
+
+// =============================================================================
+// INVENTORY
+// =============================================================================
 
 model Location {
   id             String          @id @default(uuid())
   name           String
   type           LocationType
-  channel        Channel?
+  channel        Channel?        // For FBA, Walmart FC, etc.
   address        Json            @default("{}")
+  isActive       Boolean         @default(true)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   stockItems     StockItem[]
   purchaseOrders PurchaseOrder[]
   orderLines     OrderLine[]
+
+  @@index([type])
+  @@index([isActive])
 }
 
 enum LocationType {
-  WAREHOUSE
-  FBA
-  THREEPEL
+  WAREHOUSE   // Your own warehouse
+  FBA         // Amazon FBA center
+  THREEPEL    // Third-party logistics
+  STORE       // Retail store
 }
 
 model StockItem {
@@ -76,7 +288,10 @@ model StockItem {
   quantityAvailable Int             @default(0)
   quantityReserved  Int             @default(0)
   quantityInbound   Int             @default(0)
+  reorderPoint      Int?            // Alert threshold
+  reorderQty        Int?            // Suggested reorder quantity
   costBasis         Decimal?        @db.Decimal(10, 2)
+  binLocation       String?         // Warehouse bin/shelf location
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
   product           Product         @relation(fields: [productId], references: [id])
@@ -85,6 +300,7 @@ model StockItem {
 
   @@unique([productId, locationId])
   @@index([locationId])
+  @@index([quantityAvailable])
 }
 
 model StockMovement {
@@ -92,21 +308,29 @@ model StockMovement {
   stockItemId String
   type        MovementType
   quantity    Int
-  reference   String?
+  reference   String?      // Order ID, PO ID, etc.
   notes       String?
+  createdBy   String?      // User or system identifier
   createdAt   DateTime     @default(now())
   stockItem   StockItem    @relation(fields: [stockItemId], references: [id])
 
   @@index([stockItemId])
   @@index([createdAt])
+  @@index([type])
 }
 
 enum MovementType {
-  RECEIVE
-  SHIP
-  ADJUST
-  TRANSFER
+  RECEIVE     // Inbound from PO or return
+  SHIP        // Outbound for order
+  ADJUST      // Manual adjustment
+  TRANSFER    // Between locations
+  DAMAGE      // Write-off for damaged goods
+  COUNT       // Inventory count adjustment
 }
+
+// =============================================================================
+// ORDERS
+// =============================================================================
 
 model Order {
   id             String      @id @default(uuid())
@@ -114,8 +338,11 @@ model Order {
   channelOrderId String
   status         OrderStatus @default(PENDING)
   customer       Json        @default("{}")
+  shippingAddress Json       @default("{}")
   totals         Json        @default("{}")
   placedAt       DateTime
+  shippedAt      DateTime?
+  deliveredAt    DateTime?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   lines          OrderLine[]
@@ -128,9 +355,12 @@ model Order {
 enum OrderStatus {
   PENDING
   ALLOCATED
+  PICKING
+  PACKED
   SHIPPED
   DELIVERED
   CANCELLED
+  RETURNED
 }
 
 model OrderLine {
@@ -146,26 +376,88 @@ model OrderLine {
   allocatedFrom   Location? @relation(fields: [allocatedFromId], references: [id])
 
   @@index([orderId])
+  @@index([productId])
 }
+
+// =============================================================================
+// PROCUREMENT
+// =============================================================================
 
 model Vendor {
   id             String          @id @default(uuid())
   name           String
+  code           String?         @unique // Short vendor code
   contact        Json            @default("{}")
+  address        Json            @default("{}")
   leadTimeDays   Int             @default(14)
-  terms          String?
+  minOrderValue  Decimal?        @db.Decimal(10, 2)
+  paymentTerms   String?         // e.g., "Net 30"
+  currency       String?         @default("USD")
+  notes          String?
+  isActive       Boolean         @default(true)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   purchaseOrders PurchaseOrder[]
+  products       VendorProduct[]
+
+  @@index([isActive])
+}
+
+// Vendor-Product relationship (procurement side)
+// Each product can be sourced from multiple vendors with different terms
+model VendorProduct {
+  id              String   @id @default(uuid())
+  vendorId        String
+  productId       String
+  
+  // Vendor's identification
+  vendorSku       String   // Vendor's SKU/part number for this product
+  vendorProductName String? // Vendor's name for this product (may differ)
+  
+  // Pricing
+  unitCost        Decimal  @db.Decimal(10, 4) // Cost per unit from this vendor
+  currency        String   @default("USD")
+  
+  // Ordering constraints
+  minOrderQty     Int      @default(1)       // Minimum order quantity
+  orderMultiple   Int      @default(1)       // Must order in multiples of this
+  casePackQty     Int?                       // Units per case (if case pack)
+  
+  // Lead time (overrides vendor default if set)
+  leadTimeDays    Int?
+  
+  // Status
+  isPreferred     Boolean  @default(false)   // Preferred/primary vendor for this product
+  isActive        Boolean  @default(true)
+  
+  // Timestamps
+  lastOrderedAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  vendor          Vendor   @relation(fields: [vendorId], references: [id])
+  product         Product  @relation(fields: [productId], references: [id])
+
+  @@unique([vendorId, productId])
+  @@unique([vendorId, vendorSku])
+  @@index([productId])
+  @@index([isPreferred])
 }
 
 model PurchaseOrder {
   id            String    @id @default(uuid())
+  poNumber      String    @unique
   vendorId      String
   destinationId String
   status        POStatus  @default(DRAFT)
   notes         String?
+  subtotal      Decimal?  @db.Decimal(10, 2)
+  tax           Decimal?  @db.Decimal(10, 2)
+  shipping      Decimal?  @db.Decimal(10, 2)
+  total         Decimal?  @db.Decimal(10, 2)
+  orderedAt     DateTime?
   expectedAt    DateTime?
+  receivedAt    DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   vendor        Vendor    @relation(fields: [vendorId], references: [id])
@@ -174,11 +466,13 @@ model PurchaseOrder {
 
   @@index([vendorId])
   @@index([status])
+  @@index([poNumber])
 }
 
 enum POStatus {
   DRAFT
   SUBMITTED
+  CONFIRMED
   PARTIAL
   RECEIVED
   CANCELLED
@@ -191,8 +485,10 @@ model POLine {
   quantityOrdered  Int
   quantityReceived Int           @default(0)
   unitCost         Decimal       @db.Decimal(10, 2)
+  notes            String?
   purchaseOrder    PurchaseOrder @relation(fields: [poId], references: [id])
   product          Product       @relation(fields: [productId], references: [id])
 
   @@index([poId])
+  @@index([productId])
 }
