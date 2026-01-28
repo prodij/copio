@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { VendorProductDialog } from "@/components/vendor-product-dialog";
+import { ChannelListingDialog } from "@/components/channel-listing-dialog";
 
 interface VendorProduct {
   id: string;
@@ -741,9 +742,7 @@ export function ProductEditor({ product }: { product: Product }) {
                 <CardTitle>Channel Listings</CardTitle>
                 <CardDescription>Where you sell this product (marketplace side)</CardDescription>
               </div>
-              <Button variant="outline" size="sm">
-                <Plus className="h-4 w-4 mr-2" /> Add Channel
-              </Button>
+              <ChannelListingDialog productId={product.id} />
             </CardHeader>
             <CardContent>
               {product.listings && product.listings.length > 0 ? (
@@ -779,7 +778,10 @@ export function ProductEditor({ product }: { product: Product }) {
                           <StatusBadge status={listing.status} />
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="sm">Edit</Button>
+                          <ChannelListingDialog
+                            existingData={listing}
+                            trigger={<Button variant="ghost" size="sm">Edit</Button>}
+                          />
                         </TableCell>
                       </TableRow>
                     ))}
