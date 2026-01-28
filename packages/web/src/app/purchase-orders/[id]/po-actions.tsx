@@ -10,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { MoreHorizontal, Send, CheckCircle, XCircle, Trash2, Loader2 } from "lucide-react";
 
 interface PurchaseOrder {
@@ -43,64 +44,73 @@ export function POActions({ po }: { po: PurchaseOrder }) {
   };
 
   const deletePO = async () => {
-    if (!confirm(`Are you sure you want to delete ${po.poNumber}?`)) return;
-    
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/purchase-orders/${po.id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to delete PO");
-      }
-      router.push("/purchase-orders");
-    } catch (error) {
-      console.error("Failed to delete PO:", error);
-    } finally {
-      setLoading(false);
+    const res = await fetch(`/api/purchase-orders/${po.id}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || "Failed to delete PO");
     }
+    router.push("/purchase-orders");
+  };
+
+  const cancelPO = async () => {
+    await updateStatus("CANCELLED");
   };
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" disabled={loading}>
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {po.status === "DRAFT" && (
-          <DropdownMenuItem onClick={() => updateStatus("SUBMITTED")}>
-            <Send className="mr-2 h-4 w-4" />
-            Submit Order
-          </DropdownMenuItem>
-        )}
-        {po.status === "SUBMITTED" && (
-          <DropdownMenuItem onClick={() => updateStatus("CONFIRMED")}>
-            <CheckCircle className="mr-2 h-4 w-4" />
-            Mark Confirmed
-          </DropdownMenuItem>
-        )}
-        {(po.status === "DRAFT" || po.status === "SUBMITTED") && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => updateStatus("CANCELLED")} className="text-destructive">
-              <XCircle className="mr-2 h-4 w-4" />
-              Cancel Order
+    <div className="flex items-center gap-2">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {po.status === "DRAFT" && (
+            <DropdownMenuItem onClick={() => updateStatus("SUBMITTED")}>
+              <Send className="mr-2 h-4 w-4" />
+              Submit Order
             </DropdownMenuItem>
-          </>
-        )}
-        {(po.status === "DRAFT" || po.status === "CANCELLED") && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={deletePO} className="text-destructive">
-              <Trash2 className="mr-2 h-4 w-4" />
-              Delete PO
+          )}
+          {po.status === "SUBMITTED" && (
+            <DropdownMenuItem onClick={() => updateStatus("CONFIRMED")}>
+              <CheckCircle className="mr-2 h-4 w-4" />
+              Mark Confirmed
             </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {(po.status === "DRAFT" || po.status === "SUBMITTED") && (
+        <ConfirmDialog
+          trigger={
+            <Button variant="outline" size="icon" className="text-destructive hover:text-destructive">
+              <XCircle className="h-4 w-4" />
+            </Button>
+          }
+          title="Cancel Purchase Order?"
+          description={`Are you sure you want to cancel ${po.poNumber}? This will mark the order as cancelled.`}
+          confirmText="Cancel Order"
+          variant="destructive"
+          onConfirm={cancelPO}
+        />
+      )}
+
+      {(po.status === "DRAFT" || po.status === "CANCELLED") && (
+        <ConfirmDialog
+          trigger={
+            <Button variant="outline" size="icon" className="text-destructive hover:text-destructive">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          }
+          title="Delete Purchase Order?"
+          description={`Are you sure you want to delete ${po.poNumber}? This action cannot be undone.`}
+          confirmText="Delete"
+          variant="destructive"
+          onConfirm={deletePO}
+        />
+      )}
+    </div>
   );
 }
