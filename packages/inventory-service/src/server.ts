@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import { locationsRouter } from './routes/locations.js';
 
 const app = express();
 
@@ -14,11 +15,10 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
-// Placeholder for inventory routes
-app.get('/api/locations', (_req: Request, res: Response) => {
-  res.json({ message: 'Locations endpoint - coming soon' });
-});
+// Mount routes
+app.use('/locations', locationsRouter);
 
+// Placeholder for other routes
 app.get('/api/stock', (_req: Request, res: Response) => {
   res.json({ message: 'Stock endpoint - coming soon' });
 });
