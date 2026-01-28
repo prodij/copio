@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Truck, MapPin, Calendar, Package } from "lucide-react";
+import { ArrowLeft, Truck, MapPin, Calendar, Package, ExternalLink, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { POActions } from "./po-actions";
 import { AddLineDialog } from "./add-line-dialog";
 import { ReceiveDialog } from "./receive-dialog";
+import { TrackingDialog } from "./tracking-dialog";
+import { FollowUpDialog } from "./follow-up-dialog";
 
 const API_URL = process.env.API_URL || "http://localhost:3002";
 
@@ -37,9 +39,21 @@ interface PurchaseOrder {
   total: number | null;
   orderedAt: string | null;
   expectedAt: string | null;
+  shippedAt: string | null;
   receivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // Tracking
+  carrier: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  shipmentStatus: string | null;
+  vendorOrderNumber: string | null;
+  vendorInvoiceNumber: string | null;
+  // Follow-up
+  lastContactedAt: string | null;
+  nextFollowUpAt: string | null;
+  followUpNotes: string | null;
   vendor: {
     id: string;
     name: string;
@@ -85,6 +99,7 @@ function StatusBadge({ status }: { status: string }) {
     DRAFT: "bg-gray-100 text-gray-800",
     SUBMITTED: "bg-blue-100 text-blue-800",
     CONFIRMED: "bg-indigo-100 text-indigo-800",
+    SHIPPED: "bg-purple-100 text-purple-800",
     PARTIAL: "bg-yellow-100 text-yellow-800",
     RECEIVED: "bg-green-100 text-green-800",
     CANCELLED: "bg-red-100 text-red-800",
@@ -128,8 +143,97 @@ export default async function PurchaseOrderDetailPage({
             {po.orderedAt && ` • Ordered ${formatDate(po.orderedAt)}`}
           </p>
         </div>
-        <POActions po={po} />
+        <div className="flex items-center gap-2">
+          {po.status !== 'DRAFT' && po.status !== 'CANCELLED' && (
+            <>
+              <TrackingDialog po={po} />
+              <FollowUpDialog po={po} />
+            </>
+          )}
+          <POActions po={po} />
+        </div>
       </div>
+
+      {/* Tracking & Shipping Info */}
+      {(po.trackingNumber || po.shipmentStatus || po.vendorOrderNumber) && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Truck className="h-5 w-5" /> Shipping & Tracking
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-4">
+              {po.carrier && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Carrier</p>
+                  <p className="font-medium">{po.carrier}</p>
+                </div>
+              )}
+              {po.trackingNumber && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Tracking #</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-mono font-medium">{po.trackingNumber}</p>
+                    {po.trackingUrl && (
+                      <a href={po.trackingUrl} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+              {po.shipmentStatus && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Status</p>
+                  <Badge variant="outline" className="mt-1">
+                    {po.shipmentStatus.replace(/_/g, " ")}
+                  </Badge>
+                </div>
+              )}
+              {po.vendorOrderNumber && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Vendor Order #</p>
+                  <p className="font-medium">{po.vendorOrderNumber}</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Follow-up Info */}
+      {(po.lastContactedAt || po.nextFollowUpAt) && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Phone className="h-5 w-5" /> Vendor Follow-up
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-3">
+              {po.lastContactedAt && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Last Contacted</p>
+                  <p className="font-medium">{formatDate(po.lastContactedAt)}</p>
+                </div>
+              )}
+              {po.nextFollowUpAt && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Next Follow-up</p>
+                  <p className="font-medium">{formatDate(po.nextFollowUpAt)}</p>
+                </div>
+              )}
+              {po.followUpNotes && (
+                <div className="md:col-span-3">
+                  <p className="text-sm text-muted-foreground">Notes</p>
+                  <p className="text-sm">{po.followUpNotes}</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-4">

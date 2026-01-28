@@ -451,13 +451,35 @@ model PurchaseOrder {
   destinationId String
   status        POStatus  @default(DRAFT)
   notes         String?
+  
+  // Financials
   subtotal      Decimal?  @db.Decimal(10, 2)
   tax           Decimal?  @db.Decimal(10, 2)
   shipping      Decimal?  @db.Decimal(10, 2)
   total         Decimal?  @db.Decimal(10, 2)
+  
+  // Dates
   orderedAt     DateTime?
   expectedAt    DateTime?
+  shippedAt     DateTime?
   receivedAt    DateTime?
+  
+  // Shipping & Tracking
+  carrier           String?   // UPS, FedEx, USPS, DHL, etc.
+  trackingNumber    String?
+  trackingUrl       String?
+  shipmentStatus    ShipmentStatus?
+  lastTrackingUpdate DateTime?
+  
+  // Vendor Follow-up
+  lastContactedAt   DateTime?
+  nextFollowUpAt    DateTime?
+  followUpNotes     String?
+  
+  // Vendor reference
+  vendorOrderNumber String?   // Vendor's internal order/reference number
+  vendorInvoiceNumber String?
+  
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   vendor        Vendor    @relation(fields: [vendorId], references: [id])
@@ -467,15 +489,27 @@ model PurchaseOrder {
   @@index([vendorId])
   @@index([status])
   @@index([poNumber])
+  @@index([nextFollowUpAt])
+  @@index([shipmentStatus])
 }
 
 enum POStatus {
   DRAFT
   SUBMITTED
   CONFIRMED
+  SHIPPED
   PARTIAL
   RECEIVED
   CANCELLED
+}
+
+enum ShipmentStatus {
+  PENDING       // Waiting for vendor to ship
+  LABEL_CREATED // Shipping label created
+  IN_TRANSIT    // On the way
+  OUT_FOR_DELIVERY
+  DELIVERED
+  EXCEPTION     // Delay or issue
 }
 
 model POLine {

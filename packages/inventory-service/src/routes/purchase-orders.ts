@@ -586,3 +586,194 @@ purchaseOrdersRouter.post('/from-vendor/:vendorId', async (req: Request, res: Re
 
   res.status(201).json(po);
 });
+
+// =============================================================================
+// UPDATE TRACKING INFO
+// =============================================================================
+
+purchaseOrdersRouter.patch('/:id/tracking', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const {
+    carrier,
+    trackingNumber,
+    trackingUrl,
+    shipmentStatus,
+    vendorOrderNumber,
+    vendorInvoiceNumber,
+    shippedAt,
+  } = req.body;
+
+  const existing = await prisma.purchaseOrder.findUnique({ where: { id } });
+  if (!existing) {
+    return res.status(404).json({ error: 'Purchase order not found' });
+  }
+
+  // Auto-generate tracking URL for known carriers
+  let finalTrackingUrl = trackingUrl;
+  if (trackingNumber && !trackingUrl && carrier) {
+    const carrierUrls: Record<string, string> = {
+      UPS: `https://www.ups.com/track?tracknum=${trackingNumber}`,
+      FEDEX: `https://www.fedex.com/fedextrack/?trknbr=${trackingNumber}`,
+      USPS: `https://tools.usps.com/go/TrackConfirmAction?tLabels=${trackingNumber}`,
+      DHL: `https://www.dhl.com/en/express/tracking.html?AWB=${trackingNumber}`,
+    };
+    finalTrackingUrl = carrierUrls[carrier.toUpperCase()];
+  }
+
+  // Update status to SHIPPED if we have tracking and it's not already shipped/received
+  let newStatus = existing.status;
+  if (trackingNumber && !['SHIPPED', 'PARTIAL', 'RECEIVED', 'CANCELLED'].includes(existing.status)) {
+    newStatus = 'SHIPPED';
+  }
+
+  const po = await prisma.purchaseOrder.update({
+    where: { id },
+    data: {
+      carrier,
+      trackingNumber,
+      trackingUrl: finalTrackingUrl,
+      shipmentStatus,
+      lastTrackingUpdate: new Date(),
+      vendorOrderNumber,
+      vendorInvoiceNumber,
+      shippedAt: shippedAt ? new Date(shippedAt) : (trackingNumber && !existing.shippedAt ? new Date() : undefined),
+      status: newStatus,
+    },
+    include: {
+      vendor: { select: { id: true, name: true, code: true } },
+      destination: { select: { id: true, name: true, type: true } },
+      _count: { select: { lines: true } },
+    },
+  });
+
+  res.json(po);
+});
+
+// =============================================================================
+// UPDATE FOLLOW-UP INFO
+// =============================================================================
+
+purchaseOrdersRouter.patch('/:id/follow-up', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { lastContactedAt, nextFollowUpAt, followUpNotes } = req.body;
+
+  const existing = await prisma.purchaseOrder.findUnique({ where: { id } });
+  if (!existing) {
+    return res.status(404).json({ error: 'Purchase order not found' });
+  }
+
+  const po = await prisma.purchaseOrder.update({
+    where: { id },
+    data: {
+      lastContactedAt: lastContactedAt ? new Date(lastContactedAt) : undefined,
+      nextFollowUpAt: nextFollowUpAt ? new Date(nextFollowUpAt) : undefined,
+      followUpNotes,
+    },
+    include: {
+      vendor: { select: { id: true, name: true, code: true } },
+      destination: { select: { id: true, name: true, type: true } },
+      _count: { select: { lines: true } },
+    },
+  });
+
+  res.json(po);
+});
+
+// =============================================================================
+// LOG VENDOR CONTACT (Quick action)
+// =============================================================================
+
+purchaseOrdersRouter.post('/:id/log-contact', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { notes, nextFollowUpDays } = req.body;
+
+  const existing = await prisma.purchaseOrder.findUnique({ where: { id } });
+  if (!existing) {
+    return res.status(404).json({ error: 'Purchase order not found' });
+  }
+
+  // Calculate next follow-up date
+  let nextFollowUpAt = null;
+  if (nextFollowUpDays) {
+    nextFollowUpAt = new Date();
+    nextFollowUpAt.setDate(nextFollowUpAt.getDate() + nextFollowUpDays);
+  }
+
+  const po = await prisma.purchaseOrder.update({
+    where: { id },
+    data: {
+      lastContactedAt: new Date(),
+      nextFollowUpAt,
+      followUpNotes: notes || existing.followUpNotes,
+    },
+    include: {
+      vendor: { select: { id: true, name: true, code: true } },
+      destination: { select: { id: true, name: true, type: true } },
+      _count: { select: { lines: true } },
+    },
+  });
+
+  res.json(po);
+});
+
+// =============================================================================
+// GET POs NEEDING FOLLOW-UP
+// =============================================================================
+
+purchaseOrdersRouter.get('/follow-ups/due', async (req: Request, res: Response) => {
+  const now = new Date();
+  
+  const purchaseOrders = await prisma.purchaseOrder.findMany({
+    where: {
+      status: { in: ['SUBMITTED', 'CONFIRMED', 'SHIPPED'] },
+      OR: [
+        { nextFollowUpAt: { lte: now } },
+        { 
+          AND: [
+            { nextFollowUpAt: null },
+            { lastContactedAt: { lt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000) } },
+          ],
+        },
+        {
+          AND: [
+            { nextFollowUpAt: null },
+            { lastContactedAt: null },
+            { orderedAt: { lt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000) } },
+          ],
+        },
+      ],
+    },
+    include: {
+      vendor: { select: { id: true, name: true, code: true } },
+      destination: { select: { id: true, name: true, type: true } },
+      _count: { select: { lines: true } },
+    },
+    orderBy: [
+      { nextFollowUpAt: 'asc' },
+      { orderedAt: 'asc' },
+    ],
+  });
+
+  res.json(purchaseOrders);
+});
+
+// =============================================================================
+// GET SHIPMENTS IN TRANSIT
+// =============================================================================
+
+purchaseOrdersRouter.get('/shipments/in-transit', async (req: Request, res: Response) => {
+  const purchaseOrders = await prisma.purchaseOrder.findMany({
+    where: {
+      status: 'SHIPPED',
+      shipmentStatus: { in: ['LABEL_CREATED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'] },
+    },
+    include: {
+      vendor: { select: { id: true, name: true, code: true } },
+      destination: { select: { id: true, name: true, type: true } },
+      _count: { select: { lines: true } },
+    },
+    orderBy: { expectedAt: 'asc' },
+  });
+
+  res.json(purchaseOrders);
+});
