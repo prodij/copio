@@ -167,13 +167,16 @@ export function VendorProductDialog({
     }
   };
 
+  // Context-aware button label
+  const addButtonLabel = vendorId ? "Add Product" : "Add Vendor";
+
   const defaultTrigger = isEditing ? (
     <Button variant="ghost" size="sm">
       <Pencil className="h-4 w-4" />
     </Button>
   ) : (
     <Button variant="outline" size="sm">
-      <Plus className="h-4 w-4 mr-2" /> Add Vendor
+      <Plus className="h-4 w-4 mr-2" /> {addButtonLabel}
     </Button>
   );
 
@@ -183,11 +186,15 @@ export function VendorProductDialog({
       <DialogContent className="sm:max-w-[550px]">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>{isEditing ? "Edit Vendor Link" : "Link Product to Vendor"}</DialogTitle>
+            <DialogTitle>
+              {isEditing ? "Edit Vendor Link" : vendorId ? "Link Product to Vendor" : "Link Vendor to Product"}
+            </DialogTitle>
             <DialogDescription>
               {isEditing
                 ? "Update the sourcing details for this product-vendor relationship."
-                : "Add a vendor as a source for this product with pricing and ordering details."}
+                : vendorId 
+                  ? "Add a product that this vendor supplies with pricing and ordering details."
+                  : "Add a vendor as a source for this product with pricing and ordering details."}
             </DialogDescription>
           </DialogHeader>
 
@@ -386,7 +393,7 @@ export function VendorProductDialog({
             </Button>
             <Button type="submit" disabled={loading}>
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isEditing ? "Save Changes" : "Link Vendor"}
+              {isEditing ? "Save Changes" : vendorId ? "Link Product" : "Link Vendor"}
             </Button>
           </DialogFooter>
         </form>
