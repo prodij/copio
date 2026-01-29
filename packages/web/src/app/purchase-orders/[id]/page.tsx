@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Truck, MapPin, Calendar, Package, ExternalLink, Phone } from "lucide-react";
+import { ArrowLeft, Truck, MapPin, Calendar, Package, ExternalLink, Phone, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -146,6 +146,11 @@ export default async function PurchaseOrderDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <a href={`/api/purchase-orders/${po.id}/pdf`} download>
+            <Button variant="outline" size="sm">
+              <Download className="h-4 w-4 mr-2" /> PDF
+            </Button>
+          </a>
           <EditPODialog po={po} />
           {po.status !== 'DRAFT' && po.status !== 'CANCELLED' && (
             <>
