@@ -12,11 +12,13 @@
   },
   "dependencies": {
     "@copio/core": "workspace:*",
+    "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^4.21.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
     "@types/supertest": "^6.0.0",

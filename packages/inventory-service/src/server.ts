@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
 import { categoriesRouter } from './routes/categories.js';
 import { locationsRouter } from './routes/locations.js';
 import { productsRouter } from './routes/products.js';
@@ -15,6 +16,10 @@ import { vendorDocumentsRouter } from './routes/vendor-documents.js';
 const app = express();
 
 // Middleware
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  credentials: true,
+}));
 app.use(express.json());
 
 // Health check endpoint
