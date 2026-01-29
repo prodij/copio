@@ -11,6 +11,7 @@ import { ReceiveDialog } from "./receive-dialog";
 import { TrackingDialog } from "./tracking-dialog";
 import { FollowUpDialog } from "./follow-up-dialog";
 import { EditPODialog } from "./edit-po-dialog";
+import { EditLineDialog } from "./edit-line-dialog";
 
 const API_URL = process.env.API_URL || "http://localhost:3002";
 
@@ -323,6 +324,7 @@ export default async function PurchaseOrderDetailPage({
                   <TableHead className="text-center">Ordered</TableHead>
                   <TableHead className="text-center">Received</TableHead>
                   <TableHead className="text-right">Line Total</TableHead>
+                  <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -360,6 +362,9 @@ export default async function PurchaseOrderDetailPage({
                     </TableCell>
                     <TableCell className="text-right font-medium">
                       {formatCurrency(line.quantityOrdered * line.unitCost)}
+                    </TableCell>
+                    <TableCell>
+                      <EditLineDialog poId={po.id} line={line} canDelete={canEdit} />
                     </TableCell>
                   </TableRow>
                 ))}
