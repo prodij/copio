@@ -8,6 +8,9 @@ import { vendorsRouter } from './routes/vendors.js';
 import { vendorProductsRouter } from './routes/vendor-products.js';
 import { purchaseOrdersRouter } from './routes/purchase-orders.js';
 import { channelListingsRouter } from './routes/channel-listings.js';
+import { vendorContactsRouter } from './routes/vendor-contacts.js';
+import { vendorAddressesRouter } from './routes/vendor-addresses.js';
+import { vendorDocumentsRouter } from './routes/vendor-documents.js';
 
 const app = express();
 
@@ -33,6 +36,9 @@ app.use('/vendors', vendorsRouter);
 app.use('/vendor-products', vendorProductsRouter);
 app.use('/purchase-orders', purchaseOrdersRouter);
 app.use('/channel-listings', channelListingsRouter);
+app.use('/vendor-contacts', vendorContactsRouter);
+app.use('/vendor-addresses', vendorAddressesRouter);
+app.use('/vendor-documents', vendorDocumentsRouter);
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

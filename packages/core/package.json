@@ -21,7 +21,8 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@prisma/client": "^6.9.0"
+    "@prisma/client": "^6.9.0",
+    "minio": "^8.0.6"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

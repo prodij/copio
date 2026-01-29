@@ -385,22 +385,207 @@ model OrderLine {
 
 model Vendor {
   id             String          @id @default(uuid())
-  name           String
-  code           String?         @unique // Short vendor code
-  contact        Json            @default("{}")
-  address        Json            @default("{}")
+  
+  // Company Identity
+  name           String          // Display/trading name
+  legalName      String?         // Full legal entity name
+  code           String?         @unique // Short vendor code (e.g., "ACME")
+  taxId          String?         // EIN, VAT number, etc.
+  website        String?
+  
+  // Classification
+  tier           VendorTier      @default(STANDARD)
+  category       String?         // Industry/product category
+  tags           String[]        // Flexible tagging
+  
+  // Legacy address fields (use VendorAddress for new data)
+  address        Json            @default("{}") // Deprecated - use addresses relation
+  billingAddress Json            @default("{}") // Deprecated - use addresses relation
+  
+  // Ordering & Terms
   leadTimeDays   Int             @default(14)
   minOrderValue  Decimal?        @db.Decimal(10, 2)
-  paymentTerms   String?         // e.g., "Net 30"
-  currency       String?         @default("USD")
-  notes          String?
+  paymentTerms   String?         // e.g., "Net 30", "2/10 Net 30"
+  creditLimit    Decimal?        @db.Decimal(10, 2)
+  currency       String          @default("USD")
+  
+  // Account Management
+  accountManagerName  String?    // Internal owner of this vendor relationship
+  accountManagerEmail String?
+  preferredContactMethod String? // EMAIL, PHONE, PORTAL
+  
+  // Contract & Compliance
+  contractStartDate DateTime?
+  contractEndDate   DateTime?
+  insuranceExpiry   DateTime?
+  w9OnFile          Boolean     @default(false)
+  
+  // Communication
+  notes          String?         // General notes
+  internalNotes  String?         // Private internal notes
+  
+  // Status
   isActive       Boolean         @default(true)
+  onboardedAt    DateTime?
+  
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
+  
+  // Relations
+  addresses      VendorAddress[]
+  contacts       VendorContact[]
+  documents      VendorDocument[]
   purchaseOrders PurchaseOrder[]
   products       VendorProduct[]
 
   @@index([isActive])
+  @@index([tier])
+  @@index([contractEndDate])
+}
+
+enum VendorTier {
+  STRATEGIC   // Key partners, high volume, special terms
+  PREFERRED   // Established, reliable vendors
+  STANDARD    // Regular vendors
+  PROBATION   // New or underperforming, being evaluated
+  SUSPENDED   // Temporarily not ordering
+}
+
+model VendorContact {
+  id          String   @id @default(uuid())
+  vendorId    String
+  
+  // Contact Info
+  name        String
+  title       String?  // Job title
+  email       String?
+  phone       String?
+  mobile      String?
+  
+  // Role/Purpose
+  role        ContactRole @default(GENERAL)
+  isPrimary   Boolean     @default(false)
+  
+  // Notes
+  notes       String?
+  
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  vendor      Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@index([role])
+}
+
+enum ContactRole {
+  GENERAL     // General inquiries
+  SALES       // Sales rep for ordering
+  ACCOUNT     // Account manager
+  SUPPORT     // Customer support
+  BILLING     // Accounts payable/receivable
+  SHIPPING    // Shipping/logistics
+  EXECUTIVE   // Decision maker
+}
+
+model VendorAddress {
+  id          String      @id @default(uuid())
+  vendorId    String
+  
+  // Address Type
+  type        AddressType @default(WAREHOUSE)
+  label       String?     // Custom label e.g., "West Coast DC"
+  isPrimary   Boolean     @default(false)
+  
+  // Address Fields
+  street1     String
+  street2     String?
+  city        String
+  state       String?     // State/Province
+  postalCode  String?
+  country     String      // ISO 3166-1 alpha-2 (e.g., "US", "CN", "MX")
+  
+  // Geolocation (for shipping time estimates)
+  latitude    Float?
+  longitude   Float?
+  timezone    String?     // IANA timezone
+  
+  // Tax & Trade
+  taxJurisdiction String? // Tax nexus info
+  ftzZone     String?     // Foreign Trade Zone
+  portOfEntry String?     // Nearest port (for imports)
+  
+  // Contact for this location
+  contactName  String?
+  contactPhone String?
+  contactEmail String?
+  
+  // Operational
+  shippingNotes String?   // Dock hours, special instructions
+  
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  vendor      Vendor      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@index([type])
+  @@index([country])
+}
+
+enum AddressType {
+  CORPORATE   // Headquarters / legal address
+  BILLING     // Invoicing address
+  WAREHOUSE   // Ships product from here
+  RETURNS     // Returns/RMA address
+  OTHER
+}
+
+model VendorDocument {
+  id          String       @id @default(uuid())
+  vendorId    String
+  
+  // Document Info
+  type        DocumentType
+  name        String       // Display name
+  description String?
+  
+  // Storage (MinIO)
+  bucket      String       @default("vendor-documents")
+  objectKey   String       // Path in MinIO
+  mimeType    String
+  sizeBytes   Int
+  
+  // Metadata
+  expiresAt   DateTime?    // For certificates, contracts
+  version     String?      // Document version
+  
+  // Upload tracking
+  uploadedBy  String?      // User who uploaded
+  uploadedAt  DateTime     @default(now())
+  
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  vendor      Vendor       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@index([type])
+  @@index([expiresAt])
+}
+
+enum DocumentType {
+  W9              // Tax form
+  W8              // Foreign tax form
+  COI             // Certificate of Insurance
+  CONTRACT        // Agreement/contract
+  PRICE_LIST      // Pricing sheet
+  CATALOG         // Product catalog
+  SPEC_SHEET      // Product specifications
+  CERTIFICATE     // Quality/compliance cert
+  LICENSE         // Business license
+  IMPORT_PERMIT   // Import documentation
+  OTHER
 }
 
 // Vendor-Product relationship (procurement side)
