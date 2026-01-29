@@ -10,6 +10,7 @@ import { AddLineDialog } from "./add-line-dialog";
 import { ReceiveDialog } from "./receive-dialog";
 import { TrackingDialog } from "./tracking-dialog";
 import { FollowUpDialog } from "./follow-up-dialog";
+import { EditPODialog } from "./edit-po-dialog";
 
 const API_URL = process.env.API_URL || "http://localhost:3002";
 
@@ -144,6 +145,7 @@ export default async function PurchaseOrderDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <EditPODialog po={po} />
           {po.status !== 'DRAFT' && po.status !== 'CANCELLED' && (
             <>
               <TrackingDialog po={po} />
