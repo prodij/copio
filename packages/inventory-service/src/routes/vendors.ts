@@ -125,6 +125,8 @@ router.get('/:id', async (req: Request, res: Response) => {
     where: { id: req.params.id },
     include: {
       contacts: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { role: 'asc' }] },
+      addresses: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { type: 'asc' }] },
+      documents: { where: { isActive: true }, orderBy: [{ type: 'asc' }, { uploadedAt: 'desc' }] },
       products: {
         include: {
           product: { select: { id: true, sku: true, name: true } },
