@@ -73,7 +73,15 @@ purchaseOrdersRouter.get('/:id', async (req: Request, res: Response) => {
   const po = await prisma.purchaseOrder.findUnique({
     where: { id: req.params.id },
     include: {
-      vendor: { select: { id: true, name: true, code: true, contact: true, leadTimeDays: true } },
+      vendor: { 
+        select: { 
+          id: true, 
+          name: true, 
+          code: true, 
+          leadTimeDays: true,
+          contacts: { where: { isPrimary: true }, take: 1 }
+        } 
+      },
       destination: { select: { id: true, name: true, type: true, address: true } },
       lines: {
         include: {
