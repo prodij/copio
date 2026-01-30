@@ -144,7 +144,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 // List products
 router.get('/', async (req: Request, res: Response) => {
-  const { type, status, parentId, search } = req.query;
+  const { type, status, parentId, search, page = '1', pageSize = '25' } = req.query;
   
   const where: Record<string, unknown> = {};
   if (type) where.productType = type;
@@ -159,16 +159,34 @@ router.get('/', async (req: Request, res: Response) => {
     ];
   }
 
-  const products = await prisma.product.findMany({
-    where,
-    include: {
-      images: { orderBy: { position: 'asc' }, take: 1 },
-      listings: { select: { id: true, channel: true, status: true } },
-      _count: { select: { variations: true } },
+  const pageNum = Math.max(1, parseInt(page as string) || 1);
+  const pageSizeNum = Math.min(100, Math.max(1, parseInt(pageSize as string) || 25));
+  const skip = (pageNum - 1) * pageSizeNum;
+
+  const [products, total] = await Promise.all([
+    prisma.product.findMany({
+      where,
+      include: {
+        images: { orderBy: { position: 'asc' }, take: 1 },
+        listings: { select: { id: true, channel: true, status: true } },
+        _count: { select: { variations: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+      skip,
+      take: pageSizeNum,
+    }),
+    prisma.product.count({ where }),
+  ]);
+
+  res.json({
+    data: products,
+    pagination: {
+      page: pageNum,
+      pageSize: pageSizeNum,
+      total,
+      totalPages: Math.ceil(total / pageSizeNum),
     },
-    orderBy: { updatedAt: 'desc' },
   });
-  res.json(products);
 });
 
 // Get single product

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { CreateProductDialog } from "./create-dialog";
 import { ProductFilters } from "@/components/product-filters";
 import { SortableHeader } from "@/components/sortable-header";
+import { Pagination } from "@/components/pagination";
 
 const API_URL = process.env.API_URL || "http://localhost:3002";
 
@@ -22,10 +23,48 @@ interface Product {
   _count: { variations: number };
 }
 
-async function getProducts(): Promise<Product[]> {
-  const res = await fetch(`${API_URL}/products`, { cache: "no-store" });
+interface ProductsResponse {
+  data: Product[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+interface SearchParams {
+  search?: string;
+  status?: string;
+  channel?: string;
+  brand?: string;
+  sortBy?: string;
+  sortDir?: "asc" | "desc";
+  page?: string;
+  pageSize?: string;
+}
+
+async function getProducts(params: SearchParams): Promise<ProductsResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.search) searchParams.set("search", params.search);
+  if (params.status && params.status !== "all") searchParams.set("status", params.status);
+  if (params.page) searchParams.set("page", params.page);
+  if (params.pageSize) searchParams.set("pageSize", params.pageSize);
+  
+  const url = `${API_URL}/products?${searchParams.toString()}`;
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch products");
   return res.json();
+}
+
+async function getAllBrands(): Promise<string[]> {
+  // Get all products to extract brands (could optimize with dedicated endpoint)
+  const res = await fetch(`${API_URL}/products?pageSize=1000`, { cache: "no-store" });
+  if (!res.ok) return [];
+  const data: ProductsResponse = await res.json();
+  const brands = [...new Set(data.data.map((p) => p.brand).filter(Boolean))] as string[];
+  brands.sort();
+  return brands;
 }
 
 function formatDate(dateString: string) {
@@ -38,9 +77,9 @@ function formatDate(dateString: string) {
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    DRAFT: "bg-gray-100 text-gray-800 hover:bg-gray-100",
-    ACTIVE: "bg-green-100 text-green-800 hover:bg-green-100",
-    ARCHIVED: "bg-orange-100 text-orange-800 hover:bg-orange-100",
+    DRAFT: "bg-gray-100 text-gray-800 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300",
+    ACTIVE: "bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-900 dark:text-green-300",
+    ARCHIVED: "bg-orange-100 text-orange-800 hover:bg-orange-100 dark:bg-orange-900 dark:text-orange-300",
   };
   return (
     <Badge className={colors[status] || "bg-gray-100"} variant="outline">
@@ -52,8 +91,8 @@ function StatusBadge({ status }: { status: string }) {
 function TypeBadge({ type }: { type: string }) {
   if (type === "SIMPLE") return null;
   const colors: Record<string, string> = {
-    PARENT: "bg-purple-100 text-purple-800 hover:bg-purple-100",
-    VARIATION: "bg-indigo-100 text-indigo-800 hover:bg-indigo-100",
+    PARENT: "bg-purple-100 text-purple-800 hover:bg-purple-100 dark:bg-purple-900 dark:text-purple-300",
+    VARIATION: "bg-indigo-100 text-indigo-800 hover:bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-300",
   };
   return (
     <Badge className={colors[type] || "bg-gray-100"} variant="outline">
@@ -76,59 +115,37 @@ function ChannelBadge({ channel }: { channel: string }) {
   );
 }
 
-interface SearchParams {
-  search?: string;
-  status?: string;
-  channel?: string;
-  brand?: string;
-  sortBy?: string;
-  sortDir?: "asc" | "desc";
-}
-
 export default async function ProductsPage({
   searchParams,
 }: {
   searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
-  const allProducts = await getProducts();
-  
-  // Extract unique brands for filter dropdown
-  const brands = [...new Set(allProducts.map((p) => p.brand).filter(Boolean))] as string[];
-  brands.sort();
-  
-  // Filter products
-  let products = allProducts;
-  
-  if (params.search) {
-    const search = params.search.toLowerCase();
-    products = products.filter(
-      (p) =>
-        p.name.toLowerCase().includes(search) ||
-        p.sku.toLowerCase().includes(search) ||
-        (p.brand && p.brand.toLowerCase().includes(search))
-    );
-  }
-  
-  if (params.status && params.status !== "all") {
-    products = products.filter((p) => p.status === params.status);
-  }
+  const [response, brands] = await Promise.all([
+    getProducts(params),
+    getAllBrands(),
+  ]);
+
+  const { data: products, pagination } = response;
+
+  // Client-side filtering for channel and brand (not yet supported in API)
+  let filteredProducts = products;
   
   if (params.channel && params.channel !== "all") {
-    products = products.filter((p) =>
+    filteredProducts = filteredProducts.filter((p) =>
       p.listings.some((l) => l.channel === params.channel)
     );
   }
   
   if (params.brand && params.brand !== "all") {
-    products = products.filter((p) => p.brand === params.brand);
+    filteredProducts = filteredProducts.filter((p) => p.brand === params.brand);
   }
   
-  // Sort products
+  // Client-side sorting
   const sortBy = params.sortBy || "createdAt";
   const sortDir = params.sortDir || "desc";
   
-  products.sort((a, b) => {
+  filteredProducts.sort((a, b) => {
     let aVal: string | number | null;
     let bVal: string | number | null;
     
@@ -187,8 +204,8 @@ export default async function ProductsPage({
         <CardHeader>
           <CardTitle>Product Catalog</CardTitle>
           <CardDescription>
-            {products.length} of {allProducts.length} product{allProducts.length !== 1 ? "s" : ""}
-            {products.length !== allProducts.length && " (filtered)"}
+            {filteredProducts.length} of {pagination.total} product{pagination.total !== 1 ? "s" : ""}
+            {filteredProducts.length !== pagination.total && " (filtered)"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -204,8 +221,8 @@ export default async function ProductsPage({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {products.length > 0 ? (
-                products.map((product) => (
+              {filteredProducts.length > 0 ? (
+                filteredProducts.map((product) => (
                   <TableRow key={product.id} className="cursor-pointer hover:bg-muted/50">
                     <TableCell>
                       {product.images?.[0]?.url ? (
@@ -263,6 +280,7 @@ export default async function ProductsPage({
               )}
             </TableBody>
           </Table>
+          <Pagination total={pagination.total} pageSize={pagination.pageSize} />
         </CardContent>
       </Card>
     </div>
