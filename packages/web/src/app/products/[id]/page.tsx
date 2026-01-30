@@ -93,6 +93,7 @@ interface Product {
     leadTimeDays: number | null;
     isPreferred: boolean;
     isActive: boolean;
+    notes: string | null;
     vendor: { id: string; name: string; code: string | null; leadTimeDays: number };
   }>;
   parent: { id: string; sku: string; name: string } | null;

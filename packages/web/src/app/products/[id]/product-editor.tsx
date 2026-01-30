@@ -33,6 +33,7 @@ interface VendorProduct {
   leadTimeDays: number | null;
   isPreferred: boolean;
   isActive: boolean;
+  notes: string | null;
   vendor: { id: string; name: string; code: string | null; leadTimeDays: number };
 }
 
