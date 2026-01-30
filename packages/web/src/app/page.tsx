@@ -5,8 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 const API_URL = process.env.API_URL || 'http://localhost:3002';
 
 async function getProducts() {
-  const res = await fetch(`${API_URL}/products`, { cache: 'no-store' });
-  return res.json();
+  const res = await fetch(`${API_URL}/products?pageSize=1000`, { cache: 'no-store' });
+  const data = await res.json();
+  return data.data || data; // Handle both paginated and legacy response
 }
 
 async function getLocations() {

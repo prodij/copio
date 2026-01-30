@@ -33,9 +33,10 @@ async function getStockItems(): Promise<StockItem[]> {
 }
 
 async function getProducts(): Promise<Product[]> {
-  const res = await fetch(`${API_URL}/products`, { cache: 'no-store' });
+  const res = await fetch(`${API_URL}/products?pageSize=1000`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch products');
-  return res.json();
+  const data = await res.json();
+  return data.data || data; // Handle both paginated and legacy response
 }
 
 async function getLocations(): Promise<Location[]> {

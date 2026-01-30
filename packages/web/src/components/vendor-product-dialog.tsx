@@ -105,9 +105,9 @@ export function VendorProductDialog({
   useEffect(() => {
     if (open && !productId && !isEditing) {
       setLoadingOptions(true);
-      fetch("/api/products?limit=100")
+      fetch("/api/products?pageSize=100")
         .then((res) => res.json())
-        .then((data) => setProducts(data.products || data))
+        .then((data) => setProducts(data.data || data))
         .catch(console.error)
         .finally(() => setLoadingOptions(false));
     }
