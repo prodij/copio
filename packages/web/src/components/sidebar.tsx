@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { LayoutDashboard, Package, Tags, MapPin, Truck, FileText } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const navItems = [
   {
@@ -43,11 +44,12 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-screen w-64 flex-col border-r bg-sidebar">
-      <div className="flex h-14 items-center border-b px-6">
+      <div className="flex h-14 items-center justify-between border-b px-6">
         <Link href="/" className="flex items-center gap-2 font-semibold">
           <Package className="h-6 w-6" />
           <span>Copio</span>
         </Link>
+        <ThemeToggle />
       </div>
       <nav className="flex-1 space-y-1 p-4">
         {navItems.map((item) => {

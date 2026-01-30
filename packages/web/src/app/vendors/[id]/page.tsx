@@ -11,6 +11,7 @@ import { VendorContactDialog } from "@/components/vendor-contact-dialog";
 import { VendorAddressDialog } from "@/components/vendor-address-dialog";
 import { VendorDocumentUpload } from "@/components/vendor-document-upload";
 import { DocumentDownloadButton } from "@/components/document-download-button";
+import { VendorPOTable } from "@/components/vendor-po-table";
 
 const API_URL = process.env.API_URL || "http://localhost:3002";
 
@@ -70,6 +71,20 @@ interface VendorDocument {
   uploadedAt: string;
 }
 
+interface PurchaseOrder {
+  id: string;
+  poNumber: string;
+  status: string;
+  subtotal: number | null;
+  total: number | null;
+  createdAt: string;
+  orderedAt: string | null;
+  expectedAt: string | null;
+  receivedAt: string | null;
+  destination: { id: string; name: string; type: string };
+  _count: { lines: number };
+}
+
 interface Vendor {
   id: string;
   name: string;
@@ -104,6 +119,13 @@ async function getVendor(id: string): Promise<Vendor | null> {
   if (res.status === 404) return null;
   if (!res.ok) throw new Error("Failed to fetch vendor");
   return res.json();
+}
+
+async function getPurchaseOrders(vendorId: string): Promise<PurchaseOrder[]> {
+  const res = await fetch(`${API_URL}/purchase-orders?vendorId=${vendorId}`, { cache: "no-store" });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.purchaseOrders || [];
 }
 
 const TIER_COLORS: Record<string, string> = {
@@ -169,7 +191,10 @@ export default async function VendorDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const vendor = await getVendor(id);
+  const [vendor, purchaseOrders] = await Promise.all([
+    getVendor(id),
+    getPurchaseOrders(id),
+  ]);
 
   if (!vendor) {
     notFound();
@@ -296,6 +321,10 @@ export default async function VendorDetailPage({
             <Package className="h-4 w-4" />
             Products ({vendor.products?.length || 0})
           </TabsTrigger>
+          <TabsTrigger value="purchase-orders" className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Purchase Orders ({purchaseOrders.length})
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -371,6 +400,30 @@ export default async function VendorDetailPage({
               </CardContent>
             </Card>
           </div>
+
+          {/* Purchase Order History */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Purchase Order History</CardTitle>
+                <CardDescription>All orders with {vendor.name}</CardDescription>
+              </div>
+              <Link href={`/purchase-orders/new?vendorId=${vendor.id}`}>
+                <Button>New PO</Button>
+              </Link>
+            </CardHeader>
+            <CardContent>
+              {purchaseOrders.length > 0 ? (
+                <VendorPOTable purchaseOrders={purchaseOrders} />
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>No purchase orders yet.</p>
+                  <p className="text-sm">Create a PO to start ordering from this vendor.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Contacts Tab */}
@@ -385,50 +438,61 @@ export default async function VendorDetailPage({
             </CardHeader>
             <CardContent>
               {vendor.contacts && vendor.contacts.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Phone</TableHead>
-                      <TableHead></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {vendor.contacts.map((contact) => (
-                      <TableRow key={contact.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <div>
-                              <p className="font-medium">{contact.name}</p>
-                              {contact.title && (
-                                <p className="text-xs text-muted-foreground">{contact.title}</p>
-                              )}
-                            </div>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {vendor.contacts.map((contact) => (
+                    <div key={contact.id} className="border rounded-lg p-4 relative hover:border-primary/50 transition-colors">
+                      <div className="absolute top-3 right-3">
+                        <VendorContactDialog vendorId={vendor.id} existingData={contact} />
+                      </div>
+                      <div className="flex items-start gap-3 mb-3">
+                        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <span className="text-sm font-semibold text-primary">
+                            {contact.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1 pr-8">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-semibold truncate">{contact.name}</p>
                             {contact.isPrimary && (
-                              <Badge variant="outline" className="text-xs">Primary</Badge>
+                              <Badge variant="outline" className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300">Primary</Badge>
                             )}
                           </div>
-                        </TableCell>
-                        <TableCell>{CONTACT_ROLE_LABELS[contact.role] || contact.role}</TableCell>
-                        <TableCell>
-                          {contact.email ? (
-                            <a href={`mailto:${contact.email}`} className="text-primary hover:underline">
+                          {contact.title && (
+                            <p className="text-sm text-muted-foreground truncate">{contact.title}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        <Badge variant="secondary" className="text-xs">
+                          {CONTACT_ROLE_LABELS[contact.role] || contact.role}
+                        </Badge>
+                        {contact.email && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            </svg>
+                            <a href={`mailto:${contact.email}`} className="text-primary hover:underline truncate">
                               {contact.email}
                             </a>
-                          ) : "—"}
-                        </TableCell>
-                        <TableCell>
-                          {contact.phone || contact.mobile || "—"}
-                        </TableCell>
-                        <TableCell>
-                          <VendorContactDialog vendorId={vendor.id} existingData={contact} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                          </div>
+                        )}
+                        {(contact.phone || contact.mobile) && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                            </svg>
+                            <span>{contact.phone || contact.mobile}</span>
+                          </div>
+                        )}
+                        {contact.notes && (
+                          <p className="text-xs text-muted-foreground italic pt-2 border-t mt-2">
+                            {contact.notes}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
                   <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -633,6 +697,32 @@ export default async function VendorDetailPage({
                   <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
                   <p>No products linked to this vendor yet.</p>
                   <p className="text-sm">Add products to track what you source from this vendor.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Purchase Orders Tab */}
+        <TabsContent value="purchase-orders">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Purchase Orders</CardTitle>
+                <CardDescription>Order history with {vendor.name}</CardDescription>
+              </div>
+              <Link href={`/purchase-orders/new?vendorId=${vendor.id}`}>
+                <Button>New PO</Button>
+              </Link>
+            </CardHeader>
+            <CardContent>
+              {purchaseOrders.length > 0 ? (
+                <VendorPOTable purchaseOrders={purchaseOrders} />
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>No purchase orders yet.</p>
+                  <p className="text-sm">Create a PO to start ordering from this vendor.</p>
                 </div>
               )}
             </CardContent>

@@ -1,8 +1,11 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { CreateProductDialog } from "./create-dialog";
+import { ProductFilters } from "@/components/product-filters";
+import { SortableHeader } from "@/components/sortable-header";
 
 const API_URL = process.env.API_URL || "http://localhost:3002";
 
@@ -61,10 +64,10 @@ function TypeBadge({ type }: { type: string }) {
 
 function ChannelBadge({ channel }: { channel: string }) {
   const colors: Record<string, string> = {
-    AMAZON: "bg-orange-100 text-orange-800",
-    SHOPIFY: "bg-green-100 text-green-800",
-    WALMART: "bg-blue-100 text-blue-800",
-    EBAY: "bg-yellow-100 text-yellow-800",
+    AMAZON: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300",
+    SHOPIFY: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
+    WALMART: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
+    EBAY: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
   };
   return (
     <Badge className={`${colors[channel] || "bg-gray-100"} text-xs`} variant="outline">
@@ -73,8 +76,98 @@ function ChannelBadge({ channel }: { channel: string }) {
   );
 }
 
-export default async function ProductsPage() {
-  const products = await getProducts();
+interface SearchParams {
+  search?: string;
+  status?: string;
+  channel?: string;
+  brand?: string;
+  sortBy?: string;
+  sortDir?: "asc" | "desc";
+}
+
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const params = await searchParams;
+  const allProducts = await getProducts();
+  
+  // Extract unique brands for filter dropdown
+  const brands = [...new Set(allProducts.map((p) => p.brand).filter(Boolean))] as string[];
+  brands.sort();
+  
+  // Filter products
+  let products = allProducts;
+  
+  if (params.search) {
+    const search = params.search.toLowerCase();
+    products = products.filter(
+      (p) =>
+        p.name.toLowerCase().includes(search) ||
+        p.sku.toLowerCase().includes(search) ||
+        (p.brand && p.brand.toLowerCase().includes(search))
+    );
+  }
+  
+  if (params.status && params.status !== "all") {
+    products = products.filter((p) => p.status === params.status);
+  }
+  
+  if (params.channel && params.channel !== "all") {
+    products = products.filter((p) =>
+      p.listings.some((l) => l.channel === params.channel)
+    );
+  }
+  
+  if (params.brand && params.brand !== "all") {
+    products = products.filter((p) => p.brand === params.brand);
+  }
+  
+  // Sort products
+  const sortBy = params.sortBy || "createdAt";
+  const sortDir = params.sortDir || "desc";
+  
+  products.sort((a, b) => {
+    let aVal: string | number | null;
+    let bVal: string | number | null;
+    
+    switch (sortBy) {
+      case "name":
+        aVal = a.name.toLowerCase();
+        bVal = b.name.toLowerCase();
+        break;
+      case "sku":
+        aVal = a.sku.toLowerCase();
+        bVal = b.sku.toLowerCase();
+        break;
+      case "brand":
+        aVal = a.brand?.toLowerCase() || "";
+        bVal = b.brand?.toLowerCase() || "";
+        break;
+      case "status":
+        aVal = a.status;
+        bVal = b.status;
+        break;
+      case "channels":
+        aVal = a.listings.length;
+        bVal = b.listings.length;
+        break;
+      case "createdAt":
+        aVal = a.createdAt;
+        bVal = b.createdAt;
+        break;
+      default:
+        return 0;
+    }
+    
+    if (aVal === null || aVal === "") return sortDir === "asc" ? 1 : -1;
+    if (bVal === null || bVal === "") return sortDir === "asc" ? -1 : 1;
+    
+    if (aVal < bVal) return sortDir === "asc" ? -1 : 1;
+    if (aVal > bVal) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
 
   return (
     <div className="space-y-6">
@@ -86,11 +179,16 @@ export default async function ProductsPage() {
         <CreateProductDialog />
       </div>
 
+      <Suspense fallback={<div className="h-10" />}>
+        <ProductFilters brands={brands} />
+      </Suspense>
+
       <Card>
         <CardHeader>
           <CardTitle>Product Catalog</CardTitle>
           <CardDescription>
-            {products.length} product{products.length !== 1 ? "s" : ""} in your catalog
+            {products.length} of {allProducts.length} product{allProducts.length !== 1 ? "s" : ""}
+            {products.length !== allProducts.length && " (filtered)"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -98,11 +196,11 @@ export default async function ProductsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-16"></TableHead>
-                <TableHead>Product</TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Channels</TableHead>
-                <TableHead>Created</TableHead>
+                <SortableHeader field="name">Product</SortableHeader>
+                <SortableHeader field="sku">SKU</SortableHeader>
+                <SortableHeader field="status">Status</SortableHeader>
+                <SortableHeader field="channels">Channels</SortableHeader>
+                <SortableHeader field="createdAt">Created</SortableHeader>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -157,7 +255,9 @@ export default async function ProductsPage() {
               ) : (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                    No products yet. Create your first product to get started.
+                    {params.search || params.status || params.channel || params.brand
+                      ? "No products found. Try adjusting your filters."
+                      : "No products yet. Create your first product to get started."}
                   </TableCell>
                 </TableRow>
               )}
