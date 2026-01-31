@@ -3,13 +3,13 @@
 from fastapi import APIRouter
 
 from src.api.v1 import velocity, sync
+from src.auth.routes import router as auth_router
 
 api_router = APIRouter()
 
-# Include sub-routers
+# Auth routes
+api_router.include_router(auth_router, prefix="/auth", tags=["Auth"])
+
+# Feature routes
 api_router.include_router(velocity.router, prefix="/velocity", tags=["Velocity"])
 api_router.include_router(sync.router, prefix="/sync", tags=["Sync"])
-
-# TODO: Add after auth setup
-# api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
-# api_router.include_router(tenants.router, prefix="/tenants", tags=["Tenants"])

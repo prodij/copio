@@ -12,6 +12,7 @@ import { channelListingsRouter } from './routes/channel-listings.js';
 import { vendorContactsRouter } from './routes/vendor-contacts.js';
 import { vendorAddressesRouter } from './routes/vendor-addresses.js';
 import { vendorDocumentsRouter } from './routes/vendor-documents.js';
+import { requireAuth } from './middleware/auth.js';
 
 const app = express();
 
@@ -28,6 +29,14 @@ app.get('/health', (_req: Request, res: Response) => {
     status: 'healthy',
     service: 'inventory-service',
     timestamp: new Date().toISOString(),
+  });
+});
+
+// Auth check endpoint (requires valid JWT)
+app.get('/me', requireAuth, (req: Request, res: Response) => {
+  res.json({
+    userId: req.user?.id,
+    tenantId: req.user?.tenantId,
   });
 });
 
