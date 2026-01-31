@@ -1,24 +1,34 @@
 """Tests for authentication endpoints."""
 
 import pytest
+import uuid
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models.tenant import Tenant
-from src.db.models.user import User
+
+def unique_slug() -> str:
+    """Generate a unique slug for testing."""
+    return f"test-{uuid.uuid4().hex[:8]}"
+
+
+def unique_email(prefix: str = "test") -> str:
+    """Generate a unique email for testing."""
+    return f"{prefix}-{uuid.uuid4().hex[:8]}@test.com"
 
 
 class TestTenantRegistration:
     """Tests for tenant registration endpoint."""
 
-    async def test_register_tenant_success(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_register_tenant_success(self, client: AsyncClient):
         """Test successful tenant registration."""
+        slug = unique_slug()
+        email = unique_email("admin")
+        
         response = await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Test Company",
-                "tenant_slug": "test-company",
-                "email": "admin@test.com",
+                "tenant_slug": slug,
+                "email": email,
                 "password": "securepassword123",
                 "first_name": "John",
                 "last_name": "Doe",
@@ -27,20 +37,22 @@ class TestTenantRegistration:
         
         assert response.status_code == 200
         data = response.json()
-        assert data["tenant_slug"] == "test-company"
-        assert data["email"] == "admin@test.com"
+        assert data["tenant_slug"] == slug
+        assert data["email"] == email
         assert "tenant_id" in data
         assert "user_id" in data
 
-    async def test_register_tenant_duplicate_slug(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_register_tenant_duplicate_slug(self, client: AsyncClient):
         """Test duplicate tenant slug is rejected."""
+        slug = unique_slug()
+        
         # First registration
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "First Company",
-                "tenant_slug": "duplicate-slug",
-                "email": "first@test.com",
+                "tenant_slug": slug,
+                "email": unique_email("first"),
                 "password": "password123",
             },
         )
@@ -50,8 +62,8 @@ class TestTenantRegistration:
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Second Company",
-                "tenant_slug": "duplicate-slug",
-                "email": "second@test.com",
+                "tenant_slug": slug,
+                "email": unique_email("second"),
                 "password": "password123",
             },
         )
@@ -59,15 +71,17 @@ class TestTenantRegistration:
         assert response.status_code == 409
         assert "slug" in response.json()["detail"].lower()
 
-    async def test_register_tenant_duplicate_email(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_register_tenant_duplicate_email(self, client: AsyncClient):
         """Test duplicate email is rejected."""
+        email = unique_email("dup")
+        
         # First registration
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "First Company",
-                "tenant_slug": "first-company",
-                "email": "same@test.com",
+                "tenant_slug": unique_slug(),
+                "email": email,
                 "password": "password123",
             },
         )
@@ -77,8 +91,8 @@ class TestTenantRegistration:
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Second Company",
-                "tenant_slug": "second-company",
-                "email": "same@test.com",
+                "tenant_slug": unique_slug(),
+                "email": email,
                 "password": "password123",
             },
         )
@@ -90,15 +104,17 @@ class TestTenantRegistration:
 class TestLogin:
     """Tests for login endpoint."""
 
-    async def test_login_success(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_login_success(self, client: AsyncClient):
         """Test successful login."""
+        email = unique_email("login")
+        
         # Register first
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Login Test",
-                "tenant_slug": "login-test",
-                "email": "login@test.com",
+                "tenant_slug": unique_slug(),
+                "email": email,
                 "password": "loginpassword123",
             },
         )
@@ -107,7 +123,7 @@ class TestLogin:
         response = await client.post(
             "/api/v1/auth/login",
             data={  # form data, not json
-                "username": "login@test.com",
+                "username": email,
                 "password": "loginpassword123",
             },
         )
@@ -117,7 +133,7 @@ class TestLogin:
         assert "access_token" in data
         assert data["token_type"] == "bearer"
 
-    async def test_login_invalid_credentials(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_login_invalid_credentials(self, client: AsyncClient):
         """Test login with invalid credentials."""
         response = await client.post(
             "/api/v1/auth/login",
@@ -133,15 +149,17 @@ class TestLogin:
 class TestCurrentUser:
     """Tests for /me endpoint."""
 
-    async def test_get_current_user(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_get_current_user(self, client: AsyncClient):
         """Test getting current user info."""
+        email = unique_email("me")
+        
         # Register and login
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Me Test",
-                "tenant_slug": "me-test",
-                "email": "me@test.com",
+                "tenant_slug": unique_slug(),
+                "email": email,
                 "password": "mepassword123",
                 "first_name": "Me",
                 "last_name": "User",
@@ -150,7 +168,7 @@ class TestCurrentUser:
         
         login_response = await client.post(
             "/api/v1/auth/login",
-            data={"username": "me@test.com", "password": "mepassword123"},
+            data={"username": email, "password": "mepassword123"},
         )
         token = login_response.json()["access_token"]
         
@@ -162,7 +180,7 @@ class TestCurrentUser:
         
         assert response.status_code == 200
         data = response.json()
-        assert data["email"] == "me@test.com"
+        assert data["email"] == email
         assert data["first_name"] == "Me"
         assert data["role"] == "admin"
 
@@ -175,15 +193,17 @@ class TestCurrentUser:
 class TestProfileUpdate:
     """Tests for profile update endpoint."""
 
-    async def test_update_profile(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_update_profile(self, client: AsyncClient):
         """Test updating user profile."""
+        email = unique_email("profile")
+        
         # Setup: register and login
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Profile Test",
-                "tenant_slug": "profile-test",
-                "email": "profile@test.com",
+                "tenant_slug": unique_slug(),
+                "email": email,
                 "password": "profilepass123",
                 "first_name": "Old",
                 "last_name": "Name",
@@ -192,7 +212,7 @@ class TestProfileUpdate:
         
         login_response = await client.post(
             "/api/v1/auth/login",
-            data={"username": "profile@test.com", "password": "profilepass123"},
+            data={"username": email, "password": "profilepass123"},
         )
         token = login_response.json()["access_token"]
         
@@ -212,22 +232,24 @@ class TestProfileUpdate:
 class TestChangePassword:
     """Tests for password change endpoint."""
 
-    async def test_change_password_success(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_change_password_success(self, client: AsyncClient):
         """Test successful password change."""
+        email = unique_email("chpwd")
+        
         # Setup
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Password Test",
-                "tenant_slug": "password-test",
-                "email": "password@test.com",
+                "tenant_slug": unique_slug(),
+                "email": email,
                 "password": "oldpassword123",
             },
         )
         
         login_response = await client.post(
             "/api/v1/auth/login",
-            data={"username": "password@test.com", "password": "oldpassword123"},
+            data={"username": email, "password": "oldpassword123"},
         )
         token = login_response.json()["access_token"]
         
@@ -246,26 +268,28 @@ class TestChangePassword:
         # Verify can login with new password
         new_login = await client.post(
             "/api/v1/auth/login",
-            data={"username": "password@test.com", "password": "newpassword456"},
+            data={"username": email, "password": "newpassword456"},
         )
         assert new_login.status_code == 200
 
-    async def test_change_password_wrong_current(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_change_password_wrong_current(self, client: AsyncClient):
         """Test password change with wrong current password."""
+        email = unique_email("wrongpwd")
+        
         # Setup
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Wrong Pass Test",
-                "tenant_slug": "wrong-pass-test",
-                "email": "wrongpass@test.com",
+                "tenant_slug": unique_slug(),
+                "email": email,
                 "password": "correctpassword",
             },
         )
         
         login_response = await client.post(
             "/api/v1/auth/login",
-            data={"username": "wrongpass@test.com", "password": "correctpassword"},
+            data={"username": email, "password": "correctpassword"},
         )
         token = login_response.json()["access_token"]
         
@@ -285,22 +309,25 @@ class TestChangePassword:
 class TestUserInvite:
     """Tests for user invitation endpoints."""
 
-    async def test_invite_and_accept(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_invite_and_accept(self, client: AsyncClient):
         """Test full invite flow."""
+        admin_email = unique_email("admin")
+        invited_email = unique_email("invited")
+        
         # Setup: register admin
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Invite Test",
-                "tenant_slug": "invite-test",
-                "email": "admin@invite.com",
+                "tenant_slug": unique_slug(),
+                "email": admin_email,
                 "password": "adminpassword",
             },
         )
         
         login_response = await client.post(
             "/api/v1/auth/login",
-            data={"username": "admin@invite.com", "password": "adminpassword"},
+            data={"username": admin_email, "password": "adminpassword"},
         )
         token = login_response.json()["access_token"]
         
@@ -309,7 +336,7 @@ class TestUserInvite:
             "/api/v1/auth/invite",
             headers={"Authorization": f"Bearer {token}"},
             json={
-                "email": "invited@test.com",
+                "email": invited_email,
                 "role": "member",
                 "first_name": "Invited",
                 "last_name": "User",
@@ -334,26 +361,29 @@ class TestUserInvite:
         # Verify invited user can login
         invited_login = await client.post(
             "/api/v1/auth/login",
-            data={"username": "invited@test.com", "password": "invitedpassword123"},
+            data={"username": invited_email, "password": "invitedpassword123"},
         )
         assert invited_login.status_code == 200
 
-    async def test_invite_requires_admin(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_invite_requires_admin(self, client: AsyncClient):
         """Test that non-admins cannot invite users."""
+        admin_email = unique_email("admin")
+        member_email = unique_email("member")
+        
         # Setup: create admin and member
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Role Test",
-                "tenant_slug": "role-test",
-                "email": "admin@role.com",
+                "tenant_slug": unique_slug(),
+                "email": admin_email,
                 "password": "adminpassword",
             },
         )
         
         admin_login = await client.post(
             "/api/v1/auth/login",
-            data={"username": "admin@role.com", "password": "adminpassword"},
+            data={"username": admin_email, "password": "adminpassword"},
         )
         admin_token = admin_login.json()["access_token"]
         
@@ -362,7 +392,7 @@ class TestUserInvite:
             "/api/v1/auth/users",
             headers={"Authorization": f"Bearer {admin_token}"},
             json={
-                "email": "member@role.com",
+                "email": member_email,
                 "password": "memberpassword",
                 "role": "member",
             },
@@ -371,7 +401,7 @@ class TestUserInvite:
         # Login as member
         member_login = await client.post(
             "/api/v1/auth/login",
-            data={"username": "member@role.com", "password": "memberpassword"},
+            data={"username": member_email, "password": "memberpassword"},
         )
         member_token = member_login.json()["access_token"]
         
@@ -379,7 +409,7 @@ class TestUserInvite:
         response = await client.post(
             "/api/v1/auth/invite",
             headers={"Authorization": f"Bearer {member_token}"},
-            json={"email": "another@test.com"},
+            json={"email": unique_email("another")},
         )
         
         assert response.status_code == 403
@@ -388,22 +418,25 @@ class TestUserInvite:
 class TestCreateUser:
     """Tests for direct user creation endpoint."""
 
-    async def test_create_user_as_admin(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_create_user_as_admin(self, client: AsyncClient):
         """Test admin can create users directly."""
+        admin_email = unique_email("admin")
+        created_email = unique_email("created")
+        
         # Setup
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Create Test",
-                "tenant_slug": "create-test",
-                "email": "admin@create.com",
+                "tenant_slug": unique_slug(),
+                "email": admin_email,
                 "password": "adminpassword",
             },
         )
         
         login_response = await client.post(
             "/api/v1/auth/login",
-            data={"username": "admin@create.com", "password": "adminpassword"},
+            data={"username": admin_email, "password": "adminpassword"},
         )
         token = login_response.json()["access_token"]
         
@@ -412,7 +445,7 @@ class TestCreateUser:
             "/api/v1/auth/users",
             headers={"Authorization": f"Bearer {token}"},
             json={
-                "email": "created@test.com",
+                "email": created_email,
                 "password": "createdpassword123",
                 "role": "member",
                 "first_name": "Created",
@@ -421,13 +454,13 @@ class TestCreateUser:
         
         assert response.status_code == 200
         data = response.json()
-        assert data["email"] == "created@test.com"
+        assert data["email"] == created_email
         assert data["role"] == "member"
         
         # Verify user can login
         user_login = await client.post(
             "/api/v1/auth/login",
-            data={"username": "created@test.com", "password": "createdpassword123"},
+            data={"username": created_email, "password": "createdpassword123"},
         )
         assert user_login.status_code == 200
 
@@ -435,22 +468,24 @@ class TestCreateUser:
 class TestDeactivateAccount:
     """Tests for account deactivation."""
 
-    async def test_deactivate_account(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_deactivate_account(self, client: AsyncClient):
         """Test user can deactivate their own account."""
+        email = unique_email("deactivate")
+        
         # Setup
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Deactivate Test",
-                "tenant_slug": "deactivate-test",
-                "email": "deactivate@test.com",
+                "tenant_slug": unique_slug(),
+                "email": email,
                 "password": "deactivatepass",
             },
         )
         
         login_response = await client.post(
             "/api/v1/auth/login",
-            data={"username": "deactivate@test.com", "password": "deactivatepass"},
+            data={"username": email, "password": "deactivatepass"},
         )
         token = login_response.json()["access_token"]
         
@@ -465,7 +500,7 @@ class TestDeactivateAccount:
         # Verify cannot login anymore
         failed_login = await client.post(
             "/api/v1/auth/login",
-            data={"username": "deactivate@test.com", "password": "deactivatepass"},
+            data={"username": email, "password": "deactivatepass"},
         )
         assert failed_login.status_code == 400
 
@@ -473,15 +508,17 @@ class TestDeactivateAccount:
 class TestForgotPassword:
     """Tests for forgot password flow."""
 
-    async def test_forgot_password_request(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_forgot_password_request(self, client: AsyncClient):
         """Test forgot password request."""
+        email = unique_email("forgot")
+        
         # Setup
         await client.post(
             "/api/v1/auth/register-tenant",
             json={
                 "tenant_name": "Forgot Test",
-                "tenant_slug": "forgot-test",
-                "email": "forgot@test.com",
+                "tenant_slug": unique_slug(),
+                "email": email,
                 "password": "forgotpassword",
             },
         )
@@ -489,18 +526,18 @@ class TestForgotPassword:
         # Request reset
         response = await client.post(
             "/api/v1/auth/forgot-password",
-            json={"email": "forgot@test.com"},
+            json={"email": email},
         )
         
         assert response.status_code == 200
         # Should always return success (doesn't reveal if email exists)
         assert "message" in response.json()
 
-    async def test_forgot_password_nonexistent_email(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_forgot_password_nonexistent_email(self, client: AsyncClient):
         """Test forgot password with non-existent email returns success."""
         response = await client.post(
             "/api/v1/auth/forgot-password",
-            json={"email": "nonexistent@test.com"},
+            json={"email": unique_email("nonexistent")},
         )
         
         # Should return 200 to not reveal email existence

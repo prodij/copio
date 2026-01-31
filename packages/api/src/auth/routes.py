@@ -12,13 +12,37 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.backend import auth_backend, fastapi_users
 from src.auth.manager import get_user_manager, UserManager
-from src.api.deps import require_role
 from src.db.models.tenant import Tenant
 from src.db.models.user import User
 from src.db.session import get_session
 
 router = APIRouter()
 password_helper = PasswordHelper()
+
+# Current user dependency (avoiding circular import)
+current_active_user = fastapi_users.current_user(active=True)
+
+
+def require_role(allowed_roles: list[str]):
+    """
+    Dependency factory for role-based access control.
+    
+    Usage:
+        @router.get("/admin-only")
+        async def admin_endpoint(user: User = Depends(require_role(["admin"]))):
+            ...
+    """
+    async def role_checker(
+        current_user: User = Depends(current_active_user),
+    ) -> User:
+        if current_user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return current_user
+    
+    return role_checker
 
 
 # Schemas for tenant registration
