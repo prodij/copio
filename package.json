@@ -18,6 +18,8 @@
     "db:migrate": "turbo run db:migrate",
     "db:push": "turbo run db:push",
     "db:studio": "turbo run db:studio",
+    "db:seed": "pnpm --filter @copio/core db:seed",
+    "seed": "pnpm db:seed",
     "clean": "turbo run clean && rm -rf node_modules .turbo"
   },
   "devDependencies": {
