@@ -25,6 +25,24 @@ if config.config_file_name is not None:
 # Target metadata for autogenerate
 target_metadata = Base.metadata
 
+# Tables managed by Prisma - DO NOT touch these
+PRISMA_TABLES = {
+    "Product", "ProductImage", "ProductAttribute", "Category", "ProductCategory",
+    "ChannelListing", "Location", "StockItem", "StockMovement",
+    "Order", "OrderLine", "Vendor", "VendorContact", "VendorAddress",
+    "VendorDocument", "VendorProduct", "PurchaseOrder", "POLine",
+    "_prisma_migrations",
+}
+
+
+def include_object(object, name, type_, reflected, compare_to):
+    """Filter out Prisma-managed tables from autogenerate."""
+    if type_ == "table" and name in PRISMA_TABLES:
+        return False
+    if type_ == "index" and object.table.name in PRISMA_TABLES:
+        return False
+    return True
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
@@ -34,6 +52,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -42,7 +61,11 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     """Run migrations with connection."""
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_object=include_object,
+    )
 
     with context.begin_transaction():
         context.run_migrations()
