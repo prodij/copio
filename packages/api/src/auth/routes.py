@@ -1,19 +1,24 @@
-"""Auth routes including tenant registration."""
+"""Auth routes including tenant registration and user management."""
 
+from datetime import datetime, timedelta, timezone
+import secrets
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
+from fastapi_users.password import PasswordHelper
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.backend import auth_backend, fastapi_users
 from src.auth.manager import get_user_manager, UserManager
+from src.api.deps import require_role
 from src.db.models.tenant import Tenant
 from src.db.models.user import User
 from src.db.session import get_session
 
 router = APIRouter()
+password_helper = PasswordHelper()
 
 
 # Schemas for tenant registration
@@ -132,4 +137,394 @@ async def get_current_user_info(
         "last_name": user.last_name,
         "role": user.role,
         "tenant_id": str(user.tenant_id),
+        "is_active": user.is_active,
+        "is_verified": user.is_verified,
     }
+
+
+# =============================================================================
+# Profile Management Endpoints
+# =============================================================================
+
+
+class UpdateProfileRequest(BaseModel):
+    """Schema for updating user profile."""
+    first_name: str | None = None
+    last_name: str | None = None
+
+
+class UpdateProfileResponse(BaseModel):
+    """Response after profile update."""
+    id: str
+    email: str
+    first_name: str | None
+    last_name: str | None
+    role: str
+    tenant_id: str
+
+
+@router.patch("/me", response_model=UpdateProfileResponse)
+async def update_profile(
+    data: UpdateProfileRequest,
+    user: User = Depends(fastapi_users.current_user(active=True)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Update the current user's profile (first_name, last_name)."""
+    update_data = {}
+    if data.first_name is not None:
+        update_data["first_name"] = data.first_name
+    if data.last_name is not None:
+        update_data["last_name"] = data.last_name
+    
+    if not update_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields to update",
+        )
+    
+    await session.execute(
+        update(User).where(User.id == user.id).values(**update_data)
+    )
+    await session.commit()
+    
+    # Refresh user to get updated values
+    await session.refresh(user)
+    
+    return UpdateProfileResponse(
+        id=str(user.id),
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        role=user.role,
+        tenant_id=str(user.tenant_id),
+    )
+
+
+class ChangePasswordRequest(BaseModel):
+    """Schema for changing password."""
+    current_password: str
+    new_password: str = Field(..., min_length=8)
+
+
+@router.post("/change-password")
+async def change_password(
+    data: ChangePasswordRequest,
+    user: User = Depends(fastapi_users.current_user(active=True)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Change the current user's password."""
+    # Verify current password
+    valid, _ = password_helper.verify_and_update(data.current_password, user.hashed_password)
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid current password",
+        )
+    
+    # Hash and set new password
+    new_hashed = password_helper.hash(data.new_password)
+    await session.execute(
+        update(User).where(User.id == user.id).values(hashed_password=new_hashed)
+    )
+    await session.commit()
+    
+    return {"message": "Password changed successfully"}
+
+
+@router.delete("/me")
+async def deactivate_account(
+    user: User = Depends(fastapi_users.current_user(active=True)),
+    session: AsyncSession = Depends(get_session),
+):
+    """Deactivate the current user's account."""
+    await session.execute(
+        update(User).where(User.id == user.id).values(is_active=False)
+    )
+    await session.commit()
+    
+    return {"message": "Account deactivated"}
+
+
+# =============================================================================
+# User Invitation Endpoints (Admin Only)
+# =============================================================================
+
+
+class InviteUserRequest(BaseModel):
+    """Schema for inviting a user to the tenant."""
+    email: EmailStr
+    role: str = "member"  # 'admin' | 'member'
+    first_name: str | None = None
+    last_name: str | None = None
+
+
+class InviteUserResponse(BaseModel):
+    """Response after user invitation."""
+    user_id: str
+    email: str
+    invite_token: str
+    expires_at: str
+
+
+class AcceptInviteRequest(BaseModel):
+    """Schema for accepting an invitation."""
+    token: str
+    password: str = Field(..., min_length=8)
+
+
+class AcceptInviteResponse(BaseModel):
+    """Response after accepting invitation."""
+    user_id: str
+    email: str
+    message: str
+
+
+class CreateUserRequest(BaseModel):
+    """Schema for directly creating a user (admin only)."""
+    email: EmailStr
+    password: str = Field(..., min_length=8)
+    role: str = "member"
+    first_name: str | None = None
+    last_name: str | None = None
+
+
+class CreateUserResponse(BaseModel):
+    """Response after user creation."""
+    id: str
+    email: str
+    role: str
+    first_name: str | None
+    last_name: str | None
+    tenant_id: str
+
+
+@router.post("/invite", response_model=InviteUserResponse)
+async def invite_user(
+    data: InviteUserRequest,
+    admin: User = Depends(require_role(["admin"])),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Invite a user to join the tenant (admin only).
+    
+    Creates an inactive user with an invite token. The user must accept
+    the invitation by setting their password.
+    """
+    if data.role not in ("admin", "member"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Role must be 'admin' or 'member'",
+        )
+    
+    # Check if email already exists
+    existing = await session.execute(
+        select(User).where(User.email == data.email)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        )
+    
+    # Generate invite token and expiry
+    invite_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    
+    # Create inactive user with invite token stored in hashed_password field temporarily
+    # We store token hash + expiry in a special format: TOKEN:<hash>:<expiry_timestamp>
+    token_data = f"INVITE:{password_helper.hash(invite_token)}:{int(expires_at.timestamp())}"
+    
+    user = User(
+        email=data.email,
+        hashed_password=token_data,
+        tenant_id=admin.tenant_id,
+        first_name=data.first_name,
+        last_name=data.last_name,
+        role=data.role,
+        is_active=False,
+        is_verified=False,
+    )
+    session.add(user)
+    await session.commit()
+    
+    print(f"Invite sent to {data.email}. Token: {invite_token}")
+    
+    return InviteUserResponse(
+        user_id=str(user.id),
+        email=user.email,
+        invite_token=invite_token,  # In production, send this via email
+        expires_at=expires_at.isoformat(),
+    )
+
+
+@router.post("/accept-invite", response_model=AcceptInviteResponse)
+async def accept_invite(
+    data: AcceptInviteRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Accept an invitation and set password.
+    
+    This activates the user account and allows them to log in.
+    """
+    # Find all inactive users with invite tokens
+    result = await session.execute(
+        select(User).where(
+            User.is_active == False,
+            User.hashed_password.startswith("INVITE:"),
+        )
+    )
+    users = result.scalars().all()
+    
+    # Find the user with matching token
+    matched_user = None
+    for user in users:
+        parts = user.hashed_password.split(":", 2)
+        if len(parts) != 3:
+            continue
+        
+        _, token_hash, expiry_ts = parts
+        
+        # Check expiry
+        try:
+            expiry = datetime.fromtimestamp(int(expiry_ts), tz=timezone.utc)
+            if datetime.now(timezone.utc) > expiry:
+                continue
+        except (ValueError, OSError):
+            continue
+        
+        # Verify token
+        valid, _ = password_helper.verify_and_update(data.token, token_hash)
+        if valid:
+            matched_user = user
+            break
+    
+    if not matched_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired invite token",
+        )
+    
+    # Activate user and set password
+    hashed_password = password_helper.hash(data.password)
+    await session.execute(
+        update(User).where(User.id == matched_user.id).values(
+            hashed_password=hashed_password,
+            is_active=True,
+            is_verified=True,
+        )
+    )
+    await session.commit()
+    
+    return AcceptInviteResponse(
+        user_id=str(matched_user.id),
+        email=matched_user.email,
+        message="Invitation accepted. You can now log in.",
+    )
+
+
+@router.post("/users", response_model=CreateUserResponse)
+async def create_user(
+    data: CreateUserRequest,
+    admin: User = Depends(require_role(["admin"])),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Directly create a user in the tenant (admin only).
+    
+    Use this instead of invite if you want to set the password immediately.
+    """
+    if data.role not in ("admin", "member"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Role must be 'admin' or 'member'",
+        )
+    
+    # Check if email already exists
+    existing = await session.execute(
+        select(User).where(User.email == data.email)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        )
+    
+    # Create user
+    hashed_password = password_helper.hash(data.password)
+    user = User(
+        email=data.email,
+        hashed_password=hashed_password,
+        tenant_id=admin.tenant_id,
+        first_name=data.first_name,
+        last_name=data.last_name,
+        role=data.role,
+        is_active=True,
+        is_verified=True,
+    )
+    session.add(user)
+    await session.commit()
+    
+    return CreateUserResponse(
+        id=str(user.id),
+        email=user.email,
+        role=user.role,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        tenant_id=str(user.tenant_id),
+    )
+
+
+# =============================================================================
+# Forgot Password Flow
+# =============================================================================
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Schema for forgot password request."""
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """Schema for reset password request."""
+    token: str
+    password: str = Field(..., min_length=8)
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    data: ForgotPasswordRequest,
+    user_manager: UserManager = Depends(get_user_manager),
+):
+    """
+    Request a password reset.
+    
+    For now, the reset token is logged to console. In production,
+    this should send an email.
+    """
+    try:
+        user = await user_manager.get_by_email(data.email)
+        token = await user_manager.forgot_password(user)
+        # Token is logged in user_manager.on_after_forgot_password
+        return {"message": "If the email exists, a reset link has been sent"}
+    except Exception:
+        # Don't reveal if email exists
+        return {"message": "If the email exists, a reset link has been sent"}
+
+
+@router.post("/reset-password")
+async def reset_password(
+    data: ResetPasswordRequest,
+    user_manager: UserManager = Depends(get_user_manager),
+):
+    """
+    Reset password using the token from forgot-password.
+    """
+    try:
+        await user_manager.reset_password(data.token, data.password)
+        return {"message": "Password reset successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
