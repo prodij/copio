@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction, Router } from 'express';
 import cors from 'cors';
 import { categoriesRouter } from './routes/categories.js';
 import { locationsRouter } from './routes/locations.js';
@@ -15,10 +15,11 @@ import { vendorDocumentsRouter } from './routes/vendor-documents.js';
 import { requireAuth } from './middleware/auth.js';
 
 const app = express();
+const apiRouter = Router();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  origin: ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001'],
   credentials: true,
 }));
 app.use(express.json());
@@ -33,7 +34,7 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // Auth check endpoint (requires valid JWT)
-app.get('/me', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/me', requireAuth, (req: Request, res: Response) => {
   res.json({
     userId: req.user?.id,
     tenantId: req.user?.tenantId,
@@ -41,18 +42,21 @@ app.get('/me', requireAuth, (req: Request, res: Response) => {
 });
 
 // All protected routes require authentication
-app.use('/categories', requireAuth, categoriesRouter);
-app.use('/locations', requireAuth, locationsRouter);
-app.use('/products', requireAuth, productsRouter);
-app.use('/stock-items', requireAuth, stockItemsRouter);
-app.use('/stock-movements', requireAuth, stockMovementsRouter);
-app.use('/vendors', requireAuth, vendorsRouter);
-app.use('/vendor-products', requireAuth, vendorProductsRouter);
-app.use('/purchase-orders', requireAuth, purchaseOrdersRouter);
-app.use('/channel-listings', requireAuth, channelListingsRouter);
-app.use('/vendor-contacts', requireAuth, vendorContactsRouter);
-app.use('/vendor-addresses', requireAuth, vendorAddressesRouter);
-app.use('/vendor-documents', requireAuth, vendorDocumentsRouter);
+apiRouter.use('/categories', requireAuth, categoriesRouter);
+apiRouter.use('/locations', requireAuth, locationsRouter);
+apiRouter.use('/products', requireAuth, productsRouter);
+apiRouter.use('/stock-items', requireAuth, stockItemsRouter);
+apiRouter.use('/stock-movements', requireAuth, stockMovementsRouter);
+apiRouter.use('/vendors', requireAuth, vendorsRouter);
+apiRouter.use('/vendor-products', requireAuth, vendorProductsRouter);
+apiRouter.use('/purchase-orders', requireAuth, purchaseOrdersRouter);
+apiRouter.use('/channel-listings', requireAuth, channelListingsRouter);
+apiRouter.use('/vendor-contacts', requireAuth, vendorContactsRouter);
+apiRouter.use('/vendor-addresses', requireAuth, vendorAddressesRouter);
+apiRouter.use('/vendor-documents', requireAuth, vendorDocumentsRouter);
+
+// Mount API router at /api/v1
+app.use('/api/v1', apiRouter);
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

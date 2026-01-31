@@ -38,6 +38,31 @@ export async function requireAuth(
   res: Response,
   next: NextFunction
 ): Promise<void> {
+  // Development bypass - use a default user when no auth provided
+  // TODO: Remove this in production
+  if (process.env.NODE_ENV === 'development' || process.env.DEV_BYPASS_AUTH === 'true') {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      // Use default dev user
+      const { prisma } = await import('@copio/core');
+      const devUser = await prisma.users.findFirst({
+        where: { is_active: true },
+        select: { id: true, tenant_id: true, role: true },
+      });
+      
+      if (devUser) {
+        req.user = {
+          id: devUser.id,
+          tenantId: devUser.tenant_id,
+          role: devUser.role as UserRole,
+        };
+        req.tenantId = devUser.tenant_id;
+        next();
+        return;
+      }
+    }
+  }
+
   const authHeader = req.headers.authorization;
   
   if (!authHeader?.startsWith('Bearer ')) {
