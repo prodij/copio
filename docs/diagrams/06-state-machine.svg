@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1513.63 1403" width="1513.63" height="1403" style="--bg:#1a1b26;--fg:#a9b1d6;--line:#3d59a1;--accent:#7aa2f7;--muted:#565f89;background:var(--bg)">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap');
+  text { font-family: 'Inter', system-ui, sans-serif; }
+  svg {
+    /* Derived from --bg and --fg (overridable via --line, --accent, etc.) */
+    --_text:          var(--fg);
+    --_text-sec:      var(--muted, color-mix(in srgb, var(--fg) 60%, var(--bg)));
+    --_text-muted:    var(--muted, color-mix(in srgb, var(--fg) 40%, var(--bg)));
+    --_text-faint:    color-mix(in srgb, var(--fg) 25%, var(--bg));
+    --_line:          var(--line, color-mix(in srgb, var(--fg) 30%, var(--bg)));
+    --_arrow:         var(--accent, color-mix(in srgb, var(--fg) 50%, var(--bg)));
+    --_node-fill:     var(--surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+    --_node-stroke:   var(--border, color-mix(in srgb, var(--fg) 20%, var(--bg)));
+    --_group-fill:    var(--bg);
+    --_group-hdr:     color-mix(in srgb, var(--fg) 5%, var(--bg));
+    --_inner-stroke:  color-mix(in srgb, var(--fg) 12%, var(--bg));
+    --_key-badge:     color-mix(in srgb, var(--fg) 10%, var(--bg));
+  }
+</style>
+<defs>
+  <marker id="arrowhead" markerWidth="8" markerHeight="4.8" refX="8" refY="2.4" orient="auto">
+    <polygon points="0 0, 8 2.4, 0 4.8" fill="var(--_arrow)" />
+  </marker>
+  <marker id="arrowhead-start" markerWidth="8" markerHeight="4.8" refX="0" refY="2.4" orient="auto-start-reverse">
+    <polygon points="8 0, 0 2.4, 8 4.8" fill="var(--_arrow)" />
+  </marker>
+</defs>
+<rect x="122" y="40" width="454.6750000000002" height="631" rx="0" ry="0" fill="var(--_group-fill)" stroke="var(--_node-stroke)" stroke-width="1" />
+<rect x="122" y="40" width="454.6750000000002" height="28" rx="0" ry="0" fill="var(--_group-hdr)" stroke="var(--_node-stroke)" stroke-width="1" />
+<text x="134" y="54" dy="0.35em" font-size="12" font-weight="600" fill="var(--_text-sec)">Self-Managed</text>
+<rect x="596.6750000000001" y="40" width="876.9550000000002" height="1323" rx="0" ry="0" fill="var(--_group-fill)" stroke="var(--_node-stroke)" stroke-width="1" />
+<rect x="596.6750000000001" y="40" width="876.9550000000002" height="28" rx="0" ry="0" fill="var(--_group-hdr)" stroke="var(--_node-stroke)" stroke-width="1" />
+<text x="608.6750000000001" y="54" dy="0.35em" font-size="12" font-weight="600" fill="var(--_text-sec)">3PL/FBA</text>
+<polyline points="87.98012682379063,287.84560002389117 87.98012682379063,325 878.0000000000002,325 878.0000000000002,460 991.9925000000003,460" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="1025.8675000000003,478 1025.8675000000003,498 897.0725000000002,498 897.0725000000002,633 554.6750000000002,633" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="474.32500000000016,651 474.32500000000016,691 807.4575,691 807.4575,961" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="807.4575,961 807.4575,941 616.6750000000002,941 616.6750000000002,671 251.6250000000001,671 251.6250000000001,114 268.2875000000001,114" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="220.1125000000001,132 220.1125000000001,152 188.60000000000005,152 188.60000000000005,269" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="188.60000000000005,305 188.60000000000005,460 698.2175000000002,460" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="782.1425000000002,478 782.1425000000002,633 369.9750000000001,633" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="1025.8675000000003,478 1025.8675000000003,498 1065.8250000000003,498 1065.8250000000003,1152 979.7175000000002,1152" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="895.7925000000002,1170 895.7925000000002,1325 1004.2625,1325" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="1095.3375,1307 1095.3375,1287 1370.2125,1287 1370.2125,114 1379.3825000000002,114" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="1309.7575000000002,132 1309.7575000000002,152 951.7600000000002,152 951.7600000000002,269" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="951.7600000000002,305 951.7600000000002,460 866.0675000000001,460" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="1309.7575000000002,132 1309.7575000000002,152 1125.7825000000003,152 1125.7825000000003,806 1008.3650000000001,806" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="1309.7575000000002,132 1309.7575000000002,152 1217.4075000000003,152 1217.4075000000003,269" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="1217.4075000000003,269 1217.4075000000003,249 1417.0925000000002,249 1417.0925000000002,114 1379.3825000000002,114" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="931.5900000000001,824 931.5900000000001,979 866.3575,979" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="321.80000000000007,651 321.80000000000007,671 286.7125000000001,671 286.7125000000001,788" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="321.80000000000007,651 321.80000000000007,691 689.2950000000001,691 689.2950000000001,979 748.5575,979" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="321.80000000000007,651 321.80000000000007,671 398.0625000000001,671 398.0625000000001,691 747.6150000000002,691 747.6150000000002,806 854.8150000000002,806" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="807.4575,997 807.4575,1152 811.8675000000003,1152" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="1309.7575000000002,132 1309.7575000000002,979 866.3575,979" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<rect x="844.2600000000002" y="360" width="67.48" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="878.0000000000002" y="373.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Create PO</text>
+<rect x="854.7525000000002" y="533" width="84.64" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="897.0725000000002" y="546.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Vendor ships</text>
+<rect x="775.0550000000002" y="792.5" width="61.760000000000005" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="805.9350000000002" y="806" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Received</text>
+<rect x="209.30500000000012" y="533" width="84.64" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="251.6250000000001" y="546.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Order placed</text>
+<rect x="143.42000000000004" y="187" width="90.36" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="188.60000000000005" y="200.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Start picking</text>
+<rect x="169.16000000000005" y="360" width="38.88" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="188.60000000000005" y="373.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Ship</text>
+<rect x="748.4025000000001" y="533" width="67.48" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="782.1425000000002" y="546.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Delivered</text>
+<rect x="1026.3650000000002" y="792.5" width="78.92" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="1065.8250000000003" y="806" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Ship to FBA</text>
+<rect x="850.6125000000003" y="1225" width="90.36" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="895.7925000000002" y="1238.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Arrived at FC</text>
+<rect x="1336.4725" y="706" width="67.48" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="1370.2125" y="719.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Processed</text>
+<rect x="903.7200000000003" y="187" width="96.08" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="951.7600000000002" y="200.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Order/Transfer</text>
+<rect x="923.7400000000002" y="360" width="56.04" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="951.7600000000002" y="373.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Shipped</text>
+<rect x="1077.7425000000003" y="446.5" width="96.08" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="1125.7825000000003" y="460" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Damaged/Return</text>
+<rect x="1177.9475000000002" y="187" width="78.92" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="1217.4075000000003" y="200.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Discrepancy</text>
+<rect x="1386.2125" y="187" width="61.760000000000005" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="1417.0925000000002" y="200.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Resolved</text>
+<rect x="886.4100000000002" y="879" width="90.36" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="931.5900000000001" y="892.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Removal order</text>
+<rect x="632.6750000000001" y="792.5" width="113.24000000000001" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="689.2950000000001" y="806" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Return (sellable)</text>
+<rect x="705.2950000000002" y="706" width="84.64" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="747.6150000000002" y="719.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Return (FBA)</text>
+<rect x="756.5575" y="1052" width="101.8" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="807.4575" y="1065.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Transfer to FBA</text>
+<rect x="1263.8525000000002" y="533" width="90.36" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="1309.0325000000003" y="546.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Removal order</text>
+<circle cx="70" cy="287" r="16" fill="var(--_text)" stroke="none" />
+<circle cx="286.7125000000001" cy="806" r="16" fill="none" stroke="var(--_text)" stroke-width="1.5" />
+<circle cx="286.7125000000001" cy="806" r="12" fill="var(--_text)" stroke="none" />
+<rect x="991.9925000000003" y="442" width="67.75" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="393.97500000000014" y="615" width="160.70000000000002" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="748.5575" y="961" width="117.80000000000001" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="171.93750000000009" y="96" width="96.35000000000001" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="147.57500000000005" y="269" width="82.05000000000001" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="698.2175000000002" y="442" width="167.85000000000002" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="273.62500000000006" y="615" width="96.35000000000001" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="811.8675000000003" y="1134" width="167.85000000000002" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="1004.2625" y="1307" width="182.15" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="1240.1325000000002" y="96" width="139.25" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="892.8600000000002" y="269" width="117.80000000000001" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="854.8150000000002" y="788" width="153.55" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+<rect x="1147.7825000000003" y="269" width="139.25" height="36" rx="6" ry="6" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+
+
+<text x="1025.8675000000003" y="460" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">ON_PO</text>
+<text x="474.32500000000016" y="633" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">IN_TRANSIT_INBOUND</text>
+<text x="807.4575" y="979" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">IN_WAREHOUSE</text>
+<text x="220.1125000000001" y="114" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">ALLOCATED</text>
+<text x="188.60000000000005" y="287" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">IN_PREP</text>
+<text x="782.1425000000002" y="460" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">IN_TRANSIT_OUTBOUND</text>
+<text x="321.80000000000007" y="633" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">DELIVERED</text>
+<text x="895.7925000000002" y="1152" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">FBA_INBOUND_SHIPPED</text>
+<text x="1095.3375" y="1325" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">FBA_INBOUND_RECEIVING</text>
+<text x="1309.7575000000002" y="114" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">FBA_FULFILLABLE</text>
+<text x="951.7600000000002" y="287" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">FBA_RESERVED</text>
+<text x="931.5900000000001" y="806" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">FBA_UNFULFILLABLE</text>
+<text x="1217.4075000000003" y="287" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">FBA_RESEARCHING</text>
+</svg>

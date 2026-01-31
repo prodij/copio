@@ -1,18 +1,12 @@
-# Inventory Flow & Location Management
+import { renderMermaid, THEMES } from 'beautiful-mermaid';
+import { writeFileSync } from 'fs';
+import { join } from 'path';
 
-This document defines the complete inventory lifecycle, location hierarchy, and tracking requirements for Copio.
+const theme = THEMES['tokyo-night'];
+const outDir = './diagrams';
 
-> 📊 **Diagrams rendered with [beautiful-mermaid](https://github.com/lukilabs/beautiful-mermaid)** (Tokyo Night theme)
-
-## Inventory Lifecycle Overview
-
-![Inventory Lifecycle](./diagrams/01-inventory-lifecycle.svg)
-
-<details>
-<summary>View mermaid source</summary>
-
-```mermaid
-flowchart TB
+const diagrams = {
+  '01-inventory-lifecycle': `flowchart TB
     subgraph PO["📋 PURCHASE ORDER"]
         ON_PO[ON_PO<br/>Ordered, not shipped]
     end
@@ -57,21 +51,9 @@ flowchart TB
     RETURNED -->|sellable| FBA_FULFILLABLE
     RETURNED -->|sellable| IN_WAREHOUSE_BIN
 
-    %% Transfers
-    IN_WAREHOUSE_BIN <-->|transfer to/from FBA| FBA_FULFILLABLE
-```
+    IN_WAREHOUSE_BIN <-->|transfer to/from FBA| FBA_FULFILLABLE`,
 
-</details>
-
-## Transfer Between Locations
-
-![Transfer Between Locations](./diagrams/02-transfer-locations.svg)
-
-<details>
-<summary>View mermaid source</summary>
-
-```mermaid
-flowchart LR
+  '02-transfer-locations': `flowchart LR
     subgraph SELF["Self-Managed"]
         WH[Your Warehouse<br/>@ Bin Location]
     end
@@ -89,20 +71,9 @@ flowchart LR
     WFS -->|"Return to Seller"| WH
 
     WH -->|"Ship to 3PL"| OTHER
-    OTHER -->|"Return"| WH
-```
+    OTHER -->|"Return"| WH`,
 
-</details>
-
-## 3PL Exception States
-
-![3PL Exception States](./diagrams/03-exception-states.svg)
-
-<details>
-<summary>View mermaid source</summary>
-
-```mermaid
-flowchart TB
+  '03-exception-states': `flowchart TB
     FBA_FULFILLABLE[FBA_FULFILLABLE] --> EXCEPTION{Exception?}
     
     EXCEPTION -->|damaged| UNFULFILLABLE[FBA_UNFULFILLABLE<br/>• Damaged<br/>• Customer returns<br/>• Defective<br/>• Expired]
@@ -113,20 +84,9 @@ flowchart TB
     DECISION -->|dispose| DISPOSED[Disposed]
     
     RESEARCHING -->|resolved - found| FBA_FULFILLABLE
-    RESEARCHING -->|resolved - lost| REIMBURSEMENT[Reimbursement Claim]
-```
+    RESEARCHING -->|resolved - lost| REIMBURSEMENT[Reimbursement Claim]`,
 
-</details>
-
-## Warehouse Location Hierarchy
-
-![Warehouse Location Hierarchy](./diagrams/04-warehouse-hierarchy.svg)
-
-<details>
-<summary>View mermaid source</summary>
-
-```mermaid
-flowchart TB
+  '04-warehouse-hierarchy': `flowchart TB
     subgraph WAREHOUSE["🏭 WAREHOUSE: Main Warehouse - LA"]
         subgraph ZONE_A["ZONE A: Receiving"]
             DOCK[Receiving Dock<br/>temporary holding]
@@ -153,20 +113,9 @@ flowchart TB
         subgraph ZONE_D["ZONE D: Shipping"]
             OUTBOUND[Outbound Dock]
         end
-    end
-```
+    end`,
 
-</details>
-
-## Location Type Hierarchy
-
-![Location Type Hierarchy](./diagrams/05-location-class.svg)
-
-<details>
-<summary>View mermaid source</summary>
-
-```mermaid
-classDiagram
+  '05-location-class': `classDiagram
     class Location {
         +String id
         +String name
@@ -203,20 +152,9 @@ classDiagram
 
     Location --> LocationType
     Location --> FulfillmentProvider
-    Location --> Location : parentId
-```
+    Location --> Location : parentId`,
 
-</details>
-
-## Inventory Status State Machine
-
-![Inventory Status State Machine](./diagrams/06-state-machine.svg)
-
-<details>
-<summary>View mermaid source</summary>
-
-```mermaid
-stateDiagram-v2
+  '06-state-machine': `stateDiagram-v2
     [*] --> ON_PO : Create PO
 
     state "Self-Managed" as self {
@@ -246,20 +184,9 @@ stateDiagram-v2
     DELIVERED --> FBA_UNFULFILLABLE : Return (FBA)
 
     IN_WAREHOUSE --> FBA_INBOUND_SHIPPED : Transfer to FBA
-    FBA_FULFILLABLE --> IN_WAREHOUSE : Removal order
-```
+    FBA_FULFILLABLE --> IN_WAREHOUSE : Removal order`,
 
-</details>
-
-## Data Model
-
-![Data Model](./diagrams/07-data-model.svg)
-
-<details>
-<summary>View mermaid source</summary>
-
-```mermaid
-erDiagram
+  '07-data-model': `erDiagram
     Product ||--o{ StockItem : "has inventory"
     Location ||--o{ StockItem : "stores"
     FulfillmentProvider ||--o{ Location : "manages"
@@ -319,20 +246,9 @@ erDiagram
         string userId
         string reference
         string notes
-    }
-```
+    }`,
 
-</details>
-
-## Inventory Status Enum
-
-![Inventory Status Enum](./diagrams/08-status-enum.svg)
-
-<details>
-<summary>View mermaid source</summary>
-
-```mermaid
-flowchart TB
+  '08-status-enum': `flowchart TB
     subgraph SELF_MANAGED["Self-Managed Statuses"]
         ON_PO["ON_PO"]
         IN_TRANSIT_INBOUND["IN_TRANSIT_INBOUND"]
@@ -359,92 +275,24 @@ flowchart TB
         WFS_AVAILABLE["WFS_AVAILABLE"]
         WFS_RESERVED["WFS_RESERVED"]
         WFS_UNFULFILLABLE["WFS_UNFULFILLABLE"]
-    end
-```
+    end`
+};
 
-</details>
+async function main() {
+  console.log('Rendering diagrams with beautiful-mermaid (tokyo-night theme)...\n');
+  
+  for (const [name, code] of Object.entries(diagrams)) {
+    try {
+      const svg = await renderMermaid(code, theme);
+      const outPath = join(outDir, `${name}.svg`);
+      writeFileSync(outPath, svg);
+      console.log(`✅ ${name}.svg`);
+    } catch (e) {
+      console.error(`❌ ${name}: ${e.message}`);
+    }
+  }
+  
+  console.log('\nDone! SVGs saved to ./diagrams/');
+}
 
-## Product Inventory View (UI Wireframe)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  PRODUCT: Widget Pro X (SKU: WPX-001)                                       │
-│  ════════════════════════════════════                                       │
-│                                                                             │
-│  📦 TOTAL INVENTORY: 342 units                                              │
-│  ├── Fulfillable: 285                                                       │
-│  ├── Reserved: 12                                                           │
-│  ├── Inbound: 45                                                            │
-│  └── Unfulfillable: 0                                                       │
-│                                                                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  LOCATION                    │ QTY  │ STATUS          │ LAST VERIFIED       │
-│  ────────────────────────────┼──────┼─────────────────┼─────────────────    │
-│  📍 Main Warehouse - LA      │      │                 │                     │
-│     └─ B-1-R1-S1-01          │  50  │ ✅ In Stock     │ Jan 30, 2:15 PM     │
-│     └─ B-1-R2-S3-08          │  35  │ ✅ In Stock     │ Jan 29, 9:00 AM     │
-│     └─ C-1 (Pick Area)       │  12  │ 📦 Allocated    │ Jan 30, 1:45 PM     │
-│                              │      │                 │                     │
-│  🏭 Amazon FBA (US)          │      │                 │                     │
-│     └─ PHX7 (Phoenix FC)     │ 120  │ ✅ Fulfillable  │ Synced: 10 min ago  │
-│     └─ ONT8 (California FC)  │  80  │ ✅ Fulfillable  │ Synced: 10 min ago  │
-│     └─ (In Transit)          │  45  │ 🚚 Inbound      │ Ship date: Jan 28   │
-│                              │      │                 │                     │
-│  🏭 Walmart WFS              │      │                 │                     │
-│     └─ (Not configured)      │  --  │ --              │ --                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  📋 RECENT MOVEMENTS                                                        │
-│  ────────────────────────────────────────────────────────────               │
-│  Jan 30, 2:15 PM │ VERIFY   │ B-1-R1-S1-01      │ Cycle count: 50 units    │
-│  Jan 30, 1:45 PM │ ALLOCATE │ B-1-R1-S1-01 → C-1│ Order #1234 (12 units)   │
-│  Jan 28, 9:00 AM │ SHIP_FBA │ Warehouse → PHX7  │ FBA Shipment #ABC123     │
-│  Jan 25, 3:30 PM │ RECEIVE  │ PO-2025-018       │ +100 units from vendor   │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Implementation Phases
-
-### Phase 1: Location Hierarchy
-- Update Location model with `parentId`, `path`, `type`
-- Location CRUD with parent selection
-- Location tree view (collapsible hierarchy)
-- Seed example warehouse structure
-
-### Phase 2: Inventory Status Tracking
-- Add `status` and `lastVerifiedAt` to StockItem
-- Create InventoryStatus enum
-- Update receive PO flow to set status
-- Add status badges to inventory views
-
-### Phase 2.5: Fulfillment Provider Support
-- Create FulfillmentProvider model
-- Add provider selection to Location
-- Define provider-specific status enums
-- UI to configure providers (name, status mappings)
-- Location form: toggle "Third-Party Fulfillment" mode
-
-### Phase 3: Product Inventory View
-- Product detail → "Inventory" tab
-- Show all locations with qty, status, last verified
-- Show 3PL inventory separately grouped
-- Display provider-specific statuses with tooltips
-
-### Phase 4: Movement History
-- Enhanced StockMovement with from/to locations
-- Movement log page (filterable by product, location, date)
-- Quick actions: Transfer, Adjust, Verify
-
-### Phase 5: Warehouse Bin Management
-- UI to define custom bin structure
-- Assign inventory to specific bins
-- Bin label printing (future)
-
-### Phase 6: Marketplace Sync (Future)
-- Amazon SP-API: Pull FBA inventory
-- Walmart API: Pull WFS inventory
-- Auto-sync on schedule
-- Reconciliation alerts
-
----
-
-> **Re-render diagrams:** `node docs/render-diagrams.mjs`
+main();
