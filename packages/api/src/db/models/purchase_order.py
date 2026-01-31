@@ -6,10 +6,9 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, String, Text, Integer, Numeric, Enum
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.db.base import Base, TimestampMixin, generate_uuid
+from src.db.base import Base, PrismaTimestampMixin, StringUUID, generate_uuid
 from src.db.models.enums import POStatus, ShipmentStatus
 
 if TYPE_CHECKING:
@@ -18,19 +17,19 @@ if TYPE_CHECKING:
     from src.db.models.product import Product
 
 
-class PurchaseOrder(Base, TimestampMixin):
+class PurchaseOrder(Base, PrismaTimestampMixin):
     """Purchase order model matching Prisma PurchaseOrder."""
 
     __tablename__ = "PurchaseOrder"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )
     tenant_id: Mapped[UUID | None] = mapped_column(
         "tenantId",
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         nullable=True,
         index=True,
     )
@@ -102,7 +101,7 @@ class POLine(Base):
     __tablename__ = "POLine"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )

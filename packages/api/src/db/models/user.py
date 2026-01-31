@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from sqlalchemy import ForeignKey, String
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base, TimestampMixin
@@ -20,6 +21,7 @@ class User(SQLAlchemyBaseUserTableUUID, Base, TimestampMixin):
 
     # Tenant association
     tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
         ForeignKey("tenants.id"),
         nullable=False,
         index=True,

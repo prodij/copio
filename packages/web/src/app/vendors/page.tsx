@@ -7,7 +7,7 @@ import { CreateVendorDialog } from "./create-dialog";
 import { VendorFilters } from "@/components/vendor-filters";
 import { SortableHeader } from "@/components/sortable-header";
 
-const API_URL = process.env.API_URL || "http://localhost:3002";
+const API_URL = process.env.API_URL || "http://localhost:8001/api/v1";
 
 interface Vendor {
   id: string;

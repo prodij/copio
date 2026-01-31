@@ -13,7 +13,7 @@ import { VendorDocumentUpload } from "@/components/vendor-document-upload";
 import { DocumentDownloadButton } from "@/components/document-download-button";
 import { VendorPOTable } from "@/components/vendor-po-table";
 
-const API_URL = process.env.API_URL || "http://localhost:3002";
+const API_URL = process.env.API_URL || "http://localhost:8001/api/v1";
 
 interface VendorProduct {
   id: string;

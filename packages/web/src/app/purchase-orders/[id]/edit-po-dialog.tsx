@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Pencil, Loader2, AlertCircle } from "lucide-react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3002";
+// Client-side requests go through Next.js proxy
 
 interface PurchaseOrder {
   id: string;
@@ -77,7 +77,7 @@ export function EditPODialog({ po }: EditPODialogProps) {
         payload.notes = formData.notes || null;
       }
 
-      const res = await fetch(`${API_URL}/purchase-orders/${po.id}`, {
+      const res = await fetch(`/api/purchase-orders/${po.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, String, Integer, Numeric, Enum
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.db.base import Base, TimestampMixin, generate_uuid
+from src.db.base import Base, PrismaTimestampMixin, StringUUID, generate_uuid
 from src.db.models.enums import Channel, OrderStatus
 
 if TYPE_CHECKING:
@@ -17,19 +17,19 @@ if TYPE_CHECKING:
     from src.db.models.inventory import Location
 
 
-class Order(Base, TimestampMixin):
+class Order(Base, PrismaTimestampMixin):
     """Order model matching Prisma Order."""
 
     __tablename__ = "Order"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )
     tenant_id: Mapped[UUID | None] = mapped_column(
         "tenantId",
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         nullable=True,
         index=True,
     )
@@ -69,7 +69,7 @@ class OrderLine(Base):
     __tablename__ = "OrderLine"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )

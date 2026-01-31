@@ -41,7 +41,7 @@ const DOCUMENT_TYPES = [
   { value: "OTHER", label: "Other" },
 ];
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3002";
+// Client-side requests go through Next.js proxy to Python API
 
 export function VendorDocumentUpload({
   vendorId,
@@ -90,7 +90,7 @@ export function VendorDocumentUpload({
 
     try {
       // Step 1: Get presigned upload URL
-      const urlRes = await fetch(`${API_URL}/vendor-documents/upload-url`, {
+      const urlRes = await fetch(`/api/vendor-documents/upload-url`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -124,7 +124,7 @@ export function VendorDocumentUpload({
       setUploadProgress(70);
 
       // Step 3: Create document record in database
-      const docRes = await fetch(`${API_URL}/vendor-documents`, {
+      const docRes = await fetch(`/api/vendor-documents`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

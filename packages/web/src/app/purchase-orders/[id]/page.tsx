@@ -13,7 +13,7 @@ import { FollowUpDialog } from "./follow-up-dialog";
 import { EditPODialog } from "./edit-po-dialog";
 import { EditLineDialog } from "./edit-line-dialog";
 
-const API_URL = process.env.API_URL || "http://localhost:3002";
+const API_URL = process.env.API_URL || "http://localhost:8001/api/v1";
 
 interface POLine {
   id: string;

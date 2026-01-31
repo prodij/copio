@@ -6,29 +6,29 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, String, Text, Integer, Numeric, Enum
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID, ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.db.base import Base, TimestampMixin, generate_uuid
+from src.db.base import Base, PrismaTimestampMixin, StringUUID, generate_uuid
 from src.db.models.enums import Channel, ListingStatus, FulfillmentChannel
 
 if TYPE_CHECKING:
     from src.db.models.product import Product
 
 
-class ChannelListing(Base, TimestampMixin):
+class ChannelListing(Base, PrismaTimestampMixin):
     """Channel listing model matching Prisma ChannelListing."""
 
     __tablename__ = "ChannelListing"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )
     tenant_id: Mapped[UUID | None] = mapped_column(
         "tenantId",
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         nullable=True,
         index=True,
     )

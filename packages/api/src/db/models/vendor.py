@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, String, Boolean, Integer, Float, Numeric, Enum, Text
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID, ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.db.base import Base, TimestampMixin, generate_uuid
+from src.db.base import Base, PrismaTimestampMixin, StringUUID, generate_uuid
 from src.db.models.enums import VendorTier, ContactRole, AddressType, DocumentType
 
 if TYPE_CHECKING:
@@ -17,19 +17,19 @@ if TYPE_CHECKING:
     from src.db.models.purchase_order import PurchaseOrder
 
 
-class Vendor(Base, TimestampMixin):
+class Vendor(Base, PrismaTimestampMixin):
     """Vendor model matching Prisma Vendor."""
 
     __tablename__ = "Vendor"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )
     tenant_id: Mapped[UUID | None] = mapped_column(
         "tenantId",
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         nullable=True,
         index=True,
     )
@@ -106,13 +106,13 @@ class Vendor(Base, TimestampMixin):
     )
 
 
-class VendorContact(Base, TimestampMixin):
+class VendorContact(Base, PrismaTimestampMixin):
     """Vendor contact model matching Prisma VendorContact."""
 
     __tablename__ = "VendorContact"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )
@@ -147,13 +147,13 @@ class VendorContact(Base, TimestampMixin):
     vendor: Mapped["Vendor"] = relationship("Vendor", back_populates="contacts")
 
 
-class VendorAddress(Base, TimestampMixin):
+class VendorAddress(Base, PrismaTimestampMixin):
     """Vendor address model matching Prisma VendorAddress."""
 
     __tablename__ = "VendorAddress"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )
@@ -205,13 +205,13 @@ class VendorAddress(Base, TimestampMixin):
     vendor: Mapped["Vendor"] = relationship("Vendor", back_populates="addresses")
 
 
-class VendorDocument(Base, TimestampMixin):
+class VendorDocument(Base, PrismaTimestampMixin):
     """Vendor document model matching Prisma VendorDocument."""
 
     __tablename__ = "VendorDocument"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )
@@ -251,13 +251,13 @@ class VendorDocument(Base, TimestampMixin):
     vendor: Mapped["Vendor"] = relationship("Vendor", back_populates="documents")
 
 
-class VendorProduct(Base, TimestampMixin):
+class VendorProduct(Base, PrismaTimestampMixin):
     """Vendor-Product relationship model matching Prisma VendorProduct."""
 
     __tablename__ = "VendorProduct"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )

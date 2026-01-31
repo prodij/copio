@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, String, Text, Boolean, Integer, Numeric, Enum
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID, ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.db.base import Base, TimestampMixin, generate_uuid
+from src.db.base import Base, PrismaTimestampMixin, StringUUID, generate_uuid
 from src.db.models.enums import ProductType, ProductStatus
 
 if TYPE_CHECKING:
@@ -21,19 +21,19 @@ if TYPE_CHECKING:
     from src.db.models.vendor import VendorProduct
 
 
-class Product(Base, TimestampMixin):
+class Product(Base, PrismaTimestampMixin):
     """Product model matching Prisma Product."""
 
     __tablename__ = "Product"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )
     tenant_id: Mapped[UUID | None] = mapped_column(
         "tenantId",
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         nullable=True,
         index=True,
     )
@@ -52,6 +52,7 @@ class Product(Base, TimestampMixin):
     # Parent/Child Variation Hierarchy
     parent_id: Mapped[UUID | None] = mapped_column(
         "parentId",
+        StringUUID(),
         ForeignKey("Product.id"),
         nullable=True,
         index=True,
@@ -162,12 +163,13 @@ class ProductImage(Base):
     __tablename__ = "ProductImage"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )
     product_id: Mapped[UUID] = mapped_column(
         "productId",
+        StringUUID(),
         ForeignKey("Product.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -194,12 +196,13 @@ class ProductAttribute(Base):
     __tablename__ = "ProductAttribute"
 
     id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        StringUUID(),
         primary_key=True,
         default=generate_uuid,
     )
     product_id: Mapped[UUID] = mapped_column(
         "productId",
+        StringUUID(),
         ForeignKey("Product.id", ondelete="CASCADE"),
         nullable=False,
         index=True,

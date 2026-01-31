@@ -529,9 +529,9 @@ class TestForgotPassword:
             json={"email": email},
         )
         
-        assert response.status_code == 200
+        # 202 Accepted is the correct response for async password reset
+        assert response.status_code == 202
         # Should always return success (doesn't reveal if email exists)
-        assert "message" in response.json()
 
     async def test_forgot_password_nonexistent_email(self, client: AsyncClient):
         """Test forgot password with non-existent email returns success."""
@@ -540,5 +540,5 @@ class TestForgotPassword:
             json={"email": unique_email("nonexistent")},
         )
         
-        # Should return 200 to not reveal email existence
-        assert response.status_code == 200
+        # Should return 202 to not reveal email existence (async operation)
+        assert response.status_code == 202

@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,7 +17,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -22,41 +25,81 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Loader2, AlertCircle } from "lucide-react";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Plus, Loader2 } from "lucide-react";
+
+const productSchema = z.object({
+  name: z.string().min(1, "Product name is required").max(200, "Name too long"),
+  sku: z
+    .string()
+    .min(1, "SKU is required")
+    .max(50, "SKU too long")
+    .regex(/^[A-Za-z0-9\-_]+$/, "SKU can only contain letters, numbers, hyphens and underscores"),
+  brand: z.string().max(100, "Brand name too long").optional().or(z.literal("")),
+  manufacturer: z.string().max(100, "Manufacturer name too long").optional().or(z.literal("")),
+  shortDescription: z.string().max(500, "Description too long").optional().or(z.literal("")),
+  upc: z
+    .string()
+    .regex(/^(\d{12}|\d{13})?$/, "UPC must be 12 or 13 digits")
+    .optional()
+    .or(z.literal("")),
+  costPrice: z
+    .string()
+    .refine((val) => val === "" || (!isNaN(parseFloat(val)) && parseFloat(val) >= 0), {
+      message: "Cost must be a positive number",
+    })
+    .optional()
+    .or(z.literal("")),
+  msrp: z
+    .string()
+    .refine((val) => val === "" || (!isNaN(parseFloat(val)) && parseFloat(val) >= 0), {
+      message: "MSRP must be a positive number",
+    })
+    .optional()
+    .or(z.literal("")),
+  status: z.enum(["DRAFT", "ACTIVE"]),
+});
+
+type ProductFormData = z.infer<typeof productSchema>;
 
 export function CreateProductDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
-    name: "",
-    sku: "",
-    brand: "",
-    manufacturer: "",
-    shortDescription: "",
-    upc: "",
-    costPrice: "",
-    msrp: "",
-    status: "DRAFT",
+
+  const form = useForm<ProductFormData>({
+    resolver: zodResolver(productSchema),
+    defaultValues: {
+      name: "",
+      sku: "",
+      brand: "",
+      manufacturer: "",
+      shortDescription: "",
+      upc: "",
+      costPrice: "",
+      msrp: "",
+      status: "DRAFT",
+    },
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-
+  const onSubmit = async (data: ProductFormData) => {
     try {
       const payload = {
-        name: formData.name,
-        sku: formData.sku,
-        status: formData.status,
-        brand: formData.brand || undefined,
-        manufacturer: formData.manufacturer || undefined,
-        shortDescription: formData.shortDescription || undefined,
-        upc: formData.upc || undefined,
-        costPrice: formData.costPrice ? parseFloat(formData.costPrice) : undefined,
-        msrp: formData.msrp ? parseFloat(formData.msrp) : undefined,
+        name: data.name,
+        sku: data.sku,
+        status: data.status,
+        brand: data.brand || undefined,
+        manufacturer: data.manufacturer || undefined,
+        shortDescription: data.shortDescription || undefined,
+        upc: data.upc || undefined,
+        costPrice: data.costPrice ? parseFloat(data.costPrice) : undefined,
+        msrp: data.msrp ? parseFloat(data.msrp) : undefined,
       };
 
       const res = await fetch("/api/products", {
@@ -66,28 +109,17 @@ export function CreateProductDialog() {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to create product");
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Failed to create product");
       }
 
       const product = await res.json();
-      setFormData({
-        name: "",
-        sku: "",
-        brand: "",
-        manufacturer: "",
-        shortDescription: "",
-        upc: "",
-        costPrice: "",
-        msrp: "",
-        status: "DRAFT",
-      });
+      toast.success("Product created successfully");
+      form.reset();
       setOpen(false);
       router.push(`/products/${product.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create product");
-    } finally {
-      setLoading(false);
+      toast.error(err instanceof Error ? err.message : "Failed to create product");
     }
   };
 
@@ -100,134 +132,161 @@ export function CreateProductDialog() {
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[600px]">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>Create Product</DialogTitle>
-            <DialogDescription>
-              Add a new product to your catalog. You can add more details after creation.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Product Name *</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g., Wireless Bluetooth Headphones"
-                  required
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)}>
+            <DialogHeader>
+              <DialogTitle>Create Product</DialogTitle>
+              <DialogDescription>
+                Add a new product to your catalog. You can add more details after creation.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Product Name *</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g., Wireless Bluetooth Headphones" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="sku"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>SKU *</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g., WBH-001" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="sku">SKU *</Label>
-                <Input
-                  id="sku"
-                  value={formData.sku}
-                  onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                  placeholder="e.g., WBH-001"
-                  required
-                />
-              </div>
-            </div>
 
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="brand">Brand</Label>
-                <Input
-                  id="brand"
-                  value={formData.brand}
-                  onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
-                  placeholder="e.g., Acme"
+              <div className="grid grid-cols-3 gap-4">
+                <FormField
+                  control={form.control}
+                  name="brand"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Brand</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g., Acme" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="manufacturer"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Manufacturer</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g., Acme Corp" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="upc"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>UPC</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g., 012345678901" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="manufacturer">Manufacturer</Label>
-                <Input
-                  id="manufacturer"
-                  value={formData.manufacturer}
-                  onChange={(e) => setFormData({ ...formData, manufacturer: e.target.value })}
-                  placeholder="e.g., Acme Corp"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="upc">UPC</Label>
-                <Input
-                  id="upc"
-                  value={formData.upc}
-                  onChange={(e) => setFormData({ ...formData, upc: e.target.value })}
-                  placeholder="e.g., 012345678901"
-                />
-              </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="shortDescription">Short Description</Label>
-              <Textarea
-                id="shortDescription"
-                value={formData.shortDescription}
-                onChange={(e) => setFormData({ ...formData, shortDescription: e.target.value })}
-                placeholder="Brief product summary..."
-                rows={2}
+              <FormField
+                control={form.control}
+                name="shortDescription"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Short Description</FormLabel>
+                    <FormControl>
+                      <Textarea placeholder="Brief product summary..." rows={2} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </div>
 
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="costPrice">Cost Price ($)</Label>
-                <Input
-                  id="costPrice"
-                  type="number"
-                  step="0.01"
-                  value={formData.costPrice}
-                  onChange={(e) => setFormData({ ...formData, costPrice: e.target.value })}
-                  placeholder="0.00"
+              <div className="grid grid-cols-3 gap-4">
+                <FormField
+                  control={form.control}
+                  name="costPrice"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cost Price ($)</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.01" placeholder="0.00" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="msrp"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>MSRP ($)</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.01" placeholder="0.00" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="status"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Status</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="DRAFT">Draft</SelectItem>
+                          <SelectItem value="ACTIVE">Active</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="msrp">MSRP ($)</Label>
-                <Input
-                  id="msrp"
-                  type="number"
-                  step="0.01"
-                  value={formData.msrp}
-                  onChange={(e) => setFormData({ ...formData, msrp: e.target.value })}
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="status">Status</Label>
-                <Select
-                  value={formData.status}
-                  onValueChange={(value) => setFormData({ ...formData, status: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="DRAFT">Draft</SelectItem>
-                    <SelectItem value="ACTIVE">Active</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
-          </div>
-          {error && (
-            <div className="flex items-center gap-2 text-sm text-destructive mb-4">
-              <AlertCircle className="h-4 w-4" />
-              <span>{error}</span>
-            </div>
-          )}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading}>
-              {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create & Edit
-            </Button>
-          </DialogFooter>
-        </form>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Create & Edit
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
       </DialogContent>
     </Dialog>
   );

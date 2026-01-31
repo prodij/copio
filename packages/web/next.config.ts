@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
       fallback: [
         {
           source: '/api/:path*',
-          destination: `${process.env.API_URL || 'http://localhost:3002'}/:path*`,
+          destination: `${process.env.API_URL || 'http://localhost:8001/api/v1'}/:path*`,
         },
       ],
     };

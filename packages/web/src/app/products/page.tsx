@@ -8,7 +8,7 @@ import { ProductFilters } from "@/components/product-filters";
 import { SortableHeader } from "@/components/sortable-header";
 import { Pagination } from "@/components/pagination";
 
-const API_URL = process.env.API_URL || "http://localhost:3002";
+const API_URL = process.env.API_URL || "http://localhost:8001/api/v1";
 
 interface Product {
   id: string;

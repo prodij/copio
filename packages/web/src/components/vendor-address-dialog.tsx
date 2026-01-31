@@ -71,7 +71,7 @@ const COUNTRIES = [
   { value: "GB", label: "United Kingdom" },
 ];
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3002";
+// Client-side requests go through Next.js proxy to Python API
 
 export function VendorAddressDialog({
   vendorId,
@@ -126,8 +126,8 @@ export function VendorAddressDialog({
       };
 
       const url = isEditing
-        ? `${API_URL}/vendor-addresses/${existingData.id}`
-        : `${API_URL}/vendor-addresses`;
+        ? `/api/vendor-addresses/${existingData.id}`
+        : `/api/vendor-addresses`;
       const method = isEditing ? "PATCH" : "POST";
 
       const res = await fetch(url, {

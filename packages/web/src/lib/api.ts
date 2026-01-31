@@ -1,7 +1,7 @@
 import axios from "axios";
 
-// Use /api proxy in production/docker, direct URL for local dev
-const API_BASE = typeof window !== 'undefined' ? '/api' : (process.env.API_URL || 'http://localhost:3002');
+// Use /api proxy for client-side, direct URL for server-side components
+const API_BASE = typeof window !== 'undefined' ? '/api' : (process.env.API_URL || 'http://localhost:8001/api/v1');
 
 // Axios instance for React Query hooks
 export const api = axios.create({
