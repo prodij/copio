@@ -8,6 +8,9 @@
 import { Request, Response, NextFunction } from 'express';
 import * as jose from 'jose';
 
+// User roles
+export type UserRole = 'admin' | 'member';
+
 // Extend Express Request to include auth info
 declare global {
   namespace Express {
@@ -15,6 +18,7 @@ declare global {
       user?: {
         id: string;
         tenantId: string;
+        role: UserRole;
       };
       tenantId?: string;
     }
@@ -56,12 +60,12 @@ export async function requireAuth(
       return;
     }
 
-    // For now, we need to look up the user to get tenant_id
-    // In a future optimization, we could include tenant_id in the JWT claims
+    // Look up the user to get tenant_id and role
+    // In a future optimization, we could include these in the JWT claims
     const { prisma } = await import('@copio/core');
     const user = await prisma.users.findUnique({
       where: { id: userId },
-      select: { id: true, tenant_id: true },
+      select: { id: true, tenant_id: true, role: true, is_active: true },
     });
 
     if (!user) {
@@ -69,10 +73,16 @@ export async function requireAuth(
       return;
     }
 
+    if (!user.is_active) {
+      res.status(401).json({ error: 'Account is inactive' });
+      return;
+    }
+
     // Attach user info to request
     req.user = {
       id: user.id,
       tenantId: user.tenant_id,
+      role: user.role as UserRole,
     };
     req.tenantId = user.tenant_id;
     
@@ -120,13 +130,14 @@ export async function optionalAuth(
       const { prisma } = await import('@copio/core');
       const user = await prisma.users.findUnique({
         where: { id: userId },
-        select: { id: true, tenant_id: true },
+        select: { id: true, tenant_id: true, role: true, is_active: true },
       });
       
-      if (user) {
+      if (user && user.is_active) {
         req.user = {
           id: user.id,
           tenantId: user.tenant_id,
+          role: user.role as UserRole,
         };
         req.tenantId = user.tenant_id;
       }
@@ -136,4 +147,27 @@ export async function optionalAuth(
   }
   
   next();
+}
+
+/**
+ * Middleware factory that requires specific roles.
+ * Must be used after requireAuth.
+ * 
+ * Usage:
+ *   router.post('/admin-only', requireAuth, requireRole(['admin']), handler);
+ */
+export function requireRole(allowedRoles: UserRole[]) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    if (!allowedRoles.includes(req.user.role)) {
+      res.status(403).json({ error: 'Insufficient permissions' });
+      return;
+    }
+
+    next();
+  };
 }

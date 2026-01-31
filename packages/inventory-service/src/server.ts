@@ -23,7 +23,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Health check endpoint
+// Health check endpoint - no auth required
 app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'healthy',
@@ -40,19 +40,19 @@ app.get('/me', requireAuth, (req: Request, res: Response) => {
   });
 });
 
-// Mount routes
-app.use('/categories', categoriesRouter);
-app.use('/locations', locationsRouter);
-app.use('/products', productsRouter);
-app.use('/stock-items', stockItemsRouter);
-app.use('/stock-movements', stockMovementsRouter);
-app.use('/vendors', vendorsRouter);
-app.use('/vendor-products', vendorProductsRouter);
-app.use('/purchase-orders', purchaseOrdersRouter);
-app.use('/channel-listings', channelListingsRouter);
-app.use('/vendor-contacts', vendorContactsRouter);
-app.use('/vendor-addresses', vendorAddressesRouter);
-app.use('/vendor-documents', vendorDocumentsRouter);
+// All protected routes require authentication
+app.use('/categories', requireAuth, categoriesRouter);
+app.use('/locations', requireAuth, locationsRouter);
+app.use('/products', requireAuth, productsRouter);
+app.use('/stock-items', requireAuth, stockItemsRouter);
+app.use('/stock-movements', requireAuth, stockMovementsRouter);
+app.use('/vendors', requireAuth, vendorsRouter);
+app.use('/vendor-products', requireAuth, vendorProductsRouter);
+app.use('/purchase-orders', requireAuth, purchaseOrdersRouter);
+app.use('/channel-listings', requireAuth, channelListingsRouter);
+app.use('/vendor-contacts', requireAuth, vendorContactsRouter);
+app.use('/vendor-addresses', requireAuth, vendorAddressesRouter);
+app.use('/vendor-documents', requireAuth, vendorDocumentsRouter);
 
 // Error handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

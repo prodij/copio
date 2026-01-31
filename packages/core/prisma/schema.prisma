@@ -8,11 +8,57 @@ datasource db {
 }
 
 // =============================================================================
+// AUTH (Managed by Python/Alembic - DO NOT MODIFY)
+// These models are here to prevent Prisma from dropping the tables.
+// =============================================================================
+
+model tenants {
+  id            String    @id @db.Uuid
+  name          String    @db.VarChar(255)
+  slug          String    @unique @db.VarChar(100)
+  timezone      String    @db.VarChar(50)
+  base_currency String    @db.VarChar(3)
+  settings      Json      @db.JsonB
+  created_at    DateTime  @default(now()) @db.Timestamptz
+  updated_at    DateTime  @default(now()) @db.Timestamptz
+  users         users[]
+
+  @@map("tenants")
+}
+
+model users {
+  id              String    @id @db.Uuid
+  tenant_id       String    @db.Uuid
+  first_name      String?   @db.VarChar(100)
+  last_name       String?   @db.VarChar(100)
+  role            String    @db.VarChar(20)
+  email           String    @unique @db.VarChar(320)
+  hashed_password String    @db.VarChar(1024)
+  is_active       Boolean
+  is_superuser    Boolean
+  is_verified     Boolean
+  created_at      DateTime  @default(now()) @db.Timestamptz
+  updated_at      DateTime  @default(now()) @db.Timestamptz
+  tenant          tenants   @relation(fields: [tenant_id], references: [id])
+
+  @@index([tenant_id])
+  @@map("users")
+}
+
+// Alembic version tracking (DO NOT MODIFY)
+model alembic_version {
+  version_num String @id @db.VarChar(32)
+
+  @@map("alembic_version")
+}
+
+// =============================================================================
 // PRODUCT CATALOG
 // =============================================================================
 
 model Product {
   id            String        @id @default(uuid())
+  tenantId      String?       // Multi-tenant isolation (nullable for migration, will be required)
   sku           String        @unique
   productType   ProductType   @default(SIMPLE)
   status        ProductStatus @default(DRAFT)
@@ -92,6 +138,7 @@ model Product {
   @@index([status])
   @@index([upc])
   @@index([asin])
+  @@index([tenantId])
 }
 
 enum ProductType {
@@ -144,6 +191,7 @@ model ProductAttribute {
 
 model Category {
   id            String   @id @default(uuid())
+  tenantId      String?  // Multi-tenant isolation
   name          String
   slug          String   @unique
   parentId      String?
@@ -163,6 +211,7 @@ model Category {
 
   @@index([parentId])
   @@index([slug])
+  @@index([tenantId])
 }
 
 model ProductCategory {
@@ -184,6 +233,7 @@ model ProductCategory {
 
 model ChannelListing {
   id          String        @id @default(uuid())
+  tenantId    String?       // Multi-tenant isolation
   productId   String
   channel     Channel
   channelSku  String        // ASIN, Shopify variant ID, Walmart item ID
@@ -228,6 +278,7 @@ model ChannelListing {
   @@index([productId])
   @@index([status])
   @@index([channel, status])
+  @@index([tenantId])
 }
 
 enum FulfillmentChannel {
@@ -259,6 +310,7 @@ enum ListingStatus {
 
 model Location {
   id             String          @id @default(uuid())
+  tenantId       String?         // Multi-tenant isolation
   name           String
   type           LocationType
   channel        Channel?        // For FBA, Walmart FC, etc.
@@ -272,6 +324,7 @@ model Location {
 
   @@index([type])
   @@index([isActive])
+  @@index([tenantId])
 }
 
 enum LocationType {
@@ -283,6 +336,7 @@ enum LocationType {
 
 model StockItem {
   id                String          @id @default(uuid())
+  tenantId          String?         // Multi-tenant isolation
   productId         String
   locationId        String
   quantityAvailable Int             @default(0)
@@ -301,10 +355,12 @@ model StockItem {
   @@unique([productId, locationId])
   @@index([locationId])
   @@index([quantityAvailable])
+  @@index([tenantId])
 }
 
 model StockMovement {
   id          String       @id @default(uuid())
+  tenantId    String?      // Multi-tenant isolation
   stockItemId String
   type        MovementType
   quantity    Int
@@ -317,6 +373,7 @@ model StockMovement {
   @@index([stockItemId])
   @@index([createdAt])
   @@index([type])
+  @@index([tenantId])
 }
 
 enum MovementType {
@@ -334,6 +391,7 @@ enum MovementType {
 
 model Order {
   id             String      @id @default(uuid())
+  tenantId       String?     // Multi-tenant isolation
   channel        Channel
   channelOrderId String
   status         OrderStatus @default(PENDING)
@@ -350,6 +408,7 @@ model Order {
   @@unique([channel, channelOrderId])
   @@index([status])
   @@index([placedAt])
+  @@index([tenantId])
 }
 
 enum OrderStatus {
@@ -385,6 +444,7 @@ model OrderLine {
 
 model Vendor {
   id             String          @id @default(uuid())
+  tenantId       String?         // Multi-tenant isolation
   
   // Company Identity
   name           String          // Display/trading name
@@ -441,6 +501,7 @@ model Vendor {
   @@index([isActive])
   @@index([tier])
   @@index([contractEndDate])
+  @@index([tenantId])
 }
 
 enum VendorTier {
@@ -631,6 +692,7 @@ model VendorProduct {
 
 model PurchaseOrder {
   id            String    @id @default(uuid())
+  tenantId      String?   // Multi-tenant isolation
   poNumber      String    @unique
   vendorId      String
   destinationId String
@@ -676,6 +738,7 @@ model PurchaseOrder {
   @@index([poNumber])
   @@index([nextFollowUpAt])
   @@index([shipmentStatus])
+  @@index([tenantId])
 }
 
 enum POStatus {

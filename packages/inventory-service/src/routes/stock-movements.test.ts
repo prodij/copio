@@ -2,8 +2,10 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import request from 'supertest';
 import { app } from '../server.js';
 import { prisma } from '@copio/core';
+import { createTestTenant, cleanupTestData, authHeader, type TestUser } from '../test-helpers/auth.js';
 
 describe('StockMovements API', () => {
+  let testUser: TestUser;
   let testProduct: { id: string };
   let testLocation: { id: string };
   let testLocation2: { id: string };
@@ -12,35 +14,46 @@ describe('StockMovements API', () => {
 
   beforeAll(async () => {
     await prisma.$connect();
+    const { admin } = await createTestTenant({ slug: 'stock-movements-test' });
+    testUser = admin;
   });
 
   afterAll(async () => {
+    await cleanupTestData();
     await prisma.$disconnect();
   });
 
   beforeEach(async () => {
     // Clean up in order due to foreign keys
+    await prisma.pOLine.deleteMany();
+    await prisma.purchaseOrder.deleteMany();
+    await prisma.orderLine.deleteMany();
     await prisma.stockMovement.deleteMany();
     await prisma.stockItem.deleteMany();
     await prisma.channelListing.deleteMany();
+    await prisma.vendorProduct.deleteMany();
+    await prisma.productCategory.deleteMany();
+    await prisma.productAttribute.deleteMany();
+    await prisma.productImage.deleteMany();
     await prisma.product.deleteMany();
     await prisma.location.deleteMany();
 
     // Create test fixtures
     testProduct = await prisma.product.create({
-      data: { sku: 'TEST-SKU-001', name: 'Test Product' },
+      data: { sku: 'TEST-SKU-001', name: 'Test Product', tenantId: testUser.tenantId },
     });
     testLocation = await prisma.location.create({
-      data: { name: 'Warehouse A', type: 'WAREHOUSE' },
+      data: { name: 'Warehouse A', type: 'WAREHOUSE', tenantId: testUser.tenantId },
     });
     testLocation2 = await prisma.location.create({
-      data: { name: 'Warehouse B', type: 'WAREHOUSE' },
+      data: { name: 'Warehouse B', type: 'WAREHOUSE', tenantId: testUser.tenantId },
     });
     testStockItem = await prisma.stockItem.create({
       data: {
         productId: testProduct.id,
         locationId: testLocation.id,
         quantityAvailable: 100,
+        tenantId: testUser.tenantId,
       },
     });
     testStockItem2 = await prisma.stockItem.create({
@@ -48,6 +61,7 @@ describe('StockMovements API', () => {
         productId: testProduct.id,
         locationId: testLocation2.id,
         quantityAvailable: 50,
+        tenantId: testUser.tenantId,
       },
     });
   });
@@ -57,11 +71,13 @@ describe('StockMovements API', () => {
       it('creates a RECEIVE movement and adds to stock quantity', async () => {
         const response = await request(app)
           .post('/stock-movements')
+          .set(authHeader(testUser))
           .send({
             stockItemId: testStockItem.id,
             type: 'RECEIVE',
             quantity: 25,
             notes: 'PO-123 received',
+            tenantId: testUser.tenantId,
           });
 
         expect(response.status).toBe(201);
@@ -81,11 +97,13 @@ describe('StockMovements API', () => {
       it('creates a SHIP movement and subtracts from stock quantity', async () => {
         const response = await request(app)
           .post('/stock-movements')
+          .set(authHeader(testUser))
           .send({
             stockItemId: testStockItem.id,
             type: 'SHIP',
             quantity: 30,
             reference: 'ORDER-456',
+            tenantId: testUser.tenantId,
           });
 
         expect(response.status).toBe(201);
@@ -102,10 +120,12 @@ describe('StockMovements API', () => {
       it('fails SHIP when insufficient stock', async () => {
         const response = await request(app)
           .post('/stock-movements')
+          .set(authHeader(testUser))
           .send({
             stockItemId: testStockItem.id,
             type: 'SHIP',
             quantity: 150, // More than available (100)
+            tenantId: testUser.tenantId,
           });
 
         expect(response.status).toBe(400);
@@ -121,10 +141,12 @@ describe('StockMovements API', () => {
       it('allows SHIP of exact available quantity', async () => {
         const response = await request(app)
           .post('/stock-movements')
+          .set(authHeader(testUser))
           .send({
             stockItemId: testStockItem.id,
             type: 'SHIP',
             quantity: 100,
+            tenantId: testUser.tenantId,
           });
 
         expect(response.status).toBe(201);
@@ -140,11 +162,13 @@ describe('StockMovements API', () => {
       it('creates an ADJUST movement and sets stock to exact quantity', async () => {
         const response = await request(app)
           .post('/stock-movements')
+          .set(authHeader(testUser))
           .send({
             stockItemId: testStockItem.id,
             type: 'ADJUST',
             quantity: 75, // New total
             notes: 'Cycle count correction',
+            tenantId: testUser.tenantId,
           });
 
         expect(response.status).toBe(201);
@@ -162,10 +186,12 @@ describe('StockMovements API', () => {
       it('handles ADJUST to increase stock', async () => {
         const response = await request(app)
           .post('/stock-movements')
+          .set(authHeader(testUser))
           .send({
             stockItemId: testStockItem.id,
             type: 'ADJUST',
             quantity: 150,
+            tenantId: testUser.tenantId,
           });
 
         expect(response.status).toBe(201);
@@ -180,10 +206,12 @@ describe('StockMovements API', () => {
       it('handles ADJUST to zero', async () => {
         const response = await request(app)
           .post('/stock-movements')
+          .set(authHeader(testUser))
           .send({
             stockItemId: testStockItem.id,
             type: 'ADJUST',
             quantity: 0,
+            tenantId: testUser.tenantId,
           });
 
         expect(response.status).toBe(201);
@@ -199,12 +227,14 @@ describe('StockMovements API', () => {
       it('creates paired movements for TRANSFER', async () => {
         const response = await request(app)
           .post('/stock-movements')
+          .set(authHeader(testUser))
           .send({
             stockItemId: testStockItem.id,
             type: 'TRANSFER',
             quantity: 20,
             destinationStockItemId: testStockItem2.id,
             notes: 'Rebalancing inventory',
+            tenantId: testUser.tenantId,
           });
 
         expect(response.status).toBe(201);
@@ -230,11 +260,13 @@ describe('StockMovements API', () => {
       it('fails TRANSFER when insufficient stock at source', async () => {
         const response = await request(app)
           .post('/stock-movements')
+          .set(authHeader(testUser))
           .send({
             stockItemId: testStockItem.id,
             type: 'TRANSFER',
             quantity: 150,
             destinationStockItemId: testStockItem2.id,
+            tenantId: testUser.tenantId,
           });
 
         expect(response.status).toBe(400);
@@ -255,10 +287,12 @@ describe('StockMovements API', () => {
       it('requires destinationStockItemId for TRANSFER', async () => {
         const response = await request(app)
           .post('/stock-movements')
+          .set(authHeader(testUser))
           .send({
             stockItemId: testStockItem.id,
             type: 'TRANSFER',
             quantity: 20,
+            tenantId: testUser.tenantId,
           });
 
         expect(response.status).toBe(400);
@@ -269,10 +303,12 @@ describe('StockMovements API', () => {
     it('rejects invalid stockItemId', async () => {
       const response = await request(app)
         .post('/stock-movements')
+        .set(authHeader(testUser))
         .send({
           stockItemId: 'nonexistent-id',
           type: 'RECEIVE',
           quantity: 10,
+          tenantId: testUser.tenantId,
         });
 
       expect(response.status).toBe(404);
@@ -282,10 +318,12 @@ describe('StockMovements API', () => {
     it('rejects invalid movement type', async () => {
       const response = await request(app)
         .post('/stock-movements')
+        .set(authHeader(testUser))
         .send({
           stockItemId: testStockItem.id,
           type: 'INVALID',
           quantity: 10,
+          tenantId: testUser.tenantId,
         });
 
       expect(response.status).toBe(400);
@@ -294,13 +332,27 @@ describe('StockMovements API', () => {
     it('rejects negative quantity for non-ADJUST types', async () => {
       const response = await request(app)
         .post('/stock-movements')
+        .set(authHeader(testUser))
         .send({
           stockItemId: testStockItem.id,
           type: 'RECEIVE',
           quantity: -10,
+          tenantId: testUser.tenantId,
         });
 
       expect(response.status).toBe(400);
+    });
+
+    it('requires authentication', async () => {
+      const response = await request(app)
+        .post('/stock-movements')
+        .send({
+          stockItemId: testStockItem.id,
+          type: 'RECEIVE',
+          quantity: 10,
+        });
+
+      expect(response.status).toBe(401);
     });
   });
 
@@ -309,15 +361,17 @@ describe('StockMovements API', () => {
       // Create some movements
       await prisma.stockMovement.createMany({
         data: [
-          { stockItemId: testStockItem.id, type: 'RECEIVE', quantity: 50 },
-          { stockItemId: testStockItem.id, type: 'SHIP', quantity: 10 },
-          { stockItemId: testStockItem2.id, type: 'RECEIVE', quantity: 25 },
+          { stockItemId: testStockItem.id, type: 'RECEIVE', quantity: 50, tenantId: testUser.tenantId },
+          { stockItemId: testStockItem.id, type: 'SHIP', quantity: 10, tenantId: testUser.tenantId },
+          { stockItemId: testStockItem2.id, type: 'RECEIVE', quantity: 25, tenantId: testUser.tenantId },
         ],
       });
     });
 
     it('returns all movements', async () => {
-      const response = await request(app).get('/stock-movements');
+      const response = await request(app)
+        .get('/stock-movements')
+        .set(authHeader(testUser));
       expect(response.status).toBe(200);
       expect(response.body).toHaveLength(3);
     });
@@ -325,6 +379,7 @@ describe('StockMovements API', () => {
     it('filters by stockItemId', async () => {
       const response = await request(app)
         .get('/stock-movements')
+        .set(authHeader(testUser))
         .query({ stockItemId: testStockItem.id });
 
       expect(response.status).toBe(200);
@@ -334,13 +389,17 @@ describe('StockMovements API', () => {
 
     it('returns empty array when no movements exist', async () => {
       await prisma.stockMovement.deleteMany();
-      const response = await request(app).get('/stock-movements');
+      const response = await request(app)
+        .get('/stock-movements')
+        .set(authHeader(testUser));
       expect(response.status).toBe(200);
       expect(response.body).toEqual([]);
     });
 
     it('includes stockItem relation', async () => {
-      const response = await request(app).get('/stock-movements');
+      const response = await request(app)
+        .get('/stock-movements')
+        .set(authHeader(testUser));
       expect(response.status).toBe(200);
       expect(response.body[0].stockItem).toBeDefined();
     });
@@ -354,10 +413,13 @@ describe('StockMovements API', () => {
           type: 'RECEIVE',
           quantity: 100,
           notes: 'Test movement',
+          tenantId: testUser.tenantId,
         },
       });
 
-      const response = await request(app).get(`/stock-movements/${movement.id}`);
+      const response = await request(app)
+        .get(`/stock-movements/${movement.id}`)
+        .set(authHeader(testUser));
       expect(response.status).toBe(200);
       expect(response.body.id).toBe(movement.id);
       expect(response.body.quantity).toBe(100);
@@ -366,7 +428,9 @@ describe('StockMovements API', () => {
     });
 
     it('returns 404 for unknown id', async () => {
-      const response = await request(app).get('/stock-movements/unknown-id');
+      const response = await request(app)
+        .get('/stock-movements/unknown-id')
+        .set(authHeader(testUser));
       expect(response.status).toBe(404);
     });
   });
