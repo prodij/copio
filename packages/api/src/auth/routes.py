@@ -10,6 +10,8 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.services.email import send_invite_email
+
 from src.auth.backend import auth_backend, fastapi_users
 from src.auth.manager import get_user_manager, UserManager
 from src.db.models.tenant import Tenant
@@ -371,12 +373,29 @@ async def invite_user(
     session.add(user)
     await session.commit()
     
-    print(f"Invite sent to {data.email}. Token: {invite_token}")
+    # Get tenant name for email
+    result = await session.execute(
+        select(Tenant).where(Tenant.id == admin.tenant_id)
+    )
+    tenant = result.scalar_one()
+    
+    # Send invite email
+    # Note: In production, use a proper frontend URL from config
+    invite_url = f"http://localhost:3000/accept-invite?token={invite_token}"
+    
+    await send_invite_email(
+        to=data.email,
+        tenant_name=tenant.name,
+        inviter_name=admin.full_name,
+        inviter_email=admin.email,
+        role=data.role,
+        invite_url=invite_url,
+    )
     
     return InviteUserResponse(
         user_id=str(user.id),
         email=user.email,
-        invite_token=invite_token,  # In production, send this via email
+        invite_token=invite_token,  # Also returned for testing/debugging
         expires_at=expires_at.isoformat(),
     )
 

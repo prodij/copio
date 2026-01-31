@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Your Verification Code</h1>
+
+<p>Hi {{ first_name or 'there' }},</p>
+
+<p>Use the following code to complete your sign-in to Copio:</p>
+
+<div class="code">{{ code }}</div>
+
+<p class="warning">This code will expire in {{ expires_in_minutes }} minutes.</p>
+
+<p>If you didn't attempt to sign in, please change your password immediately as someone may be trying to access your account.</p>
+
+<p>Best regards,<br>The Copio Team</p>
+{% endblock %}

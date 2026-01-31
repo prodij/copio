@@ -34,6 +34,9 @@ dependencies = [
     # Utilities
     "python-multipart>=0.0.6",
     "email-validator>=2.1.0",
+    
+    # Templating (for emails)
+    "jinja2>=3.1.0",
 ]
 
 [project.optional-dependencies]

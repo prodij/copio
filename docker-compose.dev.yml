@@ -44,26 +44,26 @@ services:
       timeout: 5s
       retries: 5
 
+  # Python API (unified backend)
   api:
     build:
       context: .
-      dockerfile: packages/inventory-service/Dockerfile.dev
+      dockerfile: packages/api/Dockerfile.dev
     ports:
-      - "3002:3002"
+      - "8000:8000"   # Python API port
+      - "3002:8000"   # Alias for backward compatibility
     environment:
-      DATABASE_URL: postgresql://copio:copio_dev@postgres:5432/copio
+      DATABASE_URL: postgresql+asyncpg://copio:copio_dev@postgres:5432/copio
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: minio
       MINIO_PORT: "9000"
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-use-openssl-rand-hex-32}
-      PORT: "3002"
-      NODE_ENV: development
+      SECRET_KEY: ${JWT_SECRET:-change-me-in-production-use-openssl-rand-hex-32}
+      DEBUG: "true"
     volumes:
-      - ./packages/inventory-service/src:/app/packages/inventory-service/src
-      - ./packages/core/src:/app/packages/core/src
-      - ./packages/core/prisma:/app/packages/core/prisma
+      - ./packages/api/src:/app/packages/api/src
+      - ./packages/api/alembic:/app/packages/api/alembic
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,6 +72,30 @@ services:
       minio:
         condition: service_healthy
 
+  # TypeScript inventory-service (DEPRECATED - kept for reference)
+  # To use the old TS service, uncomment this and comment out 'api' above
+  # inventory-service:
+  #   build:
+  #     context: .
+  #     dockerfile: packages/inventory-service/Dockerfile.dev
+  #   ports:
+  #     - "3002:3002"
+  #   environment:
+  #     DATABASE_URL: postgresql://copio:copio_dev@postgres:5432/copio
+  #     REDIS_URL: redis://redis:6379
+  #     JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+  #     PORT: "3002"
+  #     NODE_ENV: development
+  #   volumes:
+  #     - ./packages/inventory-service/src:/app/packages/inventory-service/src
+  #     - ./packages/core/src:/app/packages/core/src
+  #     - ./packages/core/prisma:/app/packages/core/prisma
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
   web:
     build:
       context: .
@@ -79,7 +103,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      API_URL: http://api:3002
+      API_URL: http://api:8000
     volumes:
       - ./packages/web/src:/app/packages/web/src
       - ./packages/web/public:/app/packages/web/public
