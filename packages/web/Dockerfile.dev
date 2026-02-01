@@ -7,24 +7,15 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # Copy workspace config
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
-COPY tsconfig.base.json ./
 
-# Copy package.json files AND prisma schema (needed for postinstall)
-COPY packages/core/package.json ./packages/core/
-COPY packages/core/prisma ./packages/core/prisma
+# Copy web package.json
 COPY packages/web/package.json ./packages/web/
 
-# Install all dependencies
-RUN pnpm install
+# Install dependencies
+RUN pnpm install --filter @copio/web
 
-# Copy remaining source code
-COPY packages/core/src ./packages/core/src
-COPY packages/core/tsconfig.json ./packages/core/
+# Copy web source
 COPY packages/web ./packages/web
-
-# Generate Prisma client and build core
-RUN pnpm --filter @copio/core db:generate
-RUN pnpm --filter @copio/core build
 
 WORKDIR /app/packages/web
 
