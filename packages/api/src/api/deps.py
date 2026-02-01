@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import settings
 from src.db.session import get_session, set_tenant_context
 from src.db.models.user import User
-from src.auth import current_active_user as _current_active_user
+from src.auth import current_active_user as fastapi_users_current_user
 
 
 async def get_db() -> AsyncSession:
@@ -26,6 +26,7 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 async def get_current_user_with_dev_bypass(
     request: Request,
     session: DbSession,
+    user: User | None = Depends(fastapi_users_current_user),
 ) -> User:
     """
     Get current user with development bypass.
@@ -36,6 +37,10 @@ async def get_current_user_with_dev_bypass(
     TODO: Remove dev bypass before production.
     """
     auth_header = request.headers.get("Authorization")
+    
+    # If user was resolved by fastapi-users, return it
+    if user is not None:
+        return user
     
     # Development bypass - use first active user when no auth
     if settings.debug and not auth_header:
@@ -50,8 +55,11 @@ async def get_current_user_with_dev_bypass(
             detail="No active users in database for dev bypass",
         )
     
-    # Normal auth flow - delegate to fastapi-users
-    return await _current_active_user(request)
+    # No user and no dev bypass available
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+    )
 
 
 # Type alias for current user dependency (with dev bypass)

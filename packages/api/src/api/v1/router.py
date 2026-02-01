@@ -17,6 +17,7 @@ from src.api.v1 import channel_listings
 from src.api.v1 import purchase_orders
 from src.api.v1 import roles
 from src.api.v1 import users
+from src.api.v1 import permissions
 from src.auth.routes import router as auth_router
 
 api_router = APIRouter()
@@ -47,7 +48,8 @@ api_router.include_router(channel_listings.router, prefix="/channel-listings", t
 api_router.include_router(purchase_orders.router, prefix="/purchase-orders", tags=["Purchase Orders"])
 
 # RBAC routes
-api_router.include_router(roles.router)
+api_router.include_router(roles.router, prefix="/roles", tags=["Roles"])
+api_router.include_router(permissions.router, prefix="/permissions", tags=["Permissions"])
 
 # Users routes
 api_router.include_router(users.router)

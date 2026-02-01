@@ -18,12 +18,21 @@ from src.config import settings
 
 @pytest.fixture(scope="function")
 async def client() -> AsyncGenerator[AsyncClient, None]:
-    """Get test HTTP client."""
+    """Get test HTTP client with tables created."""
+    # Ensure tables exist for app's engine
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as client:
         yield client
+    
+    # Clean up tables after test
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    
     # Dispose engine connections after each test to avoid event loop issues
     await engine.dispose()
 
