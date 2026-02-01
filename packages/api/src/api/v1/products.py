@@ -2,11 +2,12 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import DbSession, CurrentUser
+from src.auth.dependencies import require_permission
 from src.db.models import (
     Product,
     ProductImage,
@@ -39,6 +40,7 @@ async def create_product(
     data: ProductCreate,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("products:create")),
 ):
     """Create a new product."""
     # Check for duplicate SKU
@@ -119,6 +121,7 @@ async def list_products(
     search: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=1000, alias="pageSize"),
+    _perm=Depends(require_permission("products:view")),
 ):
     """List products with pagination and filtering."""
     # Base query with tenant filter
@@ -177,6 +180,7 @@ async def get_product(
     product_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("products:view")),
 ):
     """Get a single product by ID."""
     result = await session.execute(
@@ -210,6 +214,7 @@ async def update_product(
     data: ProductUpdate,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("products:edit")),
 ):
     """Update a product."""
     result = await session.execute(
@@ -252,6 +257,7 @@ async def delete_product(
     product_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("products:delete")),
 ):
     """Delete a product."""
     result = await session.execute(

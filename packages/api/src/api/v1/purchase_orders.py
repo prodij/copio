@@ -4,11 +4,12 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func, or_, and_
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import DbSession, CurrentUser
+from src.auth.dependencies import require_permission
 from src.db.models import (
     PurchaseOrder,
     POLine,

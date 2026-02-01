@@ -6,31 +6,37 @@ from httpx import AsyncClient
 from uuid import uuid4
 
 
-@pytest.mark.asyncio
-async def test_list_audit_log(client_with_db):
-    """Test listing audit log entries."""
-    from src.db.models.audit_log import AuditLog, AuditAction
-    from src.db.models.tenant import Tenant
+async def create_superuser(session, tenant_id):
+    """Create a superuser for testing."""
     from src.db.models.user import User
-    
-    client, session = client_with_db
-    
-    # Create test data
-    tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
-    session.add(tenant)
-    await session.flush()
-    
     user = User(
         id=uuid4(),
         email=f"admin-{uuid4().hex[:8]}@example.com",
         hashed_password="placeholder",
-        tenant_id=tenant.id,
+        tenant_id=tenant_id,
         is_active=True,
         is_superuser=True,
         role="admin",
     )
     session.add(user)
     await session.flush()
+    return user
+
+
+@pytest.mark.asyncio
+async def test_list_audit_log(client_with_db):
+    """Test listing audit log entries."""
+    from src.db.models.audit_log import AuditLog, AuditAction
+    from src.db.models.tenant import Tenant
+    
+    client, session = client_with_db
+    
+    # Create test data - create superuser FIRST so dev bypass finds it
+    tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
+    session.add(tenant)
+    await session.flush()
+    
+    user = await create_superuser(session, tenant.id)
     
     # Create some audit entries
     entries = [
@@ -52,26 +58,15 @@ async def test_filter_audit_log_by_action(client_with_db):
     """Test filtering audit log entries by action."""
     from src.db.models.audit_log import AuditLog, AuditAction
     from src.db.models.tenant import Tenant
-    from src.db.models.user import User
     
     client, session = client_with_db
     
-    # Create test data
+    # Create test data - create superuser FIRST so dev bypass finds it
     tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
     session.add(tenant)
     await session.flush()
     
-    user = User(
-        id=uuid4(),
-        email=f"admin-{uuid4().hex[:8]}@example.com",
-        hashed_password="placeholder",
-        tenant_id=tenant.id,
-        is_active=True,
-        is_superuser=True,
-        role="admin",
-    )
-    session.add(user)
-    await session.flush()
+    user = await create_superuser(session, tenant.id)
     
     # Create entries with different actions
     entries = [
@@ -97,20 +92,14 @@ async def test_filter_audit_log_by_user_id(client_with_db):
     
     client, session = client_with_db
     
-    # Create test data
+    # Create test data - create superuser FIRST so dev bypass finds it
     tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
     session.add(tenant)
     await session.flush()
     
-    user1 = User(
-        id=uuid4(),
-        email=f"admin-{uuid4().hex[:8]}@example.com",
-        hashed_password="placeholder",
-        tenant_id=tenant.id,
-        is_active=True,
-        is_superuser=True,
-        role="admin",
-    )
+    user1 = await create_superuser(session, tenant.id)
+    
+    # Non-superuser
     user2 = User(
         id=uuid4(),
         email=f"user-{uuid4().hex[:8]}@example.com",
@@ -119,7 +108,7 @@ async def test_filter_audit_log_by_user_id(client_with_db):
         is_active=True,
         role="member",
     )
-    session.add_all([user1, user2])
+    session.add(user2)
     await session.flush()
     
     # Create entries for different users
@@ -142,26 +131,15 @@ async def test_audit_log_pagination(client_with_db):
     """Test audit log pagination."""
     from src.db.models.audit_log import AuditLog, AuditAction
     from src.db.models.tenant import Tenant
-    from src.db.models.user import User
     
     client, session = client_with_db
     
-    # Create test data
+    # Create test data - create superuser FIRST so dev bypass finds it
     tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
     session.add(tenant)
     await session.flush()
     
-    user = User(
-        id=uuid4(),
-        email=f"admin-{uuid4().hex[:8]}@example.com",
-        hashed_password="placeholder",
-        tenant_id=tenant.id,
-        is_active=True,
-        is_superuser=True,
-        role="admin",
-    )
-    session.add(user)
-    await session.flush()
+    user = await create_superuser(session, tenant.id)
     
     # Create multiple entries
     entries = [
@@ -186,26 +164,15 @@ async def test_export_audit_log(client_with_db):
     """Test exporting audit log as CSV."""
     from src.db.models.audit_log import AuditLog, AuditAction
     from src.db.models.tenant import Tenant
-    from src.db.models.user import User
     
     client, session = client_with_db
     
-    # Create test data
+    # Create test data - create superuser FIRST so dev bypass finds it
     tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
     session.add(tenant)
     await session.flush()
     
-    user = User(
-        id=uuid4(),
-        email=f"admin-{uuid4().hex[:8]}@example.com",
-        hashed_password="placeholder",
-        tenant_id=tenant.id,
-        is_active=True,
-        is_superuser=True,
-        role="admin",
-    )
-    session.add(user)
-    await session.flush()
+    user = await create_superuser(session, tenant.id)
     
     # Create some audit entries
     entries = [

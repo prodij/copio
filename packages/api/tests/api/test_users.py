@@ -278,41 +278,175 @@ async def test_accept_invite_not_found(client_with_db):
 
 
 @pytest.mark.asyncio
-async def test_update_user(client: AsyncClient, test_tenant, test_user, admin_user, db_session):
+async def test_update_user(client_with_db):
     """Test updating a user's details."""
+    from src.db.models.tenant import Tenant
+    from src.db.models.role import Role
+    from src.db.models.user import User
+    from src.db.models.user_role import UserRole
+    from fastapi_users.jwt import generate_jwt
+    from src.config import settings
+    
+    client, session = client_with_db
+    
+    # Create test data
+    tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
+    session.add(tenant)
+    await session.flush()
+    
+    role = Role(id=uuid4(), tenant_id=tenant.id, name="Admin", permissions=["users:edit"])
+    session.add(role)
+    await session.flush()
+    
+    admin_user = User(
+        id=uuid4(), email=f"admin-{uuid4().hex[:8]}@example.com",
+        hashed_password="placeholder", tenant_id=tenant.id, is_active=True, is_superuser=True
+    )
+    session.add(admin_user)
+    
+    target_user = User(
+        id=uuid4(), email=f"target-{uuid4().hex[:8]}@example.com",
+        hashed_password="placeholder", tenant_id=tenant.id, is_active=True,
+        first_name="Original", last_name="User"
+    )
+    session.add(target_user)
+    
+    # Add role to admin
+    user_role = UserRole(user_id=admin_user.id, role_id=role.id)
+    session.add(user_role)
+    await session.commit()
+    
+    # Create auth token (fastapi_users JWT format)
+    token = generate_jwt(
+        {"sub": str(admin_user.id), "aud": "fastapi-users:auth"},
+        settings.secret_key,
+        settings.access_token_expire_minutes * 60,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    
     response = await client.patch(
-        f"/api/v1/users/{test_user.id}",
+        f"/api/v1/users/{target_user.id}",
         json={"first_name": "Updated", "last_name": "Name"},
+        headers=headers,
     )
     assert response.status_code == 200
     assert response.json()["first_name"] == "Updated"
+    assert response.json()["last_name"] == "Name"
 
 
 @pytest.mark.asyncio
-async def test_deactivate_user(client: AsyncClient, test_tenant, test_user, admin_user, db_session):
+async def test_deactivate_user(client_with_db):
     """Test deactivating a user (soft delete)."""
-    response = await client.delete(f"/api/v1/users/{test_user.id}")
+    from src.db.models.tenant import Tenant
+    from src.db.models.role import Role
+    from src.db.models.user import User
+    from src.db.models.user_role import UserRole
+    from fastapi_users.jwt import generate_jwt
+    from src.config import settings
+    from sqlalchemy import select
+    
+    client, session = client_with_db
+    
+    # Create test data
+    tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
+    session.add(tenant)
+    await session.flush()
+    
+    role = Role(id=uuid4(), tenant_id=tenant.id, name="Admin", permissions=["users:delete"])
+    session.add(role)
+    await session.flush()
+    
+    admin_user = User(
+        id=uuid4(), email=f"admin-{uuid4().hex[:8]}@example.com",
+        hashed_password="placeholder", tenant_id=tenant.id, is_active=True, is_superuser=True
+    )
+    session.add(admin_user)
+    
+    target_user = User(
+        id=uuid4(), email=f"target-{uuid4().hex[:8]}@example.com",
+        hashed_password="placeholder", tenant_id=tenant.id, is_active=True
+    )
+    session.add(target_user)
+    
+    # Add role to admin
+    user_role = UserRole(user_id=admin_user.id, role_id=role.id)
+    session.add(user_role)
+    await session.commit()
+    
+    # Create auth token
+    token = generate_jwt(
+        {"sub": str(admin_user.id), "aud": "fastapi-users:auth"},
+        settings.secret_key,
+        settings.access_token_expire_minutes * 60,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    response = await client.delete(f"/api/v1/users/{target_user.id}", headers=headers)
     assert response.status_code == 204
     
     # Verify user is deactivated
-    from sqlalchemy import select
-    from src.db.models.user import User
-    result = await db_session.execute(select(User).where(User.id == test_user.id))
+    result = await session.execute(select(User).where(User.id == target_user.id))
     user = result.scalar_one()
     assert user.is_active is False
 
 
 @pytest.mark.asyncio
-async def test_change_user_role(client: AsyncClient, test_tenant, test_user, test_role, admin_user, db_session):
+async def test_change_user_role(client_with_db):
     """Test changing a user's role."""
+    from src.db.models.tenant import Tenant
     from src.db.models.role import Role
+    from src.db.models.user import User
+    from src.db.models.user_role import UserRole
+    from fastapi_users.jwt import generate_jwt
+    from src.config import settings
     
-    new_role = Role(tenant_id=test_tenant.id, name="New Role", permissions=["products:view"])
-    db_session.add(new_role)
-    await db_session.commit()
+    client, session = client_with_db
+    
+    # Create test data
+    tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
+    session.add(tenant)
+    await session.flush()
+    
+    old_role = Role(id=uuid4(), tenant_id=tenant.id, name="Member", permissions=["products:view"])
+    session.add(old_role)
+    
+    new_role = Role(id=uuid4(), tenant_id=tenant.id, name="Manager", permissions=["products:edit"])
+    session.add(new_role)
+    
+    admin_role = Role(id=uuid4(), tenant_id=tenant.id, name="Admin", permissions=["users:edit"])
+    session.add(admin_role)
+    await session.flush()
+    
+    admin_user = User(
+        id=uuid4(), email=f"admin-{uuid4().hex[:8]}@example.com",
+        hashed_password="placeholder", tenant_id=tenant.id, is_active=True, is_superuser=True
+    )
+    session.add(admin_user)
+    
+    target_user = User(
+        id=uuid4(), email=f"target-{uuid4().hex[:8]}@example.com",
+        hashed_password="placeholder", tenant_id=tenant.id, is_active=True
+    )
+    session.add(target_user)
+    
+    # Add role to admin and target
+    admin_user_role = UserRole(user_id=admin_user.id, role_id=admin_role.id)
+    session.add(admin_user_role)
+    target_user_role = UserRole(user_id=target_user.id, role_id=old_role.id)
+    session.add(target_user_role)
+    await session.commit()
+    
+    # Create auth token
+    token = generate_jwt(
+        {"sub": str(admin_user.id), "aud": "fastapi-users:auth"},
+        settings.secret_key,
+        settings.access_token_expire_minutes * 60,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
     
     response = await client.patch(
-        f"/api/v1/users/{test_user.id}",
+        f"/api/v1/users/{target_user.id}",
         json={"role_id": str(new_role.id)},
+        headers=headers,
     )
     assert response.status_code == 200

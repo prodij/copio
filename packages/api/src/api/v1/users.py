@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi_users.password import PasswordHelper
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from src.api.deps import DbSession, get_current_user_with_dev_bypass
 from src.auth.dependencies import require_permission
@@ -239,3 +239,72 @@ async def remove_role_from_user(
     await session.commit()
     
     return {"message": "Role removed successfully"}
+
+
+class UserUpdate(BaseModel):
+    """Request schema for updating user."""
+    first_name: str | None = None
+    last_name: str | None = None
+    role_id: UUID | None = None
+
+
+@router.patch("/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: UUID,
+    data: UserUpdate,
+    session: DbSession,
+    current_user: User = Depends(get_current_user_with_dev_bypass),
+    _perm = Depends(require_permission("users:edit")),
+):
+    """Update a user's details or role."""
+    result = await session.execute(
+        select(User).where(User.id == user_id).where(User.tenant_id == current_user.tenant_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if data.first_name is not None:
+        user.first_name = data.first_name
+    if data.last_name is not None:
+        user.last_name = data.last_name
+    if data.role_id is not None:
+        # Verify role exists
+        role_result = await session.execute(
+            select(Role).where(Role.id == data.role_id).where(Role.tenant_id == current_user.tenant_id)
+        )
+        if not role_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Role not found")
+        
+        # Update user role (remove old, add new)
+        await session.execute(
+            delete(UserRole).where(UserRole.user_id == user_id)
+        )
+        user_role = UserRole(user_id=user_id, role_id=data.role_id)
+        session.add(user_role)
+    
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def deactivate_user(
+    user_id: UUID,
+    session: DbSession,
+    current_user: User = Depends(get_current_user_with_dev_bypass),
+    _perm = Depends(require_permission("users:delete")),
+):
+    """Deactivate a user (soft delete)."""
+    result = await session.execute(
+        select(User).where(User.id == user_id).where(User.tenant_id == current_user.tenant_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
+    
+    user.is_active = False
+    await session.commit()

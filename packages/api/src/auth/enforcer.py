@@ -41,6 +41,10 @@ class PermissionEnforcer:
 
     async def can(self, user: User, permission: str) -> bool:
         """Check if user has a specific permission."""
+        # Superusers bypass all permission checks
+        if user.is_superuser:
+            return True
+        
         granted_permissions = await self._load_permissions(user)
         for granted in granted_permissions:
             if permission_matches(granted, permission):

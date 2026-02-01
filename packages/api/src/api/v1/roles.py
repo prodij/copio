@@ -60,11 +60,10 @@ class RoleUpdate(BaseModel):
 class RoleResponse(BaseModel):
     """Schema for role response."""
     id: UUID
-    tenant_id: UUID
     name: str
     description: str | None = None
-    permissions: List[str]
     is_system: bool
+    permissions: List[str]
 
     class Config:
         from_attributes = True

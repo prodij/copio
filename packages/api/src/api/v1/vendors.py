@@ -3,11 +3,12 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import DbSession, CurrentUser
+from src.auth.dependencies import require_permission
 from src.db.models import (
     Vendor,
     VendorContact,
@@ -37,6 +38,7 @@ async def create_vendor(
     data: VendorCreate,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("vendors:create")),
 ):
     """Create a new vendor."""
     # Check for duplicate code
@@ -78,6 +80,7 @@ async def list_vendors(
     active: bool | None = Query(None),
     tier: VendorTier | None = None,
     search: str | None = None,
+    _perm=Depends(require_permission("vendors:view")),
 ):
     """List vendors with optional filtering."""
     query = select(Vendor).where(Vendor.tenant_id == current_user.tenant_id)
@@ -132,6 +135,7 @@ async def list_vendors(
 async def get_vendor_stats(
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("vendors:view")),
 ):
     """Get vendor statistics summary."""
     # Total active vendors
@@ -176,6 +180,7 @@ async def get_vendor(
     vendor_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("vendors:view")),
 ):
     """Get a single vendor with all relationships."""
     result = await session.execute(
@@ -206,6 +211,7 @@ async def update_vendor(
     data: VendorUpdate,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("vendors:edit")),
 ):
     """Update a vendor."""
     result = await session.execute(
@@ -265,6 +271,7 @@ async def delete_vendor(
     vendor_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("vendors:delete")),
 ):
     """Delete a vendor."""
     result = await session.execute(

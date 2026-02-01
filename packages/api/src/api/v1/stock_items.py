@@ -2,11 +2,12 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import DbSession, CurrentUser
+from src.auth.dependencies import require_permission
 from src.db.models import StockItem, Product, Location
 from src.schemas.inventory import (
     StockItemCreate,

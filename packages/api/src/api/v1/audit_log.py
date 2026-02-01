@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, desc, func
 
 from src.api.deps import DbSession, get_current_user_with_dev_bypass
@@ -21,6 +21,8 @@ router = APIRouter(prefix="/audit-log", tags=["audit-log"])
 
 class AuditLogEntry(BaseModel):
     """Audit log entry response model."""
+    model_config = ConfigDict(from_attributes=True)
+    
     id: UUID
     user_id: UUID | None
     action: str
@@ -29,9 +31,6 @@ class AuditLogEntry(BaseModel):
     details: dict | None
     ip_address: str | None
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
 
 
 class AuditLogResponse(BaseModel):
