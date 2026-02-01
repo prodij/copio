@@ -113,7 +113,7 @@ async def list_purchase_orders(
         .options(
             selectinload(PurchaseOrder.vendor),
             selectinload(PurchaseOrder.destination),
-            selectinload(PurchaseOrder.lines),
+            selectinload(PurchaseOrder.lines).selectinload(POLine.product),
         )
         .order_by(PurchaseOrder.created_at.desc())
         .offset(offset)

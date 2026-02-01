@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Package, MapPin, Layers, AlertTriangle, ArrowDown, ArrowUp, RefreshCw, ArrowLeftRight } from "lucide-react";
+import { Package, MapPin, Layers, AlertTriangle, ArrowDown, ArrowUp, RefreshCw, ArrowLeftRight, FileText, DollarSign, Truck, Clock } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 const API_URL = process.env.API_URL || 'http://localhost:8000/api/v1';
 
@@ -24,6 +25,12 @@ async function getMovements() {
   const res = await fetch(`${API_URL}/stock-movements`, { cache: 'no-store' });
   const data = await res.json();
   return data.data || data; // Handle both paginated and legacy response
+}
+
+async function getPurchaseOrders() {
+  const res = await fetch(`${API_URL}/purchase-orders`, { cache: 'no-store' });
+  if (!res.ok) return { purchaseOrders: [], total: 0 };
+  return res.json();
 }
 
 function MovementTypeBadge({ type }: { type: string }) {
@@ -60,15 +67,28 @@ function formatDate(dateString: string) {
 }
 
 export default async function DashboardPage() {
-  const [products, locations, stockItems, movements] = await Promise.all([
+  const [products, locations, stockItems, movements, poData] = await Promise.all([
     getProducts(),
     getLocations(),
     getStockItems(),
     getMovements(),
+    getPurchaseOrders(),
   ]);
 
   const totalUnits = stockItems.reduce((sum: number, item: any) => sum + item.quantityAvailable, 0);
   const lowStockItems = stockItems.filter((item: any) => item.quantityAvailable < 10);
+  
+  // Calculate inventory value
+  const inventoryValue = stockItems.reduce((sum: number, item: any) => {
+    const cost = parseFloat(item.costBasis) || 0;
+    return sum + (cost * item.quantityAvailable);
+  }, 0);
+
+  // PO stats
+  const purchaseOrders = poData.purchaseOrders || [];
+  const openPOs = purchaseOrders.filter((po: any) => ['DRAFT', 'SUBMITTED', 'CONFIRMED'].includes(po.status));
+  const inTransitPOs = purchaseOrders.filter((po: any) => po.status === 'SHIPPED');
+  const totalPOValue = openPOs.reduce((sum: number, po: any) => sum + (parseFloat(po.total) || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -79,7 +99,7 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      {/* Stats Cards */}
+      {/* Stats Cards - Row 1: Inventory Overview */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -105,6 +125,53 @@ export default async function DashboardPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Inventory Value</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">${inventoryValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+            <p className="text-xs text-muted-foreground">Total cost basis</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Low Stock</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-orange-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">{lowStockItems.length}</div>
+            <p className="text-xs text-muted-foreground">Items need attention</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Stats Cards - Row 2: PO & Locations */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Open POs</CardTitle>
+            <FileText className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{openPOs.length}</div>
+            <p className="text-xs text-muted-foreground">${totalPOValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} pending</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">In Transit</CardTitle>
+            <Truck className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{inTransitPOs.length}</div>
+            <p className="text-xs text-muted-foreground">Shipments en route</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Locations</CardTitle>
             <MapPin className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -116,12 +183,12 @@ export default async function DashboardPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Low Stock</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Recent Activity</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{lowStockItems.length}</div>
-            <p className="text-xs text-muted-foreground">Items need attention</p>
+            <div className="text-2xl font-bold">{movements.length}</div>
+            <p className="text-xs text-muted-foreground">Stock movements</p>
           </CardContent>
         </Card>
       </div>

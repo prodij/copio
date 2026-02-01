@@ -19,7 +19,7 @@ interface PurchaseOrder {
   createdAt: string;
   vendor: { id: string; name: string; code: string | null };
   destination: { id: string; name: string; type: string };
-  _count: { lines: number };
+  lines: Array<{ id: string }>;
 }
 
 async function getPurchaseOrders(): Promise<{ purchaseOrders: PurchaseOrder[]; total: number }> {
@@ -108,7 +108,7 @@ export default async function PurchaseOrdersPage() {
                       )}
                     </TableCell>
                     <TableCell>{po.destination.name}</TableCell>
-                    <TableCell className="text-center">{po._count.lines}</TableCell>
+                    <TableCell className="text-center">{po.lines?.length || 0}</TableCell>
                     <TableCell className="text-right font-medium">
                       {formatCurrency(po.total)}
                     </TableCell>
