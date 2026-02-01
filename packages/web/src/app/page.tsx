@@ -22,7 +22,8 @@ async function getStockItems() {
 
 async function getMovements() {
   const res = await fetch(`${API_URL}/stock-movements`, { cache: 'no-store' });
-  return res.json();
+  const data = await res.json();
+  return data.data || data; // Handle both paginated and legacy response
 }
 
 function MovementTypeBadge({ type }: { type: string }) {

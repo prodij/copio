@@ -118,7 +118,7 @@ async def list_products(
     parent_id: str | None = Query(None, alias="parentId"),
     search: str | None = None,
     page: int = Query(1, ge=1),
-    page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
+    page_size: int = Query(25, ge=1, le=1000, alias="pageSize"),
 ):
     """List products with pagination and filtering."""
     # Base query with tenant filter
