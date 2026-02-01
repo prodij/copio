@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from src.main import app
 from src.db.session import engine
 from src.db.base import Base
-from src.db.models import Tenant, User
+from src.db.models import Tenant, User, Role
 from src.config import settings
 
 
@@ -93,3 +93,18 @@ async def test_user(db_session: AsyncSession, test_tenant: Tenant) -> User:
     await db_session.commit()
     await db_session.refresh(user)
     return user
+
+
+@pytest.fixture(scope="function")
+async def test_role(db_session: AsyncSession, test_tenant: Tenant) -> Role:
+    """Create a test role."""
+    role = Role(
+        id=uuid4(),
+        tenant_id=test_tenant.id,
+        name="Test Role",
+        permissions=["*:view"],
+    )
+    db_session.add(role)
+    await db_session.commit()
+    await db_session.refresh(role)
+    return role
