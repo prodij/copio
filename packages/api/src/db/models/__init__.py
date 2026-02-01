@@ -34,6 +34,7 @@ from src.db.models.vendor import (
 )
 from src.db.models.purchase_order import PurchaseOrder, POLine
 from src.db.models.user_invite import UserInvite
+from src.db.models.audit_log import AuditLog, AuditAction
 
 __all__ = [
     # Enums
@@ -83,4 +84,7 @@ __all__ = [
     "POLine",
     # User Invites
     "UserInvite",
+    # Audit
+    "AuditLog",
+    "AuditAction",
 ]
