@@ -9,19 +9,24 @@ import { SortableHeader } from "@/components/sortable-header";
 
 const API_URL = process.env.API_URL || "http://localhost:8000/api/v1";
 
+interface VendorContact {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  isPrimary: boolean;
+}
+
 interface Vendor {
   id: string;
   name: string;
   code: string | null;
   tier: string;
-  contact: Record<string, unknown>;
+  contacts: VendorContact[];
   leadTimeDays: number;
-  minOrderValue: number | null;
-  paymentTerms: string | null;
-  currency: string | null;
   isActive: boolean;
-  createdAt: string;
-  _count: { products: number; purchaseOrders: number };
+  product_count: number;
+  po_count: number;
 }
 
 async function getVendors(): Promise<Vendor[]> {
@@ -105,8 +110,8 @@ export default async function VendorsPage({
         bVal = tierOrder[b.tier as keyof typeof tierOrder] || 5;
         break;
       case "products":
-        aVal = a._count.products;
-        bVal = b._count.products;
+        aVal = a.product_count || 0;
+        bVal = b.product_count || 0;
         break;
       case "leadTimeDays":
         aVal = a.leadTimeDays;
@@ -115,10 +120,6 @@ export default async function VendorsPage({
       case "isActive":
         aVal = a.isActive ? 1 : 0;
         bVal = b.isActive ? 1 : 0;
-        break;
-      case "createdAt":
-        aVal = a.createdAt;
-        bVal = b.createdAt;
         break;
       default:
         return 0;
@@ -161,11 +162,11 @@ export default async function VendorsPage({
                 <SortableHeader field="name">Vendor</SortableHeader>
                 <SortableHeader field="code">Code</SortableHeader>
                 <SortableHeader field="tier">Tier</SortableHeader>
+                <TableHead>Contact</TableHead>
                 <SortableHeader field="products" className="text-center">Products</SortableHeader>
                 <SortableHeader field="leadTimeDays" className="text-center">Lead Time</SortableHeader>
-                <TableHead>Payment Terms</TableHead>
+                <TableHead className="text-center">POs</TableHead>
                 <SortableHeader field="isActive">Status</SortableHeader>
-                <SortableHeader field="createdAt">Added</SortableHeader>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -185,14 +186,26 @@ export default async function VendorsPage({
                         {vendor.tier}
                       </Badge>
                     </TableCell>
+                    <TableCell>
+                      {vendor.contacts?.[0] ? (
+                        <div>
+                          <div className="text-sm">{vendor.contacts[0].name}</div>
+                          {vendor.contacts[0].email && (
+                            <div className="text-xs text-muted-foreground">{vendor.contacts[0].email}</div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-center">
-                      {vendor._count.products}
+                      {vendor.product_count || 0}
                     </TableCell>
                     <TableCell className="text-center">
                       {vendor.leadTimeDays} days
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {vendor.paymentTerms || "—"}
+                    <TableCell className="text-center">
+                      {vendor.po_count || 0}
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -202,15 +215,12 @@ export default async function VendorsPage({
                         {vendor.isActive ? "Active" : "Inactive"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(vendor.createdAt)}
-                    </TableCell>
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
-                    No vendors found. {params.search || params.tier || params.status ? "Try adjusting your filters." : "Add your first vendor to start tracking sourcing."}
+                    No vendors found. {(params.search || params.tier || params.status) ? "Try adjusting your filters." : "Add your first vendor to start tracking sourcing."}
                   </TableCell>
                 </TableRow>
               )}
