@@ -15,6 +15,8 @@ from src.api.v1 import vendor_documents
 from src.api.v1 import vendor_products
 from src.api.v1 import channel_listings
 from src.api.v1 import purchase_orders
+from src.api.v1 import roles
+from src.api.v1 import users
 from src.auth.routes import router as auth_router
 
 api_router = APIRouter()
@@ -43,3 +45,9 @@ api_router.include_router(vendor_products.router, prefix="/vendor-products", tag
 # Channel & Orders routes (migrated from TypeScript)
 api_router.include_router(channel_listings.router, prefix="/channel-listings", tags=["Channel Listings"])
 api_router.include_router(purchase_orders.router, prefix="/purchase-orders", tags=["Purchase Orders"])
+
+# RBAC routes
+api_router.include_router(roles.router)
+
+# Users routes
+api_router.include_router(users.router)
