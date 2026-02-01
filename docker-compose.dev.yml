@@ -53,7 +53,7 @@ services:
       - "8000:8000"   # Python API port
       - "3002:8000"   # Alias for backward compatibility
     environment:
-      DATABASE_URL: postgresql+asyncpg://copio:copio_dev@postgres:5432/copio
+      DATABASE_URL: postgresql+psycopg://copio:copio_dev@postgres:5432/copio
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: minio
       MINIO_PORT: "9000"

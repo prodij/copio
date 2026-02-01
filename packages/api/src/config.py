@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     environment: Literal["development", "staging", "production"] = "development"
     debug: bool = True
 
-    # Database
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/copio"
+    # Database (using psycopg3 for native async without event loop issues)
+    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/copio"
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
@@ -44,10 +44,14 @@ class Settings(BaseSettings):
 
     @property
     def async_database_url(self) -> str:
-        """Ensure database URL uses asyncpg driver."""
-        if self.database_url.startswith("postgresql://"):
-            return self.database_url.replace("postgresql://", "postgresql+asyncpg://")
-        return self.database_url
+        """Ensure database URL uses psycopg async driver."""
+        url = self.database_url
+        # Normalize to psycopg for async
+        if url.startswith("postgresql://"):
+            return url.replace("postgresql://", "postgresql+psycopg://")
+        if url.startswith("postgresql+asyncpg://"):
+            return url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
+        return url
 
 
 @lru_cache

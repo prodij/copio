@@ -1,51 +1,53 @@
 """Pytest configuration and fixtures."""
 
-import asyncio
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from src.main import app
-from src.db.session import engine
 from src.db.base import Base
-from src.db import models  # Import all models to register them with Base
+from src.db import models  # noqa: F401 - Import all models
 from src.db.models import Tenant, User, Role, UserRole, UserInvite
 from src.config import settings
 from src.api.deps import get_db
+from src.api.v1.router import api_router
+
+
+def create_test_app() -> FastAPI:
+    """Create a fresh FastAPI app for testing."""
+    @asynccontextmanager
+    async def test_lifespan(app: FastAPI):
+        yield
+    
+    app = FastAPI(title="Copio Test", lifespan=test_lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.include_router(api_router, prefix="/api/v1")
+    
+    # Add health endpoint (same as main app)
+    @app.get("/health")
+    async def health_check():
+        return {"status": "healthy", "service": "copio-api"}
+    
+    return app
 
 
 @pytest.fixture(scope="function")
 async def client() -> AsyncGenerator[AsyncClient, None]:
-    """Get test HTTP client with tables created."""
-    # Ensure tables exist for app's engine
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        yield client
-    
-    # Clean up tables after test
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    
-    # Dispose engine connections after each test to avoid event loop issues
-    await engine.dispose()
-
-
-@pytest.fixture(scope="function")
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get a test database session with automatic rollback."""
-    # Create a fresh engine for this test to avoid event loop issues
+    """Get test HTTP client with fresh database per test."""
     test_engine = create_async_engine(
         settings.async_database_url,
         echo=False,
-        pool_pre_ping=True,
     )
     test_session_maker = async_sessionmaker(
         test_engine,
@@ -53,15 +55,50 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         expire_on_commit=False,
     )
     
-    # Create all tables
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
+    test_app = create_test_app()
+    
+    async def override_get_db():
+        async with test_session_maker() as session:
+            yield session
+    
+    test_app.dependency_overrides[get_db] = override_get_db
+    
+    async with AsyncClient(
+        transport=ASGITransport(app=test_app),
+        base_url="http://test",
+    ) as http_client:
+        yield http_client
+    
+    test_app.dependency_overrides.clear()
+    
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    
+    await test_engine.dispose()
+
+
+@pytest.fixture(scope="function")
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Get a test database session."""
+    test_engine = create_async_engine(
+        settings.async_database_url,
+        echo=False,
+    )
+    test_session_maker = async_sessionmaker(
+        test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     
     async with test_session_maker() as session:
         yield session
-        await session.rollback()
     
-    # Drop all tables after test
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     
@@ -70,12 +107,10 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 
 @pytest.fixture(scope="function")
 async def client_with_db() -> AsyncGenerator[tuple[AsyncClient, AsyncSession], None]:
-    """Get test HTTP client with shared database session for testing."""
-    # Create a fresh engine for this test
+    """Get test HTTP client with shared database session."""
     test_engine = create_async_engine(
         settings.async_database_url,
         echo=False,
-        pool_pre_ping=True,
     )
     test_session_maker = async_sessionmaker(
         test_engine,
@@ -83,32 +118,36 @@ async def client_with_db() -> AsyncGenerator[tuple[AsyncClient, AsyncSession], N
         expire_on_commit=False,
     )
     
-    # Create all tables
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     
-    async with test_session_maker() as session:
-        # Override the get_db dependency to use our test session
-        async def override_get_db():
-            yield session
-        
-        app.dependency_overrides[get_db] = override_get_db
-        
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            yield client, session
-        
-        # Clean up overrides
-        app.dependency_overrides.clear()
+    test_app = create_test_app()
+    session = test_session_maker()
     
-    # Drop all tables after test
+    async def override_get_db():
+        async with test_session_maker() as api_session:
+            yield api_session
+    
+    test_app.dependency_overrides[get_db] = override_get_db
+    
+    async with AsyncClient(
+        transport=ASGITransport(app=test_app),
+        base_url="http://test",
+    ) as http_client:
+        yield http_client, session
+    
+    await session.close()
+    test_app.dependency_overrides.clear()
+    
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     
     await test_engine.dispose()
 
+
+# =============================================================================
+# Test data fixtures
+# =============================================================================
 
 @pytest.fixture(scope="function")
 async def test_tenant(db_session: AsyncSession) -> Tenant:

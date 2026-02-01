@@ -384,10 +384,15 @@ async def test_deactivate_user(client_with_db):
     response = await client.delete(f"/api/v1/users/{target_user.id}", headers=headers)
     assert response.status_code == 204
     
-    # Verify user is deactivated
-    result = await session.execute(select(User).where(User.id == target_user.id))
-    user = result.scalar_one()
-    assert user.is_active is False
+    # Verify user is deactivated - use fresh query with new connection
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    verify_engine = create_async_engine(settings.async_database_url)
+    verify_session_maker = async_sessionmaker(verify_engine, class_=AsyncSession)
+    async with verify_session_maker() as verify_session:
+        result = await verify_session.execute(select(User).where(User.id == target_user.id))
+        user = result.scalar_one()
+        assert user.is_active is False
+    await verify_engine.dispose()
 
 
 @pytest.mark.asyncio
