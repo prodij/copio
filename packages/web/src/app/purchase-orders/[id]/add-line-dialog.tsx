@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, Loader2, AlertCircle } from "lucide-react";
+import { toast } from "sonner";
 
 interface VendorProduct {
   id: string;
@@ -98,11 +99,14 @@ export function AddLineDialog({ poId, vendorId }: AddLineDialogProps) {
         throw new Error(data.error || "Failed to add line");
       }
 
+      toast.success("Item added to purchase order");
       setFormData({ productId: "", quantityOrdered: "", unitCost: "" });
       setOpen(false);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }

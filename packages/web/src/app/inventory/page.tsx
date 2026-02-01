@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { InventoryTable } from "./inventory-table";
 
-const API_URL = process.env.API_URL || 'http://localhost:8001/api/v1';
+const API_URL = process.env.API_URL || 'http://localhost:8000/api/v1';
 
 interface Product {
   id: string;

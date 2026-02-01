@@ -16,8 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Pencil, Loader2, AlertCircle, Trash2 } from "lucide-react";
-
-// Client-side requests go through Next.js proxy
+import { toast } from "sonner";
 
 interface POLine {
   id: string;
@@ -70,10 +69,13 @@ export function EditLineDialog({ poId, line, canDelete = true }: EditLineDialogP
         throw new Error(data.error || "Failed to update line");
       }
 
+      toast.success("Line item updated");
       setOpen(false);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -93,10 +95,13 @@ export function EditLineDialog({ poId, line, canDelete = true }: EditLineDialogP
         throw new Error(data.error || "Failed to delete line");
       }
 
+      toast.success("Item removed from order");
       setOpen(false);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }

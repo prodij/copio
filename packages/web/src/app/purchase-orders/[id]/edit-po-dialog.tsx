@@ -16,8 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Pencil, Loader2, AlertCircle } from "lucide-react";
-
-// Client-side requests go through Next.js proxy
+import { toast } from "sonner";
 
 interface PurchaseOrder {
   id: string;
@@ -88,10 +87,13 @@ export function EditPODialog({ po }: EditPODialogProps) {
         throw new Error(data.error || "Failed to update purchase order");
       }
 
+      toast.success("Purchase order updated");
       setOpen(false);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }

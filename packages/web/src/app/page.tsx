@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Package, MapPin, Layers, AlertTriangle, ArrowDown, ArrowUp, RefreshCw, ArrowLeftRight } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-const API_URL = process.env.API_URL || 'http://localhost:8001/api/v1';
+const API_URL = process.env.API_URL || 'http://localhost:8000/api/v1';
 
 async function getProducts() {
   const res = await fetch(`${API_URL}/products?pageSize=1000`, { cache: 'no-store' });

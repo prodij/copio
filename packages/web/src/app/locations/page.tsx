@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { MapPin } from "lucide-react";
 import { CreateLocationDialog } from "./create-dialog";
 
-const API_URL = process.env.API_URL || 'http://localhost:8001/api/v1';
+const API_URL = process.env.API_URL || 'http://localhost:8000/api/v1';
 
 interface Location {
   id: string;

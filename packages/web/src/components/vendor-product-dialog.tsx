@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Loader2, AlertCircle, Pencil } from "lucide-react";
+import { toast } from "sonner";
 
 interface Vendor {
   id: string;
@@ -157,11 +158,14 @@ export function VendorProductDialog({
         throw new Error(data.error || `Failed to ${isEditing ? "update" : "create"} vendor link`);
       }
 
+      toast.success(isEditing ? "Vendor link updated" : "Vendor link created");
       setOpen(false);
       router.refresh();
       onSuccess?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }

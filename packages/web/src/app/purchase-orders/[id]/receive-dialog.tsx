@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PackageCheck, Loader2, AlertCircle, Package } from "lucide-react";
+import { toast } from "sonner";
 
 interface POLine {
   id: string;
@@ -78,10 +79,13 @@ export function ReceiveDialog({ po }: { po: PurchaseOrder }) {
         throw new Error(data.error || "Failed to receive items");
       }
 
+      toast.success("Items received and inventory updated");
       setOpen(false);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }

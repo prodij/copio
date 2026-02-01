@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, Loader2, AlertCircle, Pencil } from "lucide-react";
+import { toast } from "sonner";
 
 interface ChannelListing {
   id: string;
@@ -138,11 +139,14 @@ export function ChannelListingDialog({
         throw new Error(data.error || `Failed to ${isEditing ? "update" : "create"} listing`);
       }
 
+      toast.success(isEditing ? "Listing updated" : "Listing created");
       setOpen(false);
       router.refresh();
       onSuccess?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
