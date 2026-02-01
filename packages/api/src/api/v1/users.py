@@ -5,6 +5,7 @@ from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi_users.password import PasswordHelper
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 
@@ -12,9 +13,13 @@ from src.api.deps import DbSession, get_current_user_with_dev_bypass
 from src.auth.dependencies import require_permission
 from src.db.models.user import User
 from src.db.models.user_invite import UserInvite
+from src.db.models.user_role import UserRole
 from src.db.models.role import Role
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+# Password helper for hashing
+password_helper = PasswordHelper()
 
 
 class UserResponse(BaseModel):
@@ -108,3 +113,61 @@ async def invite_user(
     # TODO: Send email with invite link
     
     return invite
+
+
+class InviteAccept(BaseModel):
+    """Request schema for accepting an invite."""
+    password: str
+    first_name: str | None = None
+    last_name: str | None = None
+
+
+@router.get("/invite/{token}")
+async def validate_invite(token: str, session: DbSession):
+    """Validate an invite token and return invite details."""
+    result = await session.execute(
+        select(UserInvite).where(UserInvite.token == token)
+    )
+    invite = result.scalar_one_or_none()
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    if not invite.is_valid:
+        raise HTTPException(status_code=410, detail="Invite expired or already used")
+    return {"email": invite.email, "expires_at": invite.expires_at}
+
+
+@router.post("/invite/{token}/accept", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def accept_invite(token: str, data: InviteAccept, session: DbSession):
+    """Accept an invite and create user account."""
+    result = await session.execute(
+        select(UserInvite).where(UserInvite.token == token)
+    )
+    invite = result.scalar_one_or_none()
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    if not invite.is_valid:
+        raise HTTPException(status_code=410, detail="Invite expired or already used")
+    
+    # Create user with hashed password
+    user = User(
+        email=invite.email,
+        hashed_password=password_helper.hash(data.password),
+        tenant_id=invite.tenant_id,
+        first_name=data.first_name,
+        last_name=data.last_name,
+        is_active=True,
+        is_verified=True,
+    )
+    session.add(user)
+    await session.flush()  # Get user.id for UserRole
+    
+    # Assign role
+    user_role = UserRole(user_id=user.id, role_id=invite.role_id)
+    session.add(user_role)
+    
+    # Mark invite as accepted
+    invite.accepted_at = datetime.now(timezone.utc)
+    
+    await session.commit()
+    await session.refresh(user)
+    return user

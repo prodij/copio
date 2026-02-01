@@ -9,10 +9,9 @@ from src.db.models.role import Role
 from src.db.models.user_role import UserRole
 
 
-def create_protected_app(db_session, debug_callback=None):
+def create_protected_app(db_session):
     """Create a fresh FastAPI app with permission-protected route."""
     from src.api.deps import get_db, get_current_user_with_dev_bypass
-    from src.auth.enforcer import PermissionEnforcer
     
     app = FastAPI()
     
@@ -26,11 +25,6 @@ def create_protected_app(db_session, debug_callback=None):
         user = Depends(get_current_user_with_dev_bypass),
         _perm = Depends(require_permission("products:create")),
     ):
-        if debug_callback:
-            enforcer = PermissionEnforcer(db_session)
-            perms = await enforcer._load_permissions(user)
-            can = await enforcer.can(user, "products:create")
-            debug_callback(user, perms, can)
         return {"message": "success", "user": user.email}
     
     return app
@@ -66,19 +60,11 @@ async def test_permission_denied(test_user, test_tenant, db_session):
     db_session.add(user_role)
     await db_session.commit()
     
-    debug_info = {}
-    def capture_debug(user, perms, can):
-        debug_info['user'] = user
-        debug_info['perms'] = perms
-        debug_info['can'] = can
-    
-    app = create_protected_app(db_session, debug_callback=capture_debug)
+    app = create_protected_app(db_session)
     
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/protected")
-        if response.status_code != 403:
-            print(f"DEBUG: user={debug_info.get('user')}, perms={debug_info.get('perms')}, can={debug_info.get('can')}")
-        assert response.status_code == 403, f"Expected 403, got {response.status_code}. User={debug_info.get('user')}, perms={debug_info.get('perms')}, can={debug_info.get('can')}"
+        assert response.status_code == 403
         assert "permission" in response.json()["detail"].lower()
 
 

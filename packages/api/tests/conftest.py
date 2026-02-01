@@ -14,6 +14,7 @@ from src.db.base import Base
 from src.db import models  # Import all models to register them with Base
 from src.db.models import Tenant, User, Role, UserRole, UserInvite
 from src.config import settings
+from src.api.deps import get_db
 
 
 @pytest.fixture(scope="function")
@@ -59,6 +60,48 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async with test_session_maker() as session:
         yield session
         await session.rollback()
+    
+    # Drop all tables after test
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    
+    await test_engine.dispose()
+
+
+@pytest.fixture(scope="function")
+async def client_with_db() -> AsyncGenerator[tuple[AsyncClient, AsyncSession], None]:
+    """Get test HTTP client with shared database session for testing."""
+    # Create a fresh engine for this test
+    test_engine = create_async_engine(
+        settings.async_database_url,
+        echo=False,
+        pool_pre_ping=True,
+    )
+    test_session_maker = async_sessionmaker(
+        test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    
+    # Create all tables
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
+    async with test_session_maker() as session:
+        # Override the get_db dependency to use our test session
+        async def override_get_db():
+            yield session
+        
+        app.dependency_overrides[get_db] = override_get_db
+        
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            yield client, session
+        
+        # Clean up overrides
+        app.dependency_overrides.clear()
     
     # Drop all tables after test
     async with test_engine.begin() as conn:

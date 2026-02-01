@@ -119,23 +119,46 @@ class TestUsersAPI:
 
 
 
+
+
 # Standalone tests for invite validation/acceptance (these are public endpoints)
 @pytest.mark.asyncio
-async def test_validate_invite_token(client: AsyncClient, db_session, test_tenant, test_role, test_user):
+async def test_validate_invite_token(client_with_db):
     """Test validating an invite token returns invite details."""
     from src.db.models.user_invite import UserInvite
+    from src.db.models.tenant import Tenant
+    from src.db.models.role import Role
+    from src.db.models.user import User
     from datetime import datetime, timedelta, timezone
     
+    client, session = client_with_db
+    
+    # Create test data
+    tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
+    session.add(tenant)
+    await session.flush()
+    
+    role = Role(id=uuid4(), tenant_id=tenant.id, name="Test Role", permissions=["*:view"])
+    session.add(role)
+    await session.flush()
+    
+    user = User(
+        id=uuid4(), email=f"inviter-{uuid4().hex[:8]}@example.com",
+        hashed_password="placeholder", tenant_id=tenant.id, is_active=True
+    )
+    session.add(user)
+    await session.flush()
+    
     invite = UserInvite(
-        tenant_id=test_tenant.id,
+        tenant_id=tenant.id,
         email="newuser@example.com",
-        role_id=test_role.id,
-        invited_by=test_user.id,
+        role_id=role.id,
+        invited_by=user.id,
         expires_at=datetime.now(timezone.utc) + timedelta(days=7),
     )
-    db_session.add(invite)
-    await db_session.commit()
-    await db_session.refresh(invite)
+    session.add(invite)
+    await session.commit()
+    await session.refresh(invite)
     
     response = await client.get(f"/api/v1/users/invite/{invite.token}")
     assert response.status_code == 200
@@ -143,29 +166,51 @@ async def test_validate_invite_token(client: AsyncClient, db_session, test_tenan
 
 
 @pytest.mark.asyncio
-async def test_validate_invite_token_not_found(client: AsyncClient):
+async def test_validate_invite_token_not_found(client_with_db):
     """Test validating non-existent token returns 404."""
+    client, _ = client_with_db
     fake_token = "a" * 64
     response = await client.get(f"/api/v1/users/invite/{fake_token}")
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_accept_invite(client: AsyncClient, db_session, test_tenant, test_role, test_user):
+async def test_accept_invite(client_with_db):
     """Test accepting an invite creates a user account."""
     from src.db.models.user_invite import UserInvite
+    from src.db.models.tenant import Tenant
+    from src.db.models.role import Role
+    from src.db.models.user import User
     from datetime import datetime, timedelta, timezone
     
+    client, session = client_with_db
+    
+    # Create test data
+    tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
+    session.add(tenant)
+    await session.flush()
+    
+    role = Role(id=uuid4(), tenant_id=tenant.id, name="Test Role", permissions=["*:view"])
+    session.add(role)
+    await session.flush()
+    
+    user = User(
+        id=uuid4(), email=f"inviter-{uuid4().hex[:8]}@example.com",
+        hashed_password="placeholder", tenant_id=tenant.id, is_active=True
+    )
+    session.add(user)
+    await session.flush()
+    
     invite = UserInvite(
-        tenant_id=test_tenant.id,
+        tenant_id=tenant.id,
         email="accepted@example.com",
-        role_id=test_role.id,
-        invited_by=test_user.id,
+        role_id=role.id,
+        invited_by=user.id,
         expires_at=datetime.now(timezone.utc) + timedelta(days=7),
     )
-    db_session.add(invite)
-    await db_session.commit()
-    await db_session.refresh(invite)
+    session.add(invite)
+    await session.commit()
+    await session.refresh(invite)
     
     response = await client.post(
         f"/api/v1/users/invite/{invite.token}/accept",
@@ -176,21 +221,42 @@ async def test_accept_invite(client: AsyncClient, db_session, test_tenant, test_
 
 
 @pytest.mark.asyncio
-async def test_accept_expired_invite(client: AsyncClient, db_session, test_tenant, test_role, test_user):
+async def test_accept_expired_invite(client_with_db):
     """Test accepting expired invite returns 410 Gone."""
     from src.db.models.user_invite import UserInvite
+    from src.db.models.tenant import Tenant
+    from src.db.models.role import Role
+    from src.db.models.user import User
     from datetime import datetime, timedelta, timezone
     
-    invite = UserInvite(
-        tenant_id=test_tenant.id,
-        email="expired@example.com",
-        role_id=test_role.id,
-        invited_by=test_user.id,
-        expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+    client, session = client_with_db
+    
+    # Create test data
+    tenant = Tenant(id=uuid4(), name="Test Tenant", slug=f"test-{uuid4().hex[:8]}")
+    session.add(tenant)
+    await session.flush()
+    
+    role = Role(id=uuid4(), tenant_id=tenant.id, name="Test Role", permissions=["*:view"])
+    session.add(role)
+    await session.flush()
+    
+    user = User(
+        id=uuid4(), email=f"inviter-{uuid4().hex[:8]}@example.com",
+        hashed_password="placeholder", tenant_id=tenant.id, is_active=True
     )
-    db_session.add(invite)
-    await db_session.commit()
-    await db_session.refresh(invite)
+    session.add(user)
+    await session.flush()
+    
+    invite = UserInvite(
+        tenant_id=tenant.id,
+        email="expired@example.com",
+        role_id=role.id,
+        invited_by=user.id,
+        expires_at=datetime.now(timezone.utc) - timedelta(days=1),  # Already expired
+    )
+    session.add(invite)
+    await session.commit()
+    await session.refresh(invite)
     
     response = await client.post(
         f"/api/v1/users/invite/{invite.token}/accept",
@@ -200,11 +266,53 @@ async def test_accept_expired_invite(client: AsyncClient, db_session, test_tenan
 
 
 @pytest.mark.asyncio
-async def test_accept_invite_not_found(client: AsyncClient):
+async def test_accept_invite_not_found(client_with_db):
     """Test accepting non-existent invite returns 404."""
+    client, _ = client_with_db
     fake_token = "b" * 64
     response = await client.post(
         f"/api/v1/users/invite/{fake_token}/accept",
         json={"password": "SecurePassword123!"},
     )
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_user(client: AsyncClient, test_tenant, test_user, admin_user, db_session):
+    """Test updating a user's details."""
+    response = await client.patch(
+        f"/api/v1/users/{test_user.id}",
+        json={"first_name": "Updated", "last_name": "Name"},
+    )
+    assert response.status_code == 200
+    assert response.json()["first_name"] == "Updated"
+
+
+@pytest.mark.asyncio
+async def test_deactivate_user(client: AsyncClient, test_tenant, test_user, admin_user, db_session):
+    """Test deactivating a user (soft delete)."""
+    response = await client.delete(f"/api/v1/users/{test_user.id}")
+    assert response.status_code == 204
+    
+    # Verify user is deactivated
+    from sqlalchemy import select
+    from src.db.models.user import User
+    result = await db_session.execute(select(User).where(User.id == test_user.id))
+    user = result.scalar_one()
+    assert user.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_change_user_role(client: AsyncClient, test_tenant, test_user, test_role, admin_user, db_session):
+    """Test changing a user's role."""
+    from src.db.models.role import Role
+    
+    new_role = Role(tenant_id=test_tenant.id, name="New Role", permissions=["products:view"])
+    db_session.add(new_role)
+    await db_session.commit()
+    
+    response = await client.patch(
+        f"/api/v1/users/{test_user.id}",
+        json={"role_id": str(new_role.id)},
+    )
+    assert response.status_code == 200

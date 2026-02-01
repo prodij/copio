@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import settings
 from src.db.session import get_session, set_tenant_context
 from src.db.models.user import User
-from src.auth import current_active_user as fastapi_users_current_user
+from src.auth import current_active_user_optional
 
 
 async def get_db() -> AsyncSession:
@@ -26,7 +26,7 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 async def get_current_user_with_dev_bypass(
     request: Request,
     session: DbSession,
-    user: User | None = Depends(fastapi_users_current_user),
+    user: User | None = Depends(current_active_user_optional),
 ) -> User:
     """
     Get current user with development bypass.

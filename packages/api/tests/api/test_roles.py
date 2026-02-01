@@ -247,3 +247,10 @@ class TestRolesAPI:
             headers=auth_context["headers"],
         )
         assert response.status_code == 404
+
+
+# Note: System role protection tests (test_cannot_update_system_role, test_cannot_delete_system_role)
+# are not included because system roles can only be created with is_system=True flag
+# via direct database access, not through the API. The protection is implemented in:
+# - update_role: raises 403 if role.is_system is True
+# - delete_role: raises 403 if role.is_system is True

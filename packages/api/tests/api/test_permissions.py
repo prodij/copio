@@ -62,7 +62,7 @@ class TestPermissionsAPI:
         """Test getting permissions for admin user with all permissions."""
         # First, create an admin role with all permissions
         response = await client.post(
-            "/api/v1/roles",
+            "/api/v1/roles/",
             json={
                 "name": f"Admin {uuid4().hex[:8]}",
                 "permissions": ["*:*"],
@@ -98,7 +98,7 @@ class TestPermissionsAPI:
         """Test getting permissions for user with limited permissions."""
         # Create a viewer role with only view permissions
         response = await client.post(
-            "/api/v1/roles",
+            "/api/v1/roles/",
             json={
                 "name": f"Viewer {uuid4().hex[:8]}",
                 "permissions": ["*:view"],
