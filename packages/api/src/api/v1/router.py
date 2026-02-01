@@ -18,6 +18,7 @@ from src.api.v1 import purchase_orders
 from src.api.v1 import roles
 from src.api.v1 import users
 from src.api.v1 import permissions
+from src.api.v1 import audit_log
 from src.auth.routes import router as auth_router
 
 api_router = APIRouter()
@@ -53,3 +54,6 @@ api_router.include_router(permissions.router, prefix="/permissions", tags=["Perm
 
 # Users routes
 api_router.include_router(users.router)
+
+# Audit Log routes
+api_router.include_router(audit_log.router)

@@ -171,3 +171,71 @@ async def accept_invite(token: str, data: InviteAccept, session: DbSession):
     await session.commit()
     await session.refresh(user)
     return user
+
+
+@router.post("/{user_id}/roles/{role_id}")
+async def assign_role_to_user(
+    user_id: UUID,
+    role_id: UUID,
+    session: DbSession,
+    current_user: User = Depends(get_current_user_with_dev_bypass),
+):
+    """Assign a role to a user."""
+    # Verify user exists and belongs to same tenant
+    result = await session.execute(
+        select(User).where(User.id == user_id).where(User.tenant_id == current_user.tenant_id)
+    )
+    target_user = result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Verify role exists and belongs to tenant
+    role_result = await session.execute(
+        select(Role).where(Role.id == role_id).where(Role.tenant_id == current_user.tenant_id)
+    )
+    if not role_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Role not found")
+    
+    # Check if user already has this role
+    existing = await session.execute(
+        select(UserRole).where(UserRole.user_id == user_id).where(UserRole.role_id == role_id)
+    )
+    if existing.scalar_one_or_none():
+        return {"message": "Role already assigned"}
+    
+    # Assign role
+    user_role = UserRole(user_id=user_id, role_id=role_id)
+    session.add(user_role)
+    await session.commit()
+    
+    return {"message": "Role assigned successfully"}
+
+
+@router.delete("/{user_id}/roles/{role_id}")
+async def remove_role_from_user(
+    user_id: UUID,
+    role_id: UUID,
+    session: DbSession,
+    current_user: User = Depends(get_current_user_with_dev_bypass),
+):
+    """Remove a role from a user."""
+    # Verify user exists and belongs to same tenant
+    result = await session.execute(
+        select(User).where(User.id == user_id).where(User.tenant_id == current_user.tenant_id)
+    )
+    target_user = result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Find and delete the user role
+    result = await session.execute(
+        select(UserRole).where(UserRole.user_id == user_id).where(UserRole.role_id == role_id)
+    )
+    user_role = result.scalar_one_or_none()
+    if not user_role:
+        raise HTTPException(status_code=404, detail="User does not have this role")
+    
+    await session.delete(user_role)
+    await session.commit()
+    
+    return {"message": "Role removed successfully"}
