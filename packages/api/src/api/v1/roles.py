@@ -100,7 +100,7 @@ def require_permission(permission: str):
 # CRUD ENDPOINTS
 # =============================================================================
 
-@router.post("/", response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
 async def create_role(
     data: RoleCreate,
     session: DbSession,
@@ -134,7 +134,7 @@ async def create_role(
     return role
 
 
-@router.get("/", response_model=RoleListResponse)
+@router.get("", response_model=RoleListResponse)
 async def list_roles(
     session: DbSession,
     user: User = Depends(get_current_user_with_dev_bypass),

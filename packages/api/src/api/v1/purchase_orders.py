@@ -91,6 +91,7 @@ async def list_purchase_orders(
     destination_id: UUID | None = Query(None, alias="destinationId"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    _perm=Depends(require_permission("purchase_orders:view")),
 ):
     """List purchase orders."""
     query = select(PurchaseOrder).where(PurchaseOrder.tenant_id == current_user.tenant_id)
@@ -132,6 +133,7 @@ async def list_purchase_orders(
 async def get_follow_ups_due(
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("purchase_orders:view")),
 ):
     """Get POs needing follow-up."""
     now = datetime.now()
@@ -169,6 +171,7 @@ async def get_follow_ups_due(
 async def get_shipments_in_transit(
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("purchase_orders:view")),
 ):
     """Get POs with shipments in transit."""
     result = await session.execute(
@@ -196,6 +199,7 @@ async def get_purchase_order(
     po_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("purchase_orders:view")),
 ):
     """Get a single purchase order."""
     result = await session.execute(
@@ -224,6 +228,7 @@ async def create_purchase_order(
     data: PurchaseOrderCreate,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("purchase_orders:create")),
 ):
     """Create a new purchase order."""
     # Verify vendor
@@ -322,6 +327,7 @@ async def update_purchase_order(
     data: PurchaseOrderUpdate,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("purchase_orders:edit")),
 ):
     """Update a purchase order."""
     result = await session.execute(
@@ -379,6 +385,7 @@ async def delete_purchase_order(
     po_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("purchase_orders:delete")),
 ):
     """Delete a purchase order."""
     result = await session.execute(
@@ -619,6 +626,7 @@ async def receive_items(
     data: ReceiveItemsRequest,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("purchase_orders:receive")),
 ):
     """Receive items against a PO."""
     result = await session.execute(

@@ -23,6 +23,7 @@ async def create_stock_item(
     data: StockItemCreate,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("inventory:create")),
 ):
     """Create a new stock item."""
     # Verify product exists and belongs to tenant
@@ -87,6 +88,7 @@ async def create_stock_item(
 async def list_stock_items(
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("inventory:view")),
 ):
     """List all stock items for the tenant."""
     result = await session.execute(
@@ -105,6 +107,7 @@ async def list_stock_items_by_location(
     location_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("inventory:view")),
 ):
     """List stock items for a specific location."""
     result = await session.execute(
@@ -126,6 +129,7 @@ async def list_stock_items_by_product(
     product_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("inventory:view")),
 ):
     """List stock items for a specific product."""
     result = await session.execute(
@@ -147,6 +151,7 @@ async def get_stock_item(
     stock_item_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("inventory:view")),
 ):
     """Get a single stock item."""
     result = await session.execute(
@@ -175,6 +180,7 @@ async def update_stock_item(
     data: StockItemUpdate,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("inventory:edit")),
 ):
     """Update a stock item."""
     result = await session.execute(
@@ -213,6 +219,7 @@ async def delete_stock_item(
     stock_item_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    _perm=Depends(require_permission("inventory:delete")),
 ):
     """Delete a stock item."""
     result = await session.execute(

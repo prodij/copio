@@ -37,11 +37,11 @@ class TestUsersAPI:
         # Get or create a role for invites
         response = await client.get("/api/v1/roles", headers=headers)
         assert response.status_code == 200
-        roles = response.json()
+        roles_data = response.json()
         
         # Use first available role or create one
-        if roles:
-            role_id = roles[0]["id"]
+        if roles_data.get("data"):
+            role_id = roles_data["data"][0]["id"]
         else:
             response = await client.post(
                 "/api/v1/roles",

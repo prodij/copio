@@ -35,7 +35,7 @@ class TestRolesAPI:
     @pytest.mark.asyncio
     async def test_list_roles(self, client: AsyncClient, auth_headers: dict):
         """Test listing roles for a tenant."""
-        response = await client.get("/api/v1/roles/", headers=auth_headers)
+        response = await client.get("/api/v1/roles", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         # Response is paginated with {data: [...], total: N}
@@ -48,7 +48,7 @@ class TestRolesAPI:
         """Test creating a new role."""
         role_name = f"Warehouse Staff {uuid4().hex[:8]}"
         response = await client.post(
-            "/api/v1/roles/",
+            "/api/v1/roles",
             json={
                 "name": role_name,
                 "description": "Inventory and receiving",
@@ -71,7 +71,7 @@ class TestRolesAPI:
         
         # Create first role
         response = await client.post(
-            "/api/v1/roles/",
+            "/api/v1/roles",
             json={"name": role_name, "permissions": ["*:view"]},
             headers=auth_headers,
         )
@@ -79,7 +79,7 @@ class TestRolesAPI:
         
         # Try to create duplicate
         response = await client.post(
-            "/api/v1/roles/",
+            "/api/v1/roles",
             json={"name": role_name, "permissions": ["products:view"]},
             headers=auth_headers,
         )
@@ -92,14 +92,14 @@ class TestRolesAPI:
         
         # Create a role
         response = await client.post(
-            "/api/v1/roles/",
+            "/api/v1/roles",
             json={"name": role_name, "permissions": ["products:view", "products:create"]},
             headers=auth_headers,
         )
         assert response.status_code == 201
         
         # List roles and verify it's there
-        response = await client.get("/api/v1/roles/", headers=auth_headers)
+        response = await client.get("/api/v1/roles", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert any(r["name"] == role_name for r in data["data"])
@@ -108,7 +108,7 @@ class TestRolesAPI:
     async def test_create_role_with_invalid_permissions(self, client: AsyncClient, auth_headers: dict):
         """Test that invalid permissions are rejected."""
         response = await client.post(
-            "/api/v1/roles/",
+            "/api/v1/roles",
             json={
                 "name": f"Bad Role {uuid4().hex[:8]}",
                 "permissions": ["invalid:permission", "fake:action"],
@@ -125,7 +125,7 @@ class TestRolesAPI:
         
         # Create role
         response = await client.post(
-            "/api/v1/roles/",
+            "/api/v1/roles",
             json={"name": role_name, "permissions": ["products:view"]},
             headers=auth_headers,
         )
@@ -144,7 +144,7 @@ class TestRolesAPI:
         
         # Create role
         response = await client.post(
-            "/api/v1/roles/",
+            "/api/v1/roles",
             json={"name": role_name, "permissions": ["products:view"]},
             headers=auth_headers,
         )
@@ -169,7 +169,7 @@ class TestRolesAPI:
         
         # Create role
         response = await client.post(
-            "/api/v1/roles/",
+            "/api/v1/roles",
             json={"name": role_name, "permissions": ["products:view"]},
             headers=auth_headers,
         )
