@@ -3,7 +3,7 @@
  * Run: npx tsx scripts/seed-vendors.ts
  */
 
-const API_URL = "http://localhost:3002";
+const API_URL = process.env.API_URL || "http://localhost:8000/api/v1";
 
 const VENDORS = [
   {

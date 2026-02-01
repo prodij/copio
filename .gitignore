@@ -14,9 +14,13 @@ out/
 .env
 .env.local
 .env.*.local
+!.env.example
 
 # Testing
 coverage/
+.coverage
+htmlcov/
+.pytest_cache/
 
 # IDE
 .idea/
@@ -35,3 +39,22 @@ pnpm-debug.log*
 
 # Misc
 *.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+env/
+ENV/
+
+# Alembic
+packages/api/alembic/versions/*.pyc

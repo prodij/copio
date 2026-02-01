@@ -1,9 +1,12 @@
 """Celery tasks for background processing."""
 
 import asyncio
+import logging
 from datetime import datetime
 
 from src.workers.celery_app import celery
+
+logger = logging.getLogger(__name__)
 from src.db.session import async_session_maker
 from src.services.velocity import calculate_all_velocities, calculate_sku_consumption
 
@@ -42,7 +45,7 @@ def calculate_velocities_task(self):
                     total_skus += skus
                 except Exception as e:
                     # Log error but continue with other tenants
-                    print(f"Error processing tenant {tenant.id}: {e}")
+                    logger.error(f"Error processing tenant {tenant.id}: {e}")
             
             await session.commit()
             return {

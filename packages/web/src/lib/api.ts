@@ -47,7 +47,7 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
   return res.json();
 }
 
-// Types based on Prisma schema
+// Types matching SQLAlchemy models
 export interface Product {
   id: string;
   sku: string;

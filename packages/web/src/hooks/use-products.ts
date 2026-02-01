@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
-// Types based on Prisma schema
+// Types matching SQLAlchemy models
 export interface ChannelListing {
   id: string;
   productId: string;

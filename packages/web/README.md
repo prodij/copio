@@ -1,36 +1,155 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Copio Web
 
-## Getting Started
+Next.js 16 frontend for the Copio multi-marketplace ERP.
 
-First, run the development server:
+## Tech Stack
+
+- **Framework**: Next.js 16 (App Router)
+- **React**: 19.x with Server & Client Components
+- **Styling**: Tailwind CSS 4
+- **UI Components**: Radix UI primitives
+- **Forms**: React Hook Form + Zod validation
+- **Data Fetching**: TanStack React Query + Axios
+- **Notifications**: Sonner toasts
+
+## Setup
+
+### Prerequisites
+
+- Node.js 20+
+- pnpm 9+
+- Running API backend (see `packages/api`)
+
+### Installation
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd packages/web
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# Start dev server
+pnpm dev
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Open http://localhost:3000
+```
 
-## Learn More
+### Build
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+pnpm build
+pnpm start
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Project Structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+src/
+├── app/                    # Next.js App Router
+│   ├── page.tsx            # Dashboard (home)
+│   ├── layout.tsx          # Root layout
+│   ├── error.tsx           # Error boundary
+│   ├── not-found.tsx       # 404 page
+│   ├── products/
+│   │   ├── page.tsx        # Product list
+│   │   └── [id]/
+│   │       ├── page.tsx    # Product detail
+│   │       └── product-editor.tsx  # 6-tab editor
+│   ├── categories/
+│   │   └── page.tsx        # Category management
+│   ├── locations/
+│   │   └── page.tsx        # Warehouse locations
+│   ├── inventory/
+│   │   └── page.tsx        # Stock levels
+│   ├── vendors/
+│   │   ├── page.tsx        # Vendor list
+│   │   └── [id]/page.tsx   # Vendor detail
+│   └── purchase-orders/
+│       ├── page.tsx        # PO list
+│       └── [id]/page.tsx   # PO detail + PDF
+├── components/
+│   ├── ui/                 # Radix UI primitives
+│   │   ├── button.tsx
+│   │   ├── dialog.tsx
+│   │   ├── table.tsx
+│   │   ├── form.tsx
+│   │   ├── select.tsx
+│   │   ├── tabs.tsx
+│   │   └── ...
+│   ├── sidebar.tsx         # Navigation
+│   ├── providers.tsx       # React Query + Theme
+│   ├── pagination.tsx      # Table pagination
+│   └── ...
+├── hooks/                  # Custom React hooks
+│   ├── use-products.ts
+│   ├── use-locations.ts
+│   ├── use-stock-items.ts
+│   └── use-dashboard.ts
+└── lib/
+    ├── api.ts              # Axios client + helpers
+    └── utils.ts            # Utility functions
+```
 
-## Deploy on Vercel
+## Pages
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Route | Description |
+|-------|-------------|
+| `/` | Dashboard with KPIs and quick actions |
+| `/products` | Product catalog with filters |
+| `/products/[id]` | Product editor (6 tabs) |
+| `/categories` | Category tree management |
+| `/locations` | Warehouse/location CRUD |
+| `/inventory` | Stock levels and movements |
+| `/vendors` | Vendor management |
+| `/vendors/[id]` | Vendor detail + contacts, addresses, documents |
+| `/purchase-orders` | PO list with status filters |
+| `/purchase-orders/[id]` | PO detail + line items + PDF export |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Product Editor Tabs
+
+The product detail page at `/products/[id]` has 6 tabs:
+
+1. **Basic Info** - Name, brand, manufacturer, pricing
+2. **Content** - Descriptions, bullet points, SEO metadata
+3. **Physical** - Weight, dimensions, package dimensions
+4. **Identifiers** - UPC, EAN, GTIN, ASIN, MPN
+5. **Compliance** - Country of origin, certifications, hazmat flags
+6. **Media** - Images, custom attributes
+
+## API Proxy
+
+The frontend proxies `/api/*` requests to the Python backend. This is configured in `next.config.ts`:
+
+```typescript
+// Requests to /api/* are forwarded to the Python API
+rewrites: async () => [
+  {
+    source: '/api/:path*',
+    destination: `${API_URL}/:path*`,
+  },
+]
+```
+
+Default API URL: `http://localhost:8001/api/v1`
+
+## Environment Variables
+
+```bash
+# API backend URL
+API_URL=http://localhost:8001/api/v1
+```
+
+## UI Components
+
+Uses Radix UI primitives with Tailwind CSS styling:
+
+- `<Button>` - Primary, secondary, ghost, outline variants
+- `<Dialog>` - Modal dialogs
+- `<Table>` - Data tables with sorting
+- `<Form>` - Form fields with validation
+- `<Select>` - Dropdown selects
+- `<Tabs>` - Tab navigation
+- `<AlertDialog>` - Confirmation dialogs
+- `<DropdownMenu>` - Context menus

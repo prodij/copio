@@ -4,27 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Copio is a multi-marketplace seller ERP with real-time inventory sync. It's a pnpm monorepo with three packages:
-- **@copio/core** - Shared Prisma database models and TypeScript types
-- **@copio/inventory-service** - Express.js REST API (port 3002)
+Copio is a multi-marketplace seller ERP with real-time inventory sync. It's a pnpm monorepo with two active packages:
+- **@copio/api** - Python FastAPI backend (port 8000)
 - **@copio/web** - Next.js 16 frontend (port 3000)
+
+Note: Legacy TypeScript code exists in `.deprecated/` for reference only.
 
 ## Development Commands
 
 ```bash
-# Start everything (requires Docker for Postgres/Redis)
+# Start everything (requires Docker for Postgres/Redis/MinIO)
 docker compose -f docker-compose.dev.yml up -d
 pnpm install
-pnpm db:push        # Push schema to database
+pnpm db:migrate     # Run Alembic migrations
 
-# Database
-pnpm db:generate    # Generate Prisma client after schema changes
-pnpm db:migrate     # Create and run migrations
-pnpm db:studio      # Open Prisma Studio GUI
+# Start development servers
+pnpm dev            # Starts both API and web
 
-# Testing (inventory-service only)
-pnpm --filter @copio/inventory-service test
-pnpm --filter @copio/inventory-service test:watch
+# Individual packages
+pnpm --filter @copio/api dev
+pnpm --filter @copio/web dev
 
 # Other
 pnpm build          # Build all packages
@@ -36,10 +35,10 @@ pnpm typecheck      # TypeScript checking
 
 ### Data Flow
 ```
-Browser → Next.js (3000) → /api/* proxy → Express API (3002) → PostgreSQL
+Browser → Next.js (3000) → /api/* proxy → Python FastAPI (8000) → PostgreSQL
 ```
 
-The web package proxies `/api/*` requests to the inventory-service (configured in `next.config.ts`).
+The web package proxies `/api/*` requests to the Python API (configured in `next.config.ts`).
 
 ### Product Data Model (Three Perspectives)
 
@@ -69,9 +68,9 @@ Products have three dimensions of data:
 └─────────────────────┘    └─────────────────────────────────────┘
 ```
 
-### Database (Prisma)
+### Database (SQLAlchemy)
 
-Schema is in `packages/core/prisma/schema.prisma`. Key models:
+Models are in `packages/api/src/db/models/`. Key models:
 
 **Product Catalog:**
 - **Product** - Master product with customer-facing defaults
@@ -84,7 +83,7 @@ Schema is in `packages/core/prisma/schema.prisma`. Key models:
 - **ChannelListing** - Marketplace-specific: title, price, fulfillment settings
 
 **Inventory:**
-- **Location** (WAREHOUSE, FBA, THREEPEL, STORE) → **StockItem** 
+- **Location** (WAREHOUSE, FBA, THREEPEL, STORE) → **StockItem**
 - **StockMovement** (RECEIVE, SHIP, ADJUST, TRANSFER, DAMAGE, COUNT)
 
 **Procurement:**
@@ -94,25 +93,30 @@ Schema is in `packages/core/prisma/schema.prisma`. Key models:
 **Orders:**
 - **Order** → **OrderLine**
 
-### API Routes (inventory-service)
+### API Routes (Python FastAPI)
 
-All routes use Zod for request validation. Pattern: `packages/inventory-service/src/routes/*.ts`
+All routes use Pydantic for request validation. Pattern: `packages/api/src/api/v1/*.py`
 
 | Route | Purpose |
 |-------|---------|
-| `/products` | Product CRUD + images + attributes |
-| `/categories` | Category tree management |
-| `/locations` | Warehouse/location management |
-| `/stock-items` | Inventory per location |
-| `/stock-movements` | Inventory audit trail |
-| `/health` | Health check |
+| `/api/v1/products` | Product CRUD + images + attributes |
+| `/api/v1/categories` | Category tree management |
+| `/api/v1/locations` | Warehouse/location management |
+| `/api/v1/stock-items` | Inventory per location |
+| `/api/v1/stock-movements` | Inventory audit trail |
+| `/api/v1/vendors` | Vendor management |
+| `/api/v1/vendor-products` | Vendor-product mappings |
+| `/api/v1/channel-listings` | Marketplace listings |
+| `/api/v1/purchase-orders` | Purchase order management |
+| `/api/v1/velocity` | Sales velocity analytics |
+| `/api/v1/sync` | Marketplace sync operations |
 
 ### Frontend (web)
 
 - Server Components for data fetching
 - Client Components for interactivity
 - UI: Radix UI primitives + Tailwind CSS
-- Pages: Dashboard, Products (list + detail editor), Locations, Inventory
+- Pages: Dashboard, Products, Categories, Locations, Inventory, Vendors, Purchase Orders
 
 ### Product Detail Editor
 
@@ -126,10 +130,24 @@ All routes use Zod for request validation. Pattern: `packages/inventory-service/
 
 ## Testing Notes
 
-Tests run sequentially (`fileParallelism: false`) to avoid database conflicts. Each test file should clean up its data in `beforeEach`.
+### Python API
+```bash
+cd packages/api
+pytest
+pytest --cov=src --cov-report=html
+```
+
+### Type Checking
+```bash
+# Python
+cd packages/api && mypy src
+
+# TypeScript
+pnpm typecheck
+```
 
 ## Future Enhancements
 
-- **Bundles/Combos** - BUNDLE, COMBO product types (see ProductType enum comment)
-- **Amazon Integration** - Phase 2
-- **Shopify/Walmart** - Phase 3
+- **Bundles/Combos** - BUNDLE, COMBO product types
+- **Amazon Integration** - SP-API integration (in progress)
+- **Shopify/Walmart** - Additional marketplace integrations
