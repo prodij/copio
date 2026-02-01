@@ -64,6 +64,7 @@ services:
     volumes:
       - ./packages/api/src:/app/packages/api/src
       - ./packages/api/alembic:/app/packages/api/alembic
+      - ./packages/api/scripts:/app/packages/api/scripts
     depends_on:
       postgres:
         condition: service_healthy

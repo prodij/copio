@@ -25,21 +25,15 @@ if config.config_file_name is not None:
 # Target metadata for autogenerate
 target_metadata = Base.metadata
 
-# Tables managed by Prisma - DO NOT touch these
-PRISMA_TABLES = {
-    "Product", "ProductImage", "ProductAttribute", "Category", "ProductCategory",
-    "ChannelListing", "Location", "StockItem", "StockMovement",
-    "Order", "OrderLine", "Vendor", "VendorContact", "VendorAddress",
-    "VendorDocument", "VendorProduct", "PurchaseOrder", "POLine",
+# Tables to skip during autogenerate (external systems)
+SKIP_TABLES = {
     "_prisma_migrations",
 }
 
 
 def include_object(object, name, type_, reflected, compare_to):
-    """Filter out Prisma-managed tables from autogenerate."""
-    if type_ == "table" and name in PRISMA_TABLES:
-        return False
-    if type_ == "index" and object.table.name in PRISMA_TABLES:
+    """Filter out external tables from autogenerate."""
+    if type_ == "table" and name in SKIP_TABLES:
         return False
     return True
 
