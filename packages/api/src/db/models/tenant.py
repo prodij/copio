@@ -11,6 +11,7 @@ from src.db.base import Base, TimestampMixin, generate_uuid
 
 if TYPE_CHECKING:
     from src.db.models.user import User
+    from src.db.models.role import Role
 
 
 class Tenant(Base, TimestampMixin):
@@ -31,6 +32,7 @@ class Tenant(Base, TimestampMixin):
 
     # Relationships
     users: Mapped[list["User"]] = relationship("User", back_populates="tenant")
+    roles: Mapped[list["Role"]] = relationship("Role", back_populates="tenant")
 
     def __repr__(self) -> str:
         return f"<Tenant {self.slug}>"

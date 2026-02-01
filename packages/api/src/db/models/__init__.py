@@ -18,6 +18,8 @@ from src.db.models.enums import (
 )
 from src.db.models.tenant import Tenant
 from src.db.models.user import User
+from src.db.models.role import Role
+from src.db.models.user_role import UserRole
 from src.db.models.product import Product, ProductImage, ProductAttribute
 from src.db.models.category import Category, ProductCategory
 from src.db.models.channel_listing import ChannelListing
@@ -51,6 +53,8 @@ __all__ = [
     # Auth
     "Tenant",
     "User",
+    "Role",
+    "UserRole",
     # Products
     "Product",
     "ProductImage",

@@ -12,6 +12,7 @@ from src.db.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from src.db.models.tenant import Tenant
+    from src.db.models.user_role import UserRole
 
 
 class User(SQLAlchemyBaseUserTableUUID, Base, TimestampMixin):
@@ -34,6 +35,7 @@ class User(SQLAlchemyBaseUserTableUUID, Base, TimestampMixin):
 
     # Relationships
     tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="users")
+    user_roles: Mapped[list["UserRole"]] = relationship("UserRole", back_populates="user")
 
     def __repr__(self) -> str:
         return f"<User {self.email}>"
