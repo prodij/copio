@@ -7,7 +7,6 @@ from fastapi import Depends, HTTPException, Request, status
 
 from src.api.deps import DbSession, get_current_user_with_dev_bypass
 from src.auth.enforcer import PermissionEnforcer
-from src.config import settings
 from src.db.models.user import User
 
 
@@ -36,9 +35,6 @@ def require_permission(permission: str) -> Callable:
         user: User = Depends(get_current_user_with_dev_bypass),
         enforcer: PermissionEnforcer = Depends(get_enforcer),
     ) -> None:
-        # Skip permission check in debug mode
-        if settings.debug:
-            return
         if not await enforcer.can(user, permission):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -66,9 +62,6 @@ def require_any_permission(*permissions: str) -> Callable:
         user: User = Depends(get_current_user_with_dev_bypass),
         enforcer: PermissionEnforcer = Depends(get_enforcer),
     ) -> None:
-        # Skip permission check in debug mode
-        if settings.debug:
-            return
         for permission in permissions:
             if await enforcer.can(user, permission):
                 return

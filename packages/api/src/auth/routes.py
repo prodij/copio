@@ -16,6 +16,8 @@ from src.auth.backend import auth_backend, fastapi_users
 from src.auth.manager import get_user_manager, UserManager
 from src.db.models.tenant import Tenant
 from src.db.models.user import User
+from src.db.models.role import Role
+from src.db.models.user_role import UserRole
 from src.db.session import get_session
 
 router = APIRouter()
@@ -141,6 +143,25 @@ async def register_tenant(
         is_verified=True,  # Auto-verify first admin
     )
     session.add(user)
+    await session.flush()  # Get user.id
+
+    # Create Admin role with all permissions
+    admin_role = Role(
+        tenant_id=tenant.id,
+        name="Admin",
+        description="Full system access",
+        is_system=True,
+        permissions=["*:*"],
+    )
+    session.add(admin_role)
+    await session.flush()  # Get admin_role.id
+
+    # Assign Admin role to the first user
+    user_role = UserRole(
+        user_id=user.id,
+        role_id=admin_role.id,
+    )
+    session.add(user_role)
     await session.commit()
 
     return TenantResponse(
