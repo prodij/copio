@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertCircle, Loader2, Package } from "lucide-react";
+import { AlertCircle, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { Logo } from "@/components/logo";
 
 export default function LoginPage() {
   const { login, isLoading: authLoading } = useAuth();
@@ -41,14 +42,11 @@ export default function LoginPage() {
   return (
     <Card className="w-full max-w-md mx-4">
       <CardHeader className="space-y-1">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="h-10 w-10 rounded-lg bg-primary flex items-center justify-center">
-            <Package className="h-6 w-6 text-primary-foreground" />
-          </div>
-          <span className="text-2xl font-bold">Copio</span>
+        <div className="flex justify-center mb-4">
+          <Logo size="lg" />
         </div>
-        <CardTitle className="text-2xl">Welcome back</CardTitle>
-        <CardDescription>
+        <CardTitle className="text-2xl text-center">Welcome back</CardTitle>
+        <CardDescription className="text-center">
           Enter your credentials to access your account
         </CardDescription>
       </CardHeader>

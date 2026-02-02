@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth.tsx";
 import { LayoutDashboard, Package, Tags, MapPin, Truck, FileText, Settings, LogOut, User } from "lucide-react";
+import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,10 +61,9 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-screen w-64 flex-col border-r bg-sidebar">
-      <div className="flex h-14 items-center justify-between border-b px-6">
-        <Link href="/" className="flex items-center gap-2 font-semibold">
-          <Package className="h-6 w-6" />
-          <span>Copio</span>
+      <div className="flex h-14 items-center justify-between border-b px-4">
+        <Link href="/">
+          <Logo size="sm" />
         </Link>
         <ThemeToggle />
       </div>
