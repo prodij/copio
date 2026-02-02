@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Users, Shield, ScrollText, Settings as SettingsIcon } from "lucide-react";
+import { Users, Shield, ScrollText, Settings as SettingsIcon, User } from "lucide-react";
 
 const settingsNav = [
+  { title: "Profile", href: "/settings/profile", icon: User },
   { title: "General", href: "/settings", icon: SettingsIcon },
   { title: "Users", href: "/settings/users", icon: Users },
   { title: "Roles", href: "/settings/roles", icon: Shield },

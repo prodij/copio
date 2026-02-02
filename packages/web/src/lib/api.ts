@@ -8,11 +8,14 @@ export const api = axios.create({
   baseURL: API_BASE,
 });
 
-// Request interceptor for auth tokens (future use)
+// Request interceptor for auth tokens
 api.interceptors.request.use((config) => {
-  // Add auth token if available
-  // const token = localStorage.getItem('token');
-  // if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("copio_token");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
   return config;
 });
 
@@ -20,9 +23,13 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Handle common errors
-    if (error.response?.status === 401) {
-      // Handle unauthorized
+    // Handle 401 - redirect to login
+    if (error.response?.status === 401 && typeof window !== "undefined") {
+      localStorage.removeItem("copio_token");
+      // Only redirect if not already on login page
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   }
