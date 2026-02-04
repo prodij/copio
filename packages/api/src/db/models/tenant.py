@@ -1,9 +1,10 @@
 """Tenant model for multi-tenancy."""
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import String, Text
+from sqlalchemy import DateTime, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -54,6 +55,18 @@ class Tenant(Base, TimestampMixin):
 
     # Onboarding status
     onboarding_complete: Mapped[bool] = mapped_column(default=False, server_default="false")
+
+    # Status management
+    status: Mapped[str] = mapped_column(
+        String(20), default="active", server_default="active", nullable=False
+    )
+    suspended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    suspended_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
     users: Mapped[list["User"]] = relationship("User", back_populates="tenant")
