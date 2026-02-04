@@ -1,28 +1,39 @@
 """Auth routes including tenant registration and user management."""
 
 from datetime import datetime, timedelta, timezone
+import logging
 import secrets
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi_users.password import PasswordHelper
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.services.email import send_invite_email
+from src.config import settings
+from src.services.email import send_invite_email, send_verification_email
+from src.services import system_settings
 
-from src.auth.backend import auth_backend, fastapi_users
+from src.auth.backend import auth_backend, fastapi_users, get_jwt_strategy
+from src.auth.cookies import set_auth_cookies, clear_auth_cookies
 from src.auth.manager import get_user_manager, UserManager
+from src.auth.tokens import create_access_token, create_refresh_token, verify_refresh_token, get_refresh_token_expiry
 from src.auth.default_roles import DEFAULT_ROLES, get_owner_role
+from src.db.models.refresh_token import RefreshToken
 from src.db.models.tenant import Tenant
 from src.db.models.user import User
 from src.db.models.role import Role
 from src.db.models.user_role import UserRole
 from src.db.session import get_session
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 password_helper = PasswordHelper()
+
+# Rate limiting for resend verification (simple in-memory, per-email)
+_resend_timestamps: dict[str, datetime] = {}
 
 # Current user dependency (avoiding circular import)
 current_active_user = fastapi_users.current_user(active=True)
@@ -67,38 +78,354 @@ class TenantResponse(BaseModel):
     tenant_slug: str
     user_id: UUID
     email: str
+    verification_required: bool = False
+    message: str | None = None
 
     class Config:
         from_attributes = True
 
 
-# Include fastapi-users auth routes
-router.include_router(
-    fastapi_users.get_auth_router(auth_backend),
-    prefix="",
-)
-
-# Include register route (for adding users to existing tenants)
-# Note: This requires tenant_id, so we'll add a custom route instead
-
-# Include password reset routes
+# Include password reset routes from fastapi-users
 router.include_router(
     fastapi_users.get_reset_password_router(),
     prefix="",
 )
 
 
+# =============================================================================
+# Custom Login Endpoint (with email verification check and cookie auth)
+# =============================================================================
+
+
+class LoginRequest(BaseModel):
+    """Schema for login request."""
+    email: EmailStr
+    password: str
+
+
+class LoginResponse(BaseModel):
+    """Schema for login response."""
+    user: dict
+    tenant: dict
+
+
+@router.post("/login", response_model=LoginResponse)
+async def login(
+    request: LoginRequest,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+    user_manager: UserManager = Depends(get_user_manager),
+):
+    """
+    Login and set auth cookies.
+
+    If email verification is required (system setting), users with
+    is_verified=False will be rejected with a 403 error.
+    """
+    # Find user by email
+    result = await session.execute(
+        select(User).where(User.email == request.email)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+
+    # Verify password
+    if not password_helper.verify_and_update(request.password, user.hashed_password)[0]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+
+    # Check email verification requirement
+    verification_required = await system_settings.is_email_verification_required(session)
+    if verification_required and not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email before logging in",
+        )
+
+    # Get tenant info
+    tenant_result = await session.execute(
+        select(Tenant).where(Tenant.id == user.tenant_id)
+    )
+    tenant = tenant_result.scalar_one()
+
+    # Create tokens
+    access_token = create_access_token(user.id, user.tenant_id)
+    raw_refresh, hashed_refresh = create_refresh_token()
+
+    # Store refresh token in DB
+    refresh_token = RefreshToken(
+        user_id=user.id,
+        token_hash=hashed_refresh,
+        expires_at=get_refresh_token_expiry(),
+    )
+    session.add(refresh_token)
+    await session.commit()
+
+    # Set cookies
+    set_auth_cookies(response, access_token, raw_refresh)
+
+    # Call the on_after_login hook
+    await user_manager.on_after_login(user)
+
+    return LoginResponse(
+        user={
+            "id": str(user.id),
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+        },
+        tenant={
+            "id": str(tenant.id),
+            "name": tenant.name,
+            "slug": tenant.slug,
+            "onboarding_complete": tenant.onboarding_complete,
+        },
+    )
+
+
+@router.post("/refresh")
+async def refresh_tokens(
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
+    """Refresh access token using refresh token cookie."""
+    refresh_cookie = request.cookies.get("refresh_token")
+    if not refresh_cookie:
+        raise HTTPException(status_code=401, detail="No refresh token")
+
+    # Find valid refresh tokens
+    result = await session.execute(
+        select(RefreshToken).where(
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > datetime.now(timezone.utc),
+        )
+    )
+    tokens = result.scalars().all()
+
+    # Find matching token
+    matched_token = None
+    for token in tokens:
+        if verify_refresh_token(refresh_cookie, token.token_hash):
+            matched_token = token
+            break
+
+    if not matched_token:
+        clear_auth_cookies(response)
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    # Get user
+    user_result = await session.execute(
+        select(User).where(User.id == matched_token.user_id, User.is_active)
+    )
+    user = user_result.scalar_one_or_none()
+
+    if not user:
+        clear_auth_cookies(response)
+        raise HTTPException(status_code=401, detail="User not found")
+
+    # Create new access token
+    access_token = create_access_token(user.id, user.tenant_id)
+
+    # Set new access token cookie (keep same refresh token)
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=not settings.debug,
+        samesite="strict",
+        max_age=900,  # 15 minutes
+        path="/",
+    )
+
+    return {"message": "Token refreshed"}
+
+
+@router.post("/logout")
+async def logout(
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
+    """Logout - revoke refresh token and clear cookies."""
+    refresh_cookie = request.cookies.get("refresh_token")
+
+    if refresh_cookie:
+        # Find and revoke the refresh token
+        result = await session.execute(
+            select(RefreshToken).where(
+                RefreshToken.revoked_at.is_(None),
+            )
+        )
+        tokens = result.scalars().all()
+
+        for token in tokens:
+            if verify_refresh_token(refresh_cookie, token.token_hash):
+                token.revoked_at = datetime.now(timezone.utc)
+                await session.commit()
+                break
+
+    clear_auth_cookies(response)
+    return {"message": "Logged out"}
+
+
+# =============================================================================
+# Email Verification Endpoints
+# =============================================================================
+
+
+class VerifyEmailResponse(BaseModel):
+    """Response after email verification."""
+    message: str
+    email: str
+
+
+class ResendVerificationRequest(BaseModel):
+    """Schema for resending verification email."""
+    email: EmailStr
+
+
+@router.get("/verify")
+async def verify_email(
+    token: str,
+    session: AsyncSession = Depends(get_session),
+    user_manager: UserManager = Depends(get_user_manager),
+):
+    """
+    Verify email address using the token from the verification email.
+    """
+    from fastapi_users.jwt import decode_jwt
+    from fastapi_users.exceptions import InvalidVerifyToken
+
+    try:
+        data = decode_jwt(
+            token,
+            user_manager.verification_token_secret,
+            audience=["fastapi-users:verify"],
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token",
+        )
+
+    user_id = data.get("sub")
+    email = data.get("email")
+
+    if not user_id or not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification token",
+        )
+
+    # Find user
+    result = await session.execute(
+        select(User).where(User.id == UUID(user_id))
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User not found",
+        )
+
+    if user.email != email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification token",
+        )
+
+    if user.is_verified:
+        return VerifyEmailResponse(
+            message="Email already verified",
+            email=user.email,
+        )
+
+    # Mark user as verified
+    await session.execute(
+        update(User).where(User.id == user.id).values(is_verified=True)
+    )
+    await session.commit()
+
+    # Call the on_after_verify hook
+    await user_manager.on_after_verify(user)
+
+    return VerifyEmailResponse(
+        message="Email verified successfully",
+        email=user.email,
+    )
+
+
+@router.post("/resend-verification")
+async def resend_verification(
+    data: ResendVerificationRequest,
+    session: AsyncSession = Depends(get_session),
+    user_manager: UserManager = Depends(get_user_manager),
+):
+    """
+    Resend verification email.
+
+    Rate limited to 1 request per email per minute.
+    Always returns success to avoid leaking user existence.
+    """
+    # Rate limiting check
+    now = datetime.now(timezone.utc)
+    last_sent = _resend_timestamps.get(data.email)
+    if last_sent and (now - last_sent).total_seconds() < 60:
+        # Still return success to avoid leaking info, but don't send
+        return {"message": "If the email exists and is unverified, a verification link has been sent"}
+
+    # Update timestamp
+    _resend_timestamps[data.email] = now
+
+    # Find user
+    result = await session.execute(
+        select(User).where(User.email == data.email)
+    )
+    user = result.scalar_one_or_none()
+
+    # Only send if user exists, is active, and not verified
+    if user and user.is_active and not user.is_verified:
+        # Generate verification token
+        token = await user_manager.get_verification_token(user)
+        verification_url = f"{settings.frontend_url}/verify-email?token={token}"
+
+        await send_verification_email(
+            to=user.email,
+            first_name=user.first_name,
+            verification_url=verification_url,
+        )
+        logger.info(f"Resent verification email to {user.email}")
+
+    # Always return success
+    return {"message": "If the email exists and is unverified, a verification link has been sent"}
+
+
 @router.post("/register-tenant", response_model=TenantResponse)
 async def register_tenant(
     data: TenantCreate,
+    response: Response,
     session: AsyncSession = Depends(get_session),
     user_manager: UserManager = Depends(get_user_manager),
 ):
     """
     Register a new tenant with an admin user.
-    
+
     This creates both the tenant and the first admin user in one transaction.
+    If email verification is required, the user will need to verify their
+    email before logging in.
     """
+    # Check if email verification is required
+    verification_required = await system_settings.is_email_verification_required(session)
+
     # Check if tenant slug already exists
     existing = await session.execute(
         select(Tenant).where(Tenant.slug == data.tenant_slug)
@@ -128,8 +455,6 @@ async def register_tenant(
     await session.flush()  # Get tenant.id
 
     # Create admin user
-    from fastapi_users.password import PasswordHelper
-    password_helper = PasswordHelper()
     hashed_password = password_helper.hash(data.password)
 
     user = User(
@@ -141,7 +466,7 @@ async def register_tenant(
         role="admin",
         is_active=True,
         is_superuser=False,
-        is_verified=True,  # Auto-verify first admin
+        is_verified=not verification_required,  # Verified only if not required
     )
     session.add(user)
     await session.flush()  # Get user.id
@@ -160,7 +485,7 @@ async def register_tenant(
         if role_def["name"] == "Owner":
             await session.flush()  # Get owner role id
             owner_role = role
-    
+
     # Assign Owner role to the first user (tenant creator)
     if owner_role:
         user_role = UserRole(
@@ -168,14 +493,47 @@ async def register_tenant(
             role_id=owner_role.id,
         )
         session.add(user_role)
-    
+
     await session.commit()
+
+    # Send verification email if required
+    message = None
+    if verification_required:
+        token = await user_manager.get_verification_token(user)
+        verification_url = f"{settings.frontend_url}/verify-email?token={token}"
+
+        await send_verification_email(
+            to=user.email,
+            first_name=user.first_name,
+            verification_url=verification_url,
+        )
+        message = "Please check your email to verify your account before logging in"
+        logger.info(f"Sent verification email to {user.email}")
+
+    # Create tokens for auto-login (only if verification not required)
+    if not verification_required:
+        access_token = create_access_token(user.id, tenant.id)
+        raw_refresh, hashed_refresh = create_refresh_token()
+
+        # Store refresh token
+        refresh_token_obj = RefreshToken(
+            user_id=user.id,
+            token_hash=hashed_refresh,
+            expires_at=get_refresh_token_expiry(),
+        )
+        session.add(refresh_token_obj)
+        await session.commit()
+
+        # Set cookies
+        set_auth_cookies(response, access_token, raw_refresh)
 
     return TenantResponse(
         tenant_id=tenant.id,
         tenant_slug=tenant.slug,
         user_id=user.id,
         email=user.email,
+        verification_required=verification_required,
+        message=message,
     )
 
 
@@ -193,6 +551,7 @@ async def get_current_user_info(
         "tenant_id": str(user.tenant_id),
         "is_active": user.is_active,
         "is_verified": user.is_verified,
+        "is_superuser": user.is_superuser,
     }
 
 
@@ -331,6 +690,7 @@ class AcceptInviteResponse(BaseModel):
     user_id: str
     email: str
     message: str
+    verification_required: bool = False
 
 
 class CreateUserRequest(BaseModel):
@@ -408,8 +768,7 @@ async def invite_user(
     tenant = result.scalar_one()
     
     # Send invite email
-    # Note: In production, use a proper frontend URL from config
-    invite_url = f"http://localhost:3000/accept-invite?token={invite_token}"
+    invite_url = f"{settings.frontend_url}/accept-invite?token={invite_token}"
     
     await send_invite_email(
         to=data.email,
@@ -432,12 +791,17 @@ async def invite_user(
 async def accept_invite(
     data: AcceptInviteRequest,
     session: AsyncSession = Depends(get_session),
+    user_manager: UserManager = Depends(get_user_manager),
 ):
     """
     Accept an invitation and set password.
-    
-    This activates the user account and allows them to log in.
+
+    This activates the user account. If email verification is required,
+    the user will need to verify their email before logging in.
     """
+    # Check if email verification is required
+    verification_required = await system_settings.is_email_verification_required(session)
+
     # Find all inactive users with invite tokens
     result = await session.execute(
         select(User).where(
@@ -446,16 +810,16 @@ async def accept_invite(
         )
     )
     users = result.scalars().all()
-    
+
     # Find the user with matching token
     matched_user = None
     for user in users:
         parts = user.hashed_password.split(":", 2)
         if len(parts) != 3:
             continue
-        
+
         _, token_hash, expiry_ts = parts
-        
+
         # Check expiry
         try:
             expiry = datetime.fromtimestamp(int(expiry_ts), tz=timezone.utc)
@@ -463,34 +827,52 @@ async def accept_invite(
                 continue
         except (ValueError, OSError):
             continue
-        
+
         # Verify token
         valid, _ = password_helper.verify_and_update(data.token, token_hash)
         if valid:
             matched_user = user
             break
-    
+
     if not matched_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired invite token",
         )
-    
+
     # Activate user and set password
     hashed_password = password_helper.hash(data.password)
     await session.execute(
         update(User).where(User.id == matched_user.id).values(
             hashed_password=hashed_password,
             is_active=True,
-            is_verified=True,
+            is_verified=not verification_required,
         )
     )
     await session.commit()
-    
+
+    # Refresh user to get updated values
+    await session.refresh(matched_user)
+
+    # Send verification email if required
+    message = "Invitation accepted. You can now log in."
+    if verification_required:
+        token = await user_manager.get_verification_token(matched_user)
+        verification_url = f"{settings.frontend_url}/verify-email?token={token}"
+
+        await send_verification_email(
+            to=matched_user.email,
+            first_name=matched_user.first_name,
+            verification_url=verification_url,
+        )
+        message = "Invitation accepted. Please check your email to verify your account before logging in."
+        logger.info(f"Sent verification email to {matched_user.email}")
+
     return AcceptInviteResponse(
         user_id=str(matched_user.id),
         email=matched_user.email,
-        message="Invitation accepted. You can now log in.",
+        message=message,
+        verification_required=verification_required,
     )
 
 
