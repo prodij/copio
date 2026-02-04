@@ -52,6 +52,9 @@ class Tenant(Base, TimestampMixin):
     # Branding
     logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # Onboarding status
+    onboarding_complete: Mapped[bool] = mapped_column(default=False, server_default="false")
+
     # Relationships
     users: Mapped[list["User"]] = relationship("User", back_populates="tenant")
     roles: Mapped[list["Role"]] = relationship("Role", back_populates="tenant")
