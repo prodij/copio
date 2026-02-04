@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
 from passlib.hash import argon2
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 
 from src.api.deps import CurrentUser, DbSession
@@ -19,8 +19,8 @@ router = APIRouter(prefix="/api-keys", tags=["API Keys"])
 class ApiKeyCreate(BaseModel):
     """Request schema for creating an API key."""
 
-    name: str
-    expires_in_days: int | None = None  # None = never expires
+    name: str = Field(..., min_length=1, max_length=100)
+    expires_in_days: int | None = Field(None, gt=0)
 
 
 class ApiKeyResponse(BaseModel):
@@ -33,8 +33,7 @@ class ApiKeyResponse(BaseModel):
     expires_at: datetime | None
     last_used_at: datetime | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ApiKeyCreated(ApiKeyResponse):
@@ -98,6 +97,7 @@ async def list_api_keys(
     """List all active (non-revoked) API keys for the current user."""
     query = select(ApiKey).where(
         ApiKey.user_id == current_user.id,
+        ApiKey.tenant_id == current_user.tenant_id,
         ApiKey.revoked_at.is_(None),
     )
 
@@ -140,6 +140,7 @@ async def revoke_api_key(
         select(ApiKey).where(
             ApiKey.id == key_id,
             ApiKey.user_id == current_user.id,
+            ApiKey.tenant_id == current_user.tenant_id,
         )
     )
     api_key = result.scalar_one_or_none()
