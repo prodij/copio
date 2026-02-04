@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from src.db.models.user_role import UserRole
     from src.db.models.role import Role
     from src.db.models.refresh_token import RefreshToken
+    from src.db.models.api_key import ApiKey
 
 
 class User(SQLAlchemyBaseUserTableUUID, Base, TimestampMixin):
@@ -50,6 +51,13 @@ class User(SQLAlchemyBaseUserTableUUID, Base, TimestampMixin):
     # Refresh tokens for session management
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         "RefreshToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    # API keys for CLI/integration access
+    api_keys: Mapped[list["ApiKey"]] = relationship(
+        "ApiKey",
         back_populates="user",
         cascade="all, delete-orphan",
     )

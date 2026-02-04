@@ -12,6 +12,7 @@ from src.db.base import Base, TimestampMixin, generate_uuid
 if TYPE_CHECKING:
     from src.db.models.user import User
     from src.db.models.role import Role
+    from src.db.models.api_key import ApiKey
 
 
 class Tenant(Base, TimestampMixin):
@@ -54,6 +55,11 @@ class Tenant(Base, TimestampMixin):
     # Relationships
     users: Mapped[list["User"]] = relationship("User", back_populates="tenant")
     roles: Mapped[list["Role"]] = relationship("Role", back_populates="tenant")
+    api_keys: Mapped[list["ApiKey"]] = relationship(
+        "ApiKey",
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Tenant {self.slug}>"

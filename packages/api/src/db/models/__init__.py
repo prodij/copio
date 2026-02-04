@@ -37,6 +37,7 @@ from src.db.models.user_invite import UserInvite
 from src.db.models.audit_log import AuditLog, AuditAction
 from src.db.models.system_settings import SystemSettings
 from src.db.models.refresh_token import RefreshToken
+from src.db.models.api_key import ApiKey
 
 __all__ = [
     # Enums
@@ -93,4 +94,5 @@ __all__ = [
     "SystemSettings",
     # Auth tokens
     "RefreshToken",
+    "ApiKey",
 ]
