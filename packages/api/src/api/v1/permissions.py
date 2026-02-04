@@ -5,7 +5,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends
 
-from src.api.deps import get_current_user_with_dev_bypass
+from src.api.deps import get_current_user
 from src.auth.dependencies import get_enforcer
 from src.auth.enforcer import PermissionEnforcer
 from src.auth.permissions import ALL_PERMISSIONS, RESOURCE_ACTIONS
@@ -28,7 +28,7 @@ async def list_permissions_by_resource():
 
 @router.get("/me", response_model=List[str])
 async def get_my_permissions(
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
     enforcer: PermissionEnforcer = Depends(get_enforcer),
 ):
     """Get current user's effective permissions."""

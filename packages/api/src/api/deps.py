@@ -60,7 +60,7 @@ async def get_current_user(
     # Fetch user
     user_id = UUID(payload["sub"])
     result = await session.execute(
-        select(User).where(User.id == user_id, User.is_active == True)
+        select(User).where(User.id == user_id, User.is_active)
     )
     user = result.scalar_one_or_none()
 
@@ -107,7 +107,7 @@ async def _get_user_from_api_key(session: AsyncSession, raw_key: str) -> User:
 
     # Fetch user
     result = await session.execute(
-        select(User).where(User.id == api_key.user_id, User.is_active == True)
+        select(User).where(User.id == api_key.user_id, User.is_active)
     )
     user = result.scalar_one_or_none()
 

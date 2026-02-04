@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 
-from src.api.deps import DbSession, get_current_user_with_dev_bypass
+from src.api.deps import DbSession, get_current_user
 from src.auth.dependencies import require_permission
 from src.db.models.user import User
 from src.db.models.tenant import Tenant
@@ -71,7 +71,7 @@ class CompanyProfileUpdate(BaseModel):
 @router.get("", response_model=CompanyProfileResponse)
 async def get_company_profile(
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
 ):
     """Get the current company profile."""
     result = await session.execute(
@@ -87,7 +87,7 @@ async def get_company_profile(
 async def update_company_profile(
     data: CompanyProfileUpdate,
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
     _perm = Depends(require_permission("company:edit")),
 ):
     """Update company profile settings."""

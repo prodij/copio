@@ -5,7 +5,7 @@ from typing import Annotated, Callable
 
 from fastapi import Depends, HTTPException, Request, status
 
-from src.api.deps import DbSession, get_current_user_with_dev_bypass
+from src.api.deps import DbSession, get_current_user
 from src.auth.enforcer import PermissionEnforcer
 from src.db.models.user import User
 
@@ -25,14 +25,14 @@ def require_permission(permission: str) -> Callable:
     Usage:
         @router.post("/products")
         async def create_product(
-            user = Depends(get_current_user_with_dev_bypass),
+            user = Depends(get_current_user),
             _perm = Depends(require_permission("products:create")),
         ):
             ...
     """
     async def check_permission(
         request: Request,
-        user: User = Depends(get_current_user_with_dev_bypass),
+        user: User = Depends(get_current_user),
         enforcer: PermissionEnforcer = Depends(get_enforcer),
     ) -> None:
         if not await enforcer.can(user, permission):
@@ -52,14 +52,14 @@ def require_any_permission(*permissions: str) -> Callable:
     Usage:
         @router.delete("/products/{id}")
         async def delete_product(
-            user = Depends(get_current_user_with_dev_bypass),
+            user = Depends(get_current_user),
             _perm = Depends(require_any_permission("products:delete", "products:admin")),
         ):
             ...
     """
     async def check_permissions(
         request: Request,
-        user: User = Depends(get_current_user_with_dev_bypass),
+        user: User = Depends(get_current_user),
         enforcer: PermissionEnforcer = Depends(get_enforcer),
     ) -> None:
         for permission in permissions:

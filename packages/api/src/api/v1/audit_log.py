@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, desc, func
 
-from src.api.deps import DbSession, get_current_user_with_dev_bypass
+from src.api.deps import DbSession, get_current_user
 from src.auth.dependencies import require_permission
 from src.db.models.audit_log import AuditLog, AuditAction
 from src.db.models.user import User
@@ -37,7 +37,7 @@ class AuditLogEntry(BaseModel):
 @router.get("", response_model=PaginatedResponse[AuditLogEntry])
 async def list_audit_log(
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
     _perm = Depends(require_permission("audit_log:view")),
     action: str | None = None,
     user_id: UUID | None = None,
@@ -80,7 +80,7 @@ async def list_audit_log(
 @router.get("/export")
 async def export_audit_log(
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
     _perm = Depends(require_permission("audit_log:export")),
 ):
     """Export audit log as CSV."""

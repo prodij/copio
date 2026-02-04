@@ -9,7 +9,7 @@ from fastapi_users.password import PasswordHelper
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select, delete
 
-from src.api.deps import DbSession, get_current_user_with_dev_bypass
+from src.api.deps import DbSession, get_current_user
 from src.schemas.common import PaginatedResponse, Pagination
 from src.auth.dependencies import require_permission
 from src.db.models.user import User
@@ -65,7 +65,7 @@ class UserInviteResponse(BaseModel):
 @router.get("/me", response_model=UserResponse)
 async def get_current_user(
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
 ):
     """Get the currently authenticated user."""
     # Reload user with roles
@@ -78,7 +78,7 @@ async def get_current_user(
 @router.get("", response_model=PaginatedResponse[UserResponse])
 async def list_users(
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
     _perm = Depends(require_permission("users:view")),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
@@ -116,7 +116,7 @@ async def list_users(
 async def invite_user(
     data: UserInviteCreate,
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
     _perm = Depends(require_permission("users:invite")),
 ):
     """
@@ -222,7 +222,7 @@ async def assign_role_to_user(
     user_id: UUID,
     role_id: UUID,
     session: DbSession,
-    current_user: User = Depends(get_current_user_with_dev_bypass),
+    current_user: User = Depends(get_current_user),
 ):
     """Assign a role to a user."""
     # Verify user exists and belongs to same tenant
@@ -260,7 +260,7 @@ async def remove_role_from_user(
     user_id: UUID,
     role_id: UUID,
     session: DbSession,
-    current_user: User = Depends(get_current_user_with_dev_bypass),
+    current_user: User = Depends(get_current_user),
 ):
     """Remove a role from a user."""
     # Verify user exists and belongs to same tenant
@@ -297,7 +297,7 @@ async def update_user(
     user_id: UUID,
     data: UserUpdate,
     session: DbSession,
-    current_user: User = Depends(get_current_user_with_dev_bypass),
+    current_user: User = Depends(get_current_user),
     _perm = Depends(require_permission("users:edit")),
 ):
     """Update a user's details or role."""
@@ -340,7 +340,7 @@ async def update_user(
 async def deactivate_user(
     user_id: UUID,
     session: DbSession,
-    current_user: User = Depends(get_current_user_with_dev_bypass),
+    current_user: User = Depends(get_current_user),
     _perm = Depends(require_permission("users:delete")),
 ):
     """Deactivate a user (soft delete)."""

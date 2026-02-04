@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, select
 
-from src.api.deps import DbSession, get_current_user_with_dev_bypass
+from src.api.deps import DbSession, get_current_user
 from src.auth.permissions import ALL_PERMISSIONS
 from src.db.models.role import Role
 from src.db.models.user import User
@@ -82,7 +82,7 @@ def require_permission(permission: str):
     TODO: Implement full permission checking against user's roles.
     """
     async def permission_checker(
-        user: User = Depends(get_current_user_with_dev_bypass),
+        user: User = Depends(get_current_user),
     ) -> User:
         # For now, all authenticated users have access
         # Full RBAC implementation would check user.roles.permissions here
@@ -99,7 +99,7 @@ def require_permission(permission: str):
 async def create_role(
     data: RoleCreate,
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
     _perm=Depends(require_permission("roles:create")),
 ):
     """Create a new role."""
@@ -132,7 +132,7 @@ async def create_role(
 @router.get("", response_model=PaginatedResponse[RoleResponse])
 async def list_roles(
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
     _perm=Depends(require_permission("roles:view")),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
@@ -170,7 +170,7 @@ async def list_roles(
 async def get_role(
     role_id: UUID,
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
     _perm=Depends(require_permission("roles:view")),
 ):
     """Get a single role by ID."""
@@ -194,7 +194,7 @@ async def update_role(
     role_id: UUID,
     data: RoleUpdate,
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
     _perm=Depends(require_permission("roles:edit")),
 ):
     """Update a role."""
@@ -245,7 +245,7 @@ async def update_role(
 async def delete_role(
     role_id: UUID,
     session: DbSession,
-    user: User = Depends(get_current_user_with_dev_bypass),
+    user: User = Depends(get_current_user),
     _perm=Depends(require_permission("roles:delete")),
 ):
     """Delete a role."""
