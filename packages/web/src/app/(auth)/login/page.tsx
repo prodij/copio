@@ -6,28 +6,36 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AlertCircle, Loader2, CheckCircle } from "lucide-react";
+import { AlertCircle, Loader2, CheckCircle, Mail } from "lucide-react";
 import Link from "next/link";
 import { Logo } from "@/components/logo";
 
 function LoginForm() {
   const searchParams = useSearchParams();
   const registered = searchParams.get("registered") === "true";
+  const verified = searchParams.get("verified") === "true";
   const { login, isLoading: authLoading } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [needsVerification, setNeedsVerification] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setNeedsVerification(false);
     setIsSubmitting(true);
 
     try {
       await login(email, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      const errorMessage = err instanceof Error ? err.message : "Login failed";
+      setError(errorMessage);
+      // Check if this is a verification error
+      if (errorMessage.toLowerCase().includes("verify your email")) {
+        setNeedsVerification(true);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -56,14 +64,37 @@ function LoginForm() {
 
       {/* Form */}
       <form onSubmit={handleSubmit} className="space-y-6">
-        {registered && (
+        {verified && (
+          <div className="flex items-center gap-2 text-sm text-green-800 bg-green-100 dark:bg-green-900/30 dark:text-green-300 p-3 rounded-lg">
+            <CheckCircle className="h-4 w-4 flex-shrink-0" />
+            <span>Email verified! Sign in to continue.</span>
+          </div>
+        )}
+
+        {registered && !verified && (
           <div className="flex items-center gap-2 text-sm text-green-800 bg-green-100 dark:bg-green-900/30 dark:text-green-300 p-3 rounded-lg">
             <CheckCircle className="h-4 w-4 flex-shrink-0" />
             <span>Account created! Sign in to get started.</span>
           </div>
         )}
 
-        {error && (
+        {needsVerification ? (
+          <div className="space-y-3 text-sm bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/50 p-4 rounded-lg">
+            <div className="flex items-center gap-2 text-amber-800 dark:text-amber-200">
+              <Mail className="h-4 w-4 flex-shrink-0" />
+              <span className="font-medium">Email verification required</span>
+            </div>
+            <p className="text-amber-700 dark:text-amber-300">
+              Please verify your email address before signing in.
+            </p>
+            <Link
+              href="/verify-email"
+              className="inline-flex items-center text-amber-800 dark:text-amber-200 font-medium hover:underline underline-offset-4"
+            >
+              Resend verification email
+            </Link>
+          </div>
+        ) : error && (
           <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-lg">
             <AlertCircle className="h-4 w-4 flex-shrink-0" />
             <span>{error}</span>

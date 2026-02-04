@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
-import { LayoutDashboard, Package, Tags, MapPin, Truck, FileText, Settings, LogOut, User } from "lucide-react";
+import { LayoutDashboard, Package, Tags, MapPin, Truck, FileText, Settings, LogOut, User, Shield } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,12 @@ const navItems = [
   },
 ];
 
+const adminNavItem = {
+  title: "Admin",
+  href: "/admin",
+  icon: Shield,
+};
+
 export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
@@ -86,6 +92,22 @@ export function Sidebar() {
             </Link>
           );
         })}
+
+        {/* Admin link - only visible to superusers */}
+        {user?.isSuperuser && (
+          <Link
+            href={adminNavItem.href}
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              pathname?.startsWith(adminNavItem.href)
+                ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            )}
+          >
+            <adminNavItem.icon className="h-4 w-4" />
+            {adminNavItem.title}
+          </Link>
+        )}
       </nav>
       
       {/* User menu */}
