@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from src.api.v1 import velocity, sync
+from src.api.v1 import admin
 from src.api.v1 import products
 from src.api.v1 import categories
 from src.api.v1 import locations
@@ -20,6 +21,7 @@ from src.api.v1 import users
 from src.api.v1 import permissions
 from src.api.v1 import audit_log
 from src.api.v1 import company
+from src.api.v1 import api_keys
 from src.auth.routes import router as auth_router
 
 api_router = APIRouter()
@@ -61,3 +63,9 @@ api_router.include_router(audit_log.router)
 
 # Company settings
 api_router.include_router(company.router)
+
+# API Keys
+api_router.include_router(api_keys.router)
+
+# Admin routes (superuser-only)
+api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
