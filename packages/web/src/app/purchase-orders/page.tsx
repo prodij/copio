@@ -1,10 +1,17 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { CreatePODialog } from "./create-dialog";
 
 const API_URL = process.env.API_URL || "http://localhost:8000/api/v1";
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get('access_token');
+  return accessToken ? { Cookie: `access_token=${accessToken.value}` } : {};
+}
 
 interface PurchaseOrder {
   id: string;
@@ -28,8 +35,9 @@ interface PaginatedResponse {
 }
 
 async function getPurchaseOrders(): Promise<{ purchaseOrders: PurchaseOrder[]; total: number }> {
-  const res = await fetch(`${API_URL}/purchase-orders`, { cache: "no-store" });
-  if (!res.ok) throw new Error("Failed to fetch purchase orders");
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/purchase-orders`, { cache: "no-store", headers });
+  if (!res.ok) return { purchaseOrders: [], total: 0 };
   const response: PaginatedResponse = await res.json();
   return { purchaseOrders: response.data, total: response.pagination.total };
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,6 +10,12 @@ import { SortableHeader } from "@/components/sortable-header";
 import { Pagination } from "@/components/pagination";
 
 const API_URL = process.env.API_URL || "http://localhost:8000/api/v1";
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get('access_token');
+  return accessToken ? { Cookie: `access_token=${accessToken.value}` } : {};
+}
 
 interface Product {
   id: string;
@@ -45,21 +52,23 @@ interface SearchParams {
 }
 
 async function getProducts(params: SearchParams): Promise<ProductsResponse> {
+  const headers = await getAuthHeaders();
   const searchParams = new URLSearchParams();
   if (params.search) searchParams.set("search", params.search);
   if (params.status && params.status !== "all") searchParams.set("status", params.status);
   if (params.page) searchParams.set("page", params.page);
   if (params.pageSize) searchParams.set("pageSize", params.pageSize);
-  
+
   const url = `${API_URL}/products?${searchParams.toString()}`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error("Failed to fetch products");
+  const res = await fetch(url, { cache: "no-store", headers });
+  if (!res.ok) return { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } };
   return res.json();
 }
 
 async function getAllBrands(): Promise<string[]> {
   // Get all products to extract brands (could optimize with dedicated endpoint)
-  const res = await fetch(`${API_URL}/products?pageSize=1000`, { cache: "no-store" });
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/products?pageSize=1000`, { cache: "no-store", headers });
   if (!res.ok) return [];
   const data: ProductsResponse = await res.json();
   const brands = [...new Set(data.data.map((p) => p.brand).filter(Boolean))] as string[];

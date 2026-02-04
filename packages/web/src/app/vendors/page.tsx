@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -8,6 +9,12 @@ import { VendorFilters } from "@/components/vendor-filters";
 import { SortableHeader } from "@/components/sortable-header";
 
 const API_URL = process.env.API_URL || "http://localhost:8000/api/v1";
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get('access_token');
+  return accessToken ? { Cookie: `access_token=${accessToken.value}` } : {};
+}
 
 interface VendorContact {
   id: string;
@@ -30,8 +37,9 @@ interface Vendor {
 }
 
 async function getVendors(): Promise<Vendor[]> {
-  const res = await fetch(`${API_URL}/vendors`, { cache: "no-store" });
-  if (!res.ok) throw new Error("Failed to fetch vendors");
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/vendors`, { cache: "no-store", headers });
+  if (!res.ok) return [];
   const result = await res.json();
   return result.data || result; // Handle paginated response
 }

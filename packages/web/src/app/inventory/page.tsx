@@ -1,7 +1,14 @@
+import { cookies } from "next/headers";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { InventoryTable } from "./inventory-table";
 
 const API_URL = process.env.API_URL || 'http://localhost:8000/api/v1';
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get('access_token');
+  return accessToken ? { Cookie: `access_token=${accessToken.value}` } : {};
+}
 
 interface Product {
   id: string;
@@ -27,22 +34,25 @@ interface StockItem {
 }
 
 async function getStockItems(): Promise<StockItem[]> {
-  const res = await fetch(`${API_URL}/stock-items`, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Failed to fetch stock items');
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/stock-items`, { cache: 'no-store', headers });
+  if (!res.ok) return [];
   const result = await res.json();
   return result.data || result; // Handle paginated response
 }
 
 async function getProducts(): Promise<Product[]> {
-  const res = await fetch(`${API_URL}/products?pageSize=1000`, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Failed to fetch products');
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/products?pageSize=1000`, { cache: 'no-store', headers });
+  if (!res.ok) return [];
   const data = await res.json();
   return data.data || data; // Handle both paginated and legacy response
 }
 
 async function getLocations(): Promise<Location[]> {
-  const res = await fetch(`${API_URL}/locations`, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Failed to fetch locations');
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/locations`, { cache: 'no-store', headers });
+  if (!res.ok) return [];
   const result = await res.json();
   return result.data || result; // Handle paginated response
 }

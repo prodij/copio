@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { ArrowLeft, Truck, MapPin, Calendar, Package, ExternalLink, Phone, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,12 @@ import { EditPODialog } from "./edit-po-dialog";
 import { EditLineDialog } from "./edit-line-dialog";
 
 const API_URL = process.env.API_URL || "http://localhost:8000/api/v1";
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get('access_token');
+  return accessToken ? { Cookie: `access_token=${accessToken.value}` } : {};
+}
 
 interface POLine {
   id: string;
@@ -73,9 +80,10 @@ interface PurchaseOrder {
 }
 
 async function getPurchaseOrder(id: string): Promise<PurchaseOrder | null> {
-  const res = await fetch(`${API_URL}/purchase-orders/${id}`, { cache: "no-store" });
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/purchase-orders/${id}`, { cache: "no-store", headers });
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error("Failed to fetch purchase order");
+  if (!res.ok) return null;
   return res.json();
 }
 

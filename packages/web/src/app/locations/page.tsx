@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -5,6 +6,12 @@ import { MapPin } from "lucide-react";
 import { CreateLocationDialog } from "./create-dialog";
 
 const API_URL = process.env.API_URL || 'http://localhost:8000/api/v1';
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get('access_token');
+  return accessToken ? { Cookie: `access_token=${accessToken.value}` } : {};
+}
 
 interface Location {
   id: string;
@@ -16,8 +23,9 @@ interface Location {
 }
 
 async function getLocations(): Promise<Location[]> {
-  const res = await fetch(`${API_URL}/locations`, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Failed to fetch locations');
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/locations`, { cache: 'no-store', headers });
+  if (!res.ok) return [];
   const result = await res.json();
   return result.data || result; // Handle paginated response
 }

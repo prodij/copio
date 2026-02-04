@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { ArrowLeft, Package, FileText, Users, MapPin, AlertTriangle, Building2, Download, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,12 @@ import { DocumentDownloadButton } from "@/components/document-download-button";
 import { VendorPOTable } from "@/components/vendor-po-table";
 
 const API_URL = process.env.API_URL || "http://localhost:8000/api/v1";
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get('access_token');
+  return accessToken ? { Cookie: `access_token=${accessToken.value}` } : {};
+}
 
 interface VendorProduct {
   id: string;
@@ -115,14 +122,16 @@ interface Vendor {
 }
 
 async function getVendor(id: string): Promise<Vendor | null> {
-  const res = await fetch(`${API_URL}/vendors/${id}`, { cache: "no-store" });
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/vendors/${id}`, { cache: "no-store", headers });
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error("Failed to fetch vendor");
+  if (!res.ok) return null;
   return res.json();
 }
 
 async function getPurchaseOrders(vendorId: string): Promise<PurchaseOrder[]> {
-  const res = await fetch(`${API_URL}/purchase-orders?vendorId=${vendorId}`, { cache: "no-store" });
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/purchase-orders?vendorId=${vendorId}`, { cache: "no-store", headers });
   if (!res.ok) return [];
   const data = await res.json();
   return data.data || data.purchaseOrders || [];
