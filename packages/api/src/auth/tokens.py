@@ -9,8 +9,9 @@ from passlib.hash import argon2
 
 from src.config import settings
 
-ACCESS_TOKEN_EXPIRE_MINUTES = 15
-REFRESH_TOKEN_EXPIRE_DAYS = 7
+# Use settings values for token expiry
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
+REFRESH_TOKEN_EXPIRE_DAYS = settings.refresh_token_expire_days
 
 
 def create_access_token(user_id: UUID, tenant_id: UUID) -> str:

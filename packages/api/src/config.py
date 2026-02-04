@@ -27,8 +27,8 @@ class Settings(BaseSettings):
 
     # Auth
     secret_key: str = "CHANGE-ME-IN-PRODUCTION"
-    access_token_expire_minutes: int = 60 * 24  # 24 hours
-    refresh_token_expire_days: int = 30
+    access_token_expire_minutes: int = 15  # Short-lived for security
+    refresh_token_expire_days: int = 7
 
     # Amazon SP-API
     amazon_client_id: str = ""
@@ -41,6 +41,9 @@ class Settings(BaseSettings):
 
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    # Frontend URL (for email links)
+    frontend_url: str = "http://localhost:3000"
 
     @property
     def async_database_url(self) -> str:
