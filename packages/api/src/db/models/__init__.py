@@ -38,6 +38,7 @@ from src.db.models.audit_log import AuditLog, AuditAction
 from src.db.models.system_settings import SystemSettings
 from src.db.models.refresh_token import RefreshToken
 from src.db.models.api_key import ApiKey
+from src.db.models.admin_audit_log import AdminAuditLog
 
 __all__ = [
     # Enums
@@ -95,4 +96,5 @@ __all__ = [
     # Auth tokens
     "RefreshToken",
     "ApiKey",
+    "AdminAuditLog",
 ]
