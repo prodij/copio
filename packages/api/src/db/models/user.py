@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from src.db.models.tenant import Tenant
     from src.db.models.user_role import UserRole
     from src.db.models.role import Role
+    from src.db.models.refresh_token import RefreshToken
 
 
 class User(SQLAlchemyBaseUserTableUUID, Base, TimestampMixin):
@@ -44,6 +45,13 @@ class User(SQLAlchemyBaseUserTableUUID, Base, TimestampMixin):
         secondary="user_roles",
         viewonly=True,
         lazy="selectin",
+    )
+
+    # Refresh tokens for session management
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
+        "RefreshToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:

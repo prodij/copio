@@ -35,6 +35,8 @@ from src.db.models.vendor import (
 from src.db.models.purchase_order import PurchaseOrder, POLine
 from src.db.models.user_invite import UserInvite
 from src.db.models.audit_log import AuditLog, AuditAction
+from src.db.models.system_settings import SystemSettings
+from src.db.models.refresh_token import RefreshToken
 
 __all__ = [
     # Enums
@@ -87,4 +89,8 @@ __all__ = [
     # Audit
     "AuditLog",
     "AuditAction",
+    # System
+    "SystemSettings",
+    # Auth tokens
+    "RefreshToken",
 ]
