@@ -6,29 +6,29 @@ const API_BASE = typeof window !== 'undefined' ? '/api' : (process.env.API_URL |
 // Axios instance for React Query hooks
 export const api = axios.create({
   baseURL: API_BASE,
+  withCredentials: true, // Include cookies in requests
 });
 
-// Request interceptor for auth tokens
-api.interceptors.request.use((config) => {
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("copio_token");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  }
-  return config;
-});
-
-// Response interceptor for error handling
+// Response interceptor for error handling and token refresh
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    // Handle 401 - redirect to login
-    if (error.response?.status === 401 && typeof window !== "undefined") {
-      localStorage.removeItem("copio_token");
-      // Only redirect if not already on login page
-      if (!window.location.pathname.startsWith("/login")) {
-        window.location.href = "/login";
+  async (error) => {
+    const originalRequest = error.config;
+
+    // Handle 401 - try to refresh token
+    if (error.response?.status === 401 && typeof window !== "undefined" && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      try {
+        // Try to refresh the token
+        await axios.post("/api/v1/auth/refresh", {}, { withCredentials: true });
+        // Retry the original request
+        return api(originalRequest);
+      } catch {
+        // Refresh failed - redirect to login
+        if (!window.location.pathname.startsWith("/login")) {
+          window.location.href = "/login";
+        }
       }
     }
     return Promise.reject(error);
@@ -45,6 +45,7 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
       "Content-Type": "application/json",
       ...options?.headers,
     },
+    credentials: "include",
   });
 
   if (!res.ok) {

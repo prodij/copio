@@ -25,6 +25,7 @@ export function CreateRoleDialog({ open, onOpenChange, onRoleCreated }: CreateRo
     const res = await fetch("/api/v1/roles", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({
         name,
         description,

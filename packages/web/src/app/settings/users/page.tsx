@@ -53,7 +53,7 @@ function LoadingSkeleton() {
 }
 
 export default function UsersPage() {
-  const { token } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [roles, setRoles] = useState<{ id: string; name: string }[]>([]);
@@ -61,13 +61,11 @@ export default function UsersPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
-    if (!token) return;
-    
-    const headers = { Authorization: `Bearer ${token}` };
-    
+    if (!isAuthenticated) return;
+
     Promise.all([
-      fetch("/api/v1/users", { headers }).then((r) => r.ok ? r.json() : { data: [] }),
-      fetch("/api/v1/roles", { headers }).then((r) => r.ok ? r.json() : { data: [] }),
+      fetch("/api/v1/users", { credentials: "include" }).then((r) => r.ok ? r.json() : { data: [] }),
+      fetch("/api/v1/roles", { credentials: "include" }).then((r) => r.ok ? r.json() : { data: [] }),
     ]).then(([usersResponse, rolesResponse]) => {
       // Handle paginated response - extract data array
       const usersData = usersResponse.data || usersResponse;
@@ -78,13 +76,13 @@ export default function UsersPage() {
     }).catch(() => {
       setLoading(false);
     });
-  }, [token]);
+  }, [isAuthenticated]);
 
   const handleDeactivate = async (userId: string) => {
     if (!confirm("Deactivate this user?")) return;
-    await fetch(`/api/v1/users/${userId}`, { 
+    await fetch(`/api/v1/users/${userId}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     });
     setUsers(users.map((u) => (u.id === userId ? { ...u, is_active: false } : u)));
   };

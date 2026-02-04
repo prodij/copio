@@ -37,16 +37,16 @@ function LoadingSkeleton() {
 }
 
 export default function RolesPage() {
-  const { token } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
-    if (!token) return;
-    
+    if (!isAuthenticated) return;
+
     fetch("/api/v1/roles", {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     })
       .then((res) => res.ok ? res.json() : { data: [] })
       .then((response) => {
@@ -59,7 +59,7 @@ export default function RolesPage() {
         setRoles([]);
         setLoading(false);
       });
-  }, [token]);
+  }, [isAuthenticated]);
 
   const handleRoleCreated = (role: Role) => {
     setRoles([...roles, role]);

@@ -57,20 +57,18 @@ function LoadingSkeleton() {
 export default function RoleEditorPage() {
   const params = useParams();
   const router = useRouter();
-  const { token } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [role, setRole] = useState<Role | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [allPermissions, setAllPermissions] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
-    if (!token) return;
-    
-    const headers = { Authorization: `Bearer ${token}` };
-    
+    if (!isAuthenticated) return;
+
     Promise.all([
-      fetch(`/api/v1/roles/${params.id}`, { headers }).then((r) => r.ok ? r.json() : null),
-      fetch("/api/v1/permissions/by-resource", { headers }).then((r) => r.ok ? r.json() : {}),
+      fetch(`/api/v1/roles/${params.id}`, { credentials: "include" }).then((r) => r.ok ? r.json() : null),
+      fetch("/api/v1/permissions/by-resource", { credentials: "include" }).then((r) => r.ok ? r.json() : {}),
     ]).then(([roleData, perms]) => {
       setRole(roleData);
       setAllPermissions(perms && typeof perms === 'object' ? perms as Record<string, string[]> : {});
@@ -78,26 +76,26 @@ export default function RoleEditorPage() {
     }).catch(() => {
       setLoading(false);
     });
-  }, [params.id, token]);
+  }, [params.id, isAuthenticated]);
 
   const handleSave = async () => {
-    if (!role || !token) return;
+    if (!role) return;
     setSaving(true);
-    
+
     try {
       const res = await fetch(`/api/v1/roles/${role.id}`, {
         method: "PATCH",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
+        credentials: "include",
         body: JSON.stringify({
           name: role.name,
           description: role.description,
           permissions: role.permissions,
         }),
       });
-      
+
       if (res.ok) {
         toast.success("Role saved");
       } else {
@@ -111,12 +109,12 @@ export default function RoleEditorPage() {
   };
 
   const handleDelete = async () => {
-    if (!role || role.is_system || !token) return;
+    if (!role || role.is_system) return;
     if (!confirm("Delete this role?")) return;
-    
-    await fetch(`/api/v1/roles/${role.id}`, { 
+
+    await fetch(`/api/v1/roles/${role.id}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     });
     router.push("/settings/roles");
   };

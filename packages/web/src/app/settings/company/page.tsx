@@ -84,17 +84,17 @@ function LoadingSkeleton() {
 }
 
 export default function CompanySettingsPage() {
-  const { token } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [profile, setProfile] = useState<CompanyProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<Partial<CompanyProfile>>({});
 
   useEffect(() => {
-    if (!token) return;
-    
+    if (!isAuthenticated) return;
+
     fetch("/api/v1/company", {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     })
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
@@ -104,7 +104,7 @@ export default function CompanySettingsPage() {
         }
       })
       .finally(() => setLoading(false));
-  }, [token]);
+  }, [isAuthenticated]);
 
   const handleChange = (field: keyof CompanyProfile, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value || null }));
@@ -116,9 +116,9 @@ export default function CompanySettingsPage() {
       const res = await fetch("/api/v1/company", {
         method: "PATCH",
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify(formData),
       });
 

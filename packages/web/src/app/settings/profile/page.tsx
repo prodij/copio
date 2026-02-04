@@ -11,7 +11,7 @@ import { AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ProfilePage() {
-  const { user, token, refreshUser, isLoading } = useAuth();
+  const { user, refreshUser, isLoading } = useAuth();
   
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -34,14 +34,14 @@ export default function ProfilePage() {
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsUpdating(true);
-    
+
     try {
-      const res = await fetch("/api/auth/me", {
+      const res = await fetch("/api/v1/auth/me", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
+        credentials: "include",
         body: JSON.stringify({
           first_name: firstName || null,
           last_name: lastName || null,
@@ -79,12 +79,12 @@ export default function ProfilePage() {
     setIsChangingPassword(true);
     
     try {
-      const res = await fetch("/api/auth/change-password", {
+      const res = await fetch("/api/v1/auth/change-password", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
+        credentials: "include",
         body: JSON.stringify({
           current_password: currentPassword,
           new_password: newPassword,

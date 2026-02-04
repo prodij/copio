@@ -49,9 +49,10 @@ export default function RegisterPage() {
     setIsSubmitting(true);
 
     try {
-      const res = await fetch("/api/auth/register-tenant", {
+      const res = await fetch("/api/v1/auth/register-tenant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           tenant_name: formData.tenantName,
           tenant_slug: tenantSlug,
@@ -67,8 +68,16 @@ export default function RegisterPage() {
         throw new Error(data.detail || "Registration failed");
       }
 
-      // Redirect to login with success message
-      router.push("/login?registered=true");
+      const data = await res.json();
+
+      // Check if verification is required
+      if (data.verification_required) {
+        // Redirect to verify-email page with message
+        router.push("/verify-email?registered=true");
+      } else {
+        // Redirect to login with success message
+        router.push("/login?registered=true");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
     } finally {

@@ -21,12 +21,6 @@ export interface ApiError {
 }
 
 class ApiClient {
-  private token: string | null = null;
-
-  setToken(token: string | null) {
-    this.token = token;
-  }
-
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
@@ -36,13 +30,10 @@ class ApiClient {
       ...options.headers,
     };
 
-    if (this.token) {
-      (headers as Record<string, string>)["Authorization"] = `Bearer ${this.token}`;
-    }
-
     const res = await fetch(`/api/v1${endpoint}`, {
       ...options,
       headers,
+      credentials: "include",
     });
 
     if (!res.ok) {

@@ -58,15 +58,15 @@ function LoadingSkeleton() {
 }
 
 export default function AuditLogPage() {
-  const { token } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [data, setData] = useState<AuditResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionFilter, setActionFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
 
   const fetchData = async () => {
-    if (!token) return;
-    
+    if (!isAuthenticated) return;
+
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -74,9 +74,9 @@ export default function AuditLogPage() {
       if (actionFilter && actionFilter !== "all") params.set("action", actionFilter);
 
       const res = await fetch(`/api/v1/audit-log?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       });
-      
+
       if (res.ok) {
         const result = await res.json();
         setData(result);
@@ -92,10 +92,11 @@ export default function AuditLogPage() {
 
   useEffect(() => {
     fetchData();
-  }, [page, actionFilter, token]);
+  }, [page, actionFilter, isAuthenticated]);
 
   const handleExport = () => {
-    window.open(`/api/v1/audit-log/export?token=${token}`, "_blank");
+    // Export uses cookies for auth, no token needed
+    window.open("/api/v1/audit-log/export", "_blank");
   };
 
   const formatDate = (dateStr: string) => {

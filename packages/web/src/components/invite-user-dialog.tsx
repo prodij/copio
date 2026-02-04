@@ -26,6 +26,7 @@ export function InviteUserDialog({ open, onOpenChange, roles, onInviteSent }: In
     const res = await fetch("/api/v1/users/invite", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ email, role_id: roleId }),
     });
 
