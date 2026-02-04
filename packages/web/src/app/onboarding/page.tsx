@@ -292,7 +292,7 @@ function LocationStep({
         address: data.address ? { street: data.address } : undefined,
       };
 
-      const res = await fetch("/api/v1/locations", {
+      const res = await fetch("/api/v1/locations/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

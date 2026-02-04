@@ -218,8 +218,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user && !isPublicRoute) {
       router.push("/login");
     } else if (user && isPublicRoute && pathname !== "/accept-invite") {
-      // If onboarding is not complete, redirect to onboarding
-      if (tenant && !tenant.onboardingComplete && pathname !== "/onboarding") {
+      // If onboarding is not complete, redirect to onboarding (skip for superusers)
+      if (tenant && !tenant.onboardingComplete && !user.isSuperuser && pathname !== "/onboarding") {
         router.push("/onboarding");
       } else if (pathname !== "/onboarding") {
         router.push("/");
@@ -242,8 +242,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const userData = await getMeApi();
     setUser(userData);
 
-    // Check if onboarding is complete
-    if (!result.tenant.onboarding_complete) {
+    // Check if onboarding is complete (skip for superusers)
+    if (!result.tenant.onboarding_complete && !userData.isSuperuser) {
       router.push("/onboarding");
     } else {
       router.push("/");

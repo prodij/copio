@@ -6,7 +6,7 @@ import { Sidebar } from "@/components/sidebar";
 import { Loader2 } from "lucide-react";
 
 // Routes that don't show the sidebar
-const PUBLIC_ROUTES = ["/login", "/register", "/accept-invite", "/forgot-password", "/reset-password"];
+const PUBLIC_ROUTES = ["/login", "/register", "/accept-invite", "/forgot-password", "/reset-password", "/onboarding", "/verify-email"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
