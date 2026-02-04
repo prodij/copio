@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Users, Shield, ScrollText, User, Building2 } from "lucide-react";
+import { Users, Shield, ScrollText, User, Building2, Key } from "lucide-react";
 
 const settingsNav = [
   { title: "Company", href: "/settings/company", icon: Building2 },
   { title: "Profile", href: "/settings/profile", icon: User },
   { title: "Users", href: "/settings/users", icon: Users },
   { title: "Roles", href: "/settings/roles", icon: Shield },
+  { title: "API Keys", href: "/settings/api-keys", icon: Key },
   { title: "Audit Log", href: "/settings/audit-log", icon: ScrollText },
 ];
 
