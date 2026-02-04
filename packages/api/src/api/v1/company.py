@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from src.api.deps import DbSession, get_current_user
 from src.auth.dependencies import require_permission
@@ -105,5 +105,20 @@ async def update_company_profile(
     
     await session.commit()
     await session.refresh(tenant)
-    
+
     return tenant
+
+
+@router.post("/complete-onboarding")
+async def complete_onboarding(
+    session: DbSession,
+    user: User = Depends(get_current_user),
+):
+    """Mark tenant onboarding as complete."""
+    await session.execute(
+        update(Tenant)
+        .where(Tenant.id == user.tenant_id)
+        .values(onboarding_complete=True)
+    )
+    await session.commit()
+    return {"message": "Onboarding complete"}
