@@ -27,10 +27,17 @@ def create_access_token(user_id: UUID, tenant_id: UUID) -> str:
 
 
 def decode_access_token(token: str) -> dict | None:
-    """Decode and validate access token. Returns None if invalid."""
+    """Decode and validate access token. Returns None if invalid.
+
+    Accepts both:
+    - Custom tokens with type="access"
+    - fastapi-users tokens (no type field, has "aud" field)
+    """
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
-        if payload.get("type") != "access":
+        # Accept our custom tokens (type=access) or fastapi-users tokens (has aud)
+        token_type = payload.get("type")
+        if token_type is not None and token_type != "access":
             return None
         return payload
     except JWTError:

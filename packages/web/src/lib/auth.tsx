@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { SessionExpiredModal } from "@/components/session-expired-modal";
 
 // Types
 export interface User {
@@ -28,9 +29,11 @@ interface AuthContextType {
   tenant: Tenant | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  sessionExpired: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  showSessionExpired: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -153,6 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -163,6 +167,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setTenant(null);
   }, []);
+
+  // Show session expired modal
+  const showSessionExpired = useCallback(() => {
+    setSessionExpired(true);
+  }, []);
+
+  // Handle login from session expired modal
+  const handleSessionExpiredLogin = useCallback(() => {
+    setSessionExpired(false);
+    clearAuthState();
+    router.push("/login");
+  }, [clearAuthState, router]);
+
+  // Listen for session expired events from axios interceptor
+  useEffect(() => {
+    const handleSessionExpiredEvent = () => {
+      showSessionExpired();
+    };
+
+    window.addEventListener("session-expired", handleSessionExpiredEvent);
+    return () => {
+      window.removeEventListener("session-expired", handleSessionExpiredEvent);
+    };
+  }, [showSessionExpired]);
 
   // Initialize auth state by checking if we have a valid session
   useEffect(() => {
@@ -238,11 +266,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userData = await getMeApi();
       setUser(userData);
     } catch {
-      // Session expired, clear state
-      clearAuthState();
-      router.push("/login");
+      // Session expired, show modal instead of silently redirecting
+      showSessionExpired();
     }
-  }, [clearAuthState, router]);
+  }, [showSessionExpired]);
 
   return (
     <AuthContext.Provider
@@ -251,12 +278,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         tenant,
         isLoading,
         isAuthenticated: !!user,
+        sessionExpired,
         login,
         logout,
         refreshUser,
+        showSessionExpired,
       }}
     >
       {children}
+      <SessionExpiredModal
+        open={sessionExpired}
+        onLogin={handleSessionExpiredLogin}
+      />
     </AuthContext.Provider>
   );
 }
@@ -271,7 +304,7 @@ export function useAuth() {
 
 // Hook for making authenticated fetch requests with automatic token refresh
 export function useAuthFetch() {
-  const { logout } = useAuth();
+  const { showSessionExpired } = useAuth();
 
   return useCallback(
     async (url: string, options?: RequestInit) => {
@@ -279,11 +312,11 @@ export function useAuthFetch() {
         return await fetchWithRefresh(url, options);
       } catch (error) {
         if (error instanceof Error && error.message === "Session expired") {
-          logout();
+          showSessionExpired();
         }
         throw error;
       }
     },
-    [logout]
+    [showSessionExpired]
   );
 }

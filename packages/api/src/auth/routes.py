@@ -105,6 +105,8 @@ class LoginRequest(BaseModel):
 
 class LoginResponse(BaseModel):
     """Schema for login response."""
+    access_token: str
+    token_type: str = "bearer"
     user: dict
     tenant: dict
 
@@ -175,6 +177,7 @@ async def login(
     await user_manager.on_after_login(user)
 
     return LoginResponse(
+        access_token=access_token,
         user={
             "id": str(user.id),
             "email": user.email,
@@ -537,9 +540,56 @@ async def register_tenant(
     )
 
 
+async def get_current_user_from_cookie(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    """Get current user from access_token cookie or Authorization header."""
+    from src.auth.tokens import decode_access_token
+
+    # Check Authorization header first (for Bearer tokens)
+    auth_header = request.headers.get("Authorization")
+    access_token = None
+    if auth_header and auth_header.startswith("Bearer "):
+        access_token = auth_header.replace("Bearer ", "")
+
+    # Fall back to cookie
+    if not access_token:
+        access_token = request.cookies.get("access_token")
+
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
+    # Decode and validate token
+    payload = decode_access_token(access_token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
+    # Fetch user
+    user_id = UUID(payload["sub"])
+    result = await session.execute(
+        select(User).where(User.id == user_id, User.is_active)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+
+    return user
+
+
 @router.get("/me")
 async def get_current_user_info(
-    user: User = Depends(fastapi_users.current_user(active=True)),
+    user: User = Depends(get_current_user_from_cookie),
 ):
     """Get current authenticated user info."""
     return {

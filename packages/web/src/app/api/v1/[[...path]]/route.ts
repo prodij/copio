@@ -11,6 +11,13 @@ async function proxyRequest(request: NextRequest) {
   const headers = new Headers(request.headers);
   headers.delete("host");
 
+  // Forward cookies from the browser to the API
+  const cookies = request.cookies.getAll();
+  if (cookies.length > 0) {
+    const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join("; ");
+    headers.set("cookie", cookieHeader);
+  }
+
   const response = await fetch(targetUrl, {
     method: request.method,
     headers,

@@ -1,13 +1,22 @@
 import axios from "axios";
 
-// Use /api proxy for client-side, direct URL for server-side components
-const API_BASE = typeof window !== 'undefined' ? '/api' : (process.env.API_URL || 'http://localhost:8000/api/v1');
+// Use /api/v1 proxy for client-side, direct URL for server-side components
+const API_BASE = typeof window !== 'undefined' ? '/api/v1' : (process.env.API_URL || 'http://localhost:8000/api/v1');
 
 // Axios instance for React Query hooks
 export const api = axios.create({
   baseURL: API_BASE,
   withCredentials: true, // Include cookies in requests
 });
+
+// Custom event for session expiry - auth context listens for this
+export const SESSION_EXPIRED_EVENT = "session-expired";
+
+export function dispatchSessionExpired() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+  }
+}
 
 // Response interceptor for error handling and token refresh
 api.interceptors.response.use(
@@ -25,9 +34,9 @@ api.interceptors.response.use(
         // Retry the original request
         return api(originalRequest);
       } catch {
-        // Refresh failed - redirect to login
+        // Refresh failed - show session expired modal instead of redirecting
         if (!window.location.pathname.startsWith("/login")) {
-          window.location.href = "/login";
+          dispatchSessionExpired();
         }
       }
     }
@@ -37,8 +46,13 @@ api.interceptors.response.use(
 
 // Legacy fetch wrapper (kept for backward compatibility)
 export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  // Ensure endpoint has trailing slash for collection endpoints (avoids 307 redirects that lose cookies)
+  let normalizedEndpoint = endpoint;
+  if (!endpoint.includes('?') && !endpoint.match(/\/[a-f0-9-]{36}$/i) && !endpoint.endsWith('/')) {
+    normalizedEndpoint = endpoint + '/';
+  }
   // Remove leading slash from endpoint if API_BASE ends with one
-  const url = endpoint.startsWith('/') ? `${API_BASE}${endpoint}` : `${API_BASE}/${endpoint}`;
+  const url = normalizedEndpoint.startsWith('/') ? `${API_BASE}${normalizedEndpoint}` : `${API_BASE}/${normalizedEndpoint}`;
   const res = await fetch(url, {
     ...options,
     headers: {

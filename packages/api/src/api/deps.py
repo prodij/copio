@@ -29,20 +29,29 @@ async def get_current_user(
     session: DbSession,
 ) -> User:
     """
-    Get current user from access_token cookie or API key.
+    Get current user from access_token cookie, Bearer token, or API key.
 
     Priority:
     1. API Key (Authorization: Bearer ck_...)
-    2. Access token cookie
+    2. Bearer token (Authorization: Bearer <jwt>)
+    3. Access token cookie
     """
-    # Check for API key first
     auth_header = request.headers.get("Authorization")
+
+    # Check for API key first
     if auth_header and auth_header.startswith("Bearer ck_"):
         api_key = auth_header.replace("Bearer ", "")
         return await _get_user_from_api_key(session, api_key)
 
-    # Check for access token cookie
-    access_token = request.cookies.get("access_token")
+    # Check for Bearer token in header
+    access_token = None
+    if auth_header and auth_header.startswith("Bearer "):
+        access_token = auth_header.replace("Bearer ", "")
+
+    # Fall back to cookie
+    if not access_token:
+        access_token = request.cookies.get("access_token")
+
     if not access_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
