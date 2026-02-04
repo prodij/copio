@@ -4,12 +4,13 @@ from datetime import datetime, timedelta, timezone
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi_users.password import PasswordHelper
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select, delete
+from sqlalchemy import func, select, delete
 
 from src.api.deps import DbSession, get_current_user_with_dev_bypass
+from src.schemas.common import PaginatedResponse, Pagination
 from src.auth.dependencies import require_permission
 from src.db.models.user import User
 from src.db.models.user_invite import UserInvite
@@ -22,6 +23,15 @@ router = APIRouter(prefix="/users", tags=["users"])
 password_helper = PasswordHelper()
 
 
+class RoleBasic(BaseModel):
+    """Basic role info for user response."""
+    id: UUID
+    name: str
+    
+    class Config:
+        from_attributes = True
+
+
 class UserResponse(BaseModel):
     """Response schema for user data."""
     id: UUID
@@ -29,6 +39,7 @@ class UserResponse(BaseModel):
     first_name: str | None
     last_name: str | None
     is_active: bool
+    roles: List[RoleBasic] = []
     
     class Config:
         from_attributes = True
@@ -53,23 +64,52 @@ class UserInviteResponse(BaseModel):
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user(
+    session: DbSession,
     user: User = Depends(get_current_user_with_dev_bypass),
 ):
     """Get the currently authenticated user."""
-    return user
+    # Reload user with roles
+    result = await session.execute(
+        select(User).where(User.id == user.id)
+    )
+    return result.scalar_one()
 
 
-@router.get("", response_model=List[UserResponse])
+@router.get("", response_model=PaginatedResponse[UserResponse])
 async def list_users(
     session: DbSession,
     user: User = Depends(get_current_user_with_dev_bypass),
     _perm = Depends(require_permission("users:view")),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
 ):
     """List all users in the current tenant."""
-    result = await session.execute(
-        select(User).where(User.tenant_id == user.tenant_id).order_by(User.email)
+    # Base query
+    query = select(User).where(User.tenant_id == user.tenant_id)
+
+    # Get total count
+    count_result = await session.execute(
+        select(func.count()).select_from(query.subquery())
     )
-    return result.scalars().all()
+    total = count_result.scalar() or 0
+
+    # Apply pagination and ordering
+    result = await session.execute(
+        query.order_by(User.email)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    users = result.scalars().all()
+
+    return PaginatedResponse(
+        data=users,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+        ),
+    )
 
 
 @router.post("/invite", response_model=UserInviteResponse, status_code=status.HTTP_201_CREATED)
@@ -169,8 +209,12 @@ async def accept_invite(token: str, data: InviteAccept, session: DbSession):
     invite.accepted_at = datetime.now(timezone.utc)
     
     await session.commit()
-    await session.refresh(user)
-    return user
+    
+    # Reload with roles
+    result = await session.execute(
+        select(User).where(User.id == user.id)
+    )
+    return result.scalar_one()
 
 
 @router.post("/{user_id}/roles/{role_id}")
@@ -284,8 +328,12 @@ async def update_user(
         session.add(user_role)
     
     await session.commit()
-    await session.refresh(user)
-    return user
+    
+    # Reload with roles
+    result = await session.execute(
+        select(User).where(User.id == user_id)
+    )
+    return result.scalar_one()
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -2,11 +2,12 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, HTTPException, Query, status
+from sqlalchemy import func, select
 
 from src.api.deps import DbSession, CurrentUser
 from src.db.models import VendorAddress, Vendor
+from src.schemas.common import PaginatedResponse, Pagination
 from src.schemas.vendor import (
     VendorAddressCreate,
     VendorAddressUpdate,
@@ -16,11 +17,13 @@ from src.schemas.vendor import (
 router = APIRouter()
 
 
-@router.get("/by-vendor/{vendor_id}", response_model=list[VendorAddressRead])
+@router.get("/by-vendor/{vendor_id}", response_model=PaginatedResponse[VendorAddressRead])
 async def list_vendor_addresses(
     vendor_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
 ):
     """List addresses for a vendor."""
     # Verify vendor exists
@@ -36,12 +39,32 @@ async def list_vendor_addresses(
             detail="Vendor not found",
         )
 
+    # Base query conditions
+    base_conditions = [VendorAddress.vendor_id == vendor_id]
+
+    # Count query
+    count_query = select(func.count()).select_from(VendorAddress).where(*base_conditions)
+    total = (await session.execute(count_query)).scalar() or 0
+
+    # Data query with pagination
     result = await session.execute(
         select(VendorAddress)
-        .where(VendorAddress.vendor_id == vendor_id)
+        .where(*base_conditions)
         .order_by(VendorAddress.is_primary.desc(), VendorAddress.type)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
-    return result.scalars().all()
+    items = result.scalars().all()
+
+    return PaginatedResponse(
+        data=items,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+        ),
+    )
 
 
 @router.post("/", response_model=VendorAddressRead, status_code=status.HTTP_201_CREATED)

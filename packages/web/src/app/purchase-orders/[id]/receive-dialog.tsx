@@ -27,8 +27,8 @@ interface POLine {
     id: string;
     sku: string;
     name: string;
-    images: Array<{ url: string }>;
-  };
+    images?: Array<{ url: string }>;
+  } | null;
 }
 
 interface PurchaseOrder {
@@ -146,7 +146,7 @@ export function ReceiveDialog({ po }: { po: PurchaseOrder }) {
                     className={`flex items-center gap-4 p-3 rounded-lg border ${isComplete ? "bg-green-50 border-green-200" : ""}`}
                   >
                     <div className="flex-shrink-0">
-                      {line.product.images[0] ? (
+                      {line.product?.images?.[0] ? (
                         <img
                           src={line.product.images[0].url}
                           alt=""
@@ -160,9 +160,9 @@ export function ReceiveDialog({ po }: { po: PurchaseOrder }) {
                     </div>
                     
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate">{line.product.name}</div>
+                      <div className="font-medium truncate">{line.product?.name ?? "Unknown Product"}</div>
                       <div className="text-sm text-muted-foreground">
-                        {line.product.sku} • Ordered: {line.quantityOrdered} • Received: {line.quantityReceived}
+                        {line.product?.sku ?? "N/A"} • Ordered: {line.quantityOrdered} • Received: {line.quantityReceived}
                       </div>
                     </div>
 

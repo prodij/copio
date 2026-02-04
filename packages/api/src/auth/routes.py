@@ -14,6 +14,7 @@ from src.services.email import send_invite_email
 
 from src.auth.backend import auth_backend, fastapi_users
 from src.auth.manager import get_user_manager, UserManager
+from src.auth.default_roles import DEFAULT_ROLES, get_owner_role
 from src.db.models.tenant import Tenant
 from src.db.models.user import User
 from src.db.models.role import Role
@@ -145,23 +146,29 @@ async def register_tenant(
     session.add(user)
     await session.flush()  # Get user.id
 
-    # Create Admin role with all permissions
-    admin_role = Role(
-        tenant_id=tenant.id,
-        name="Admin",
-        description="Full system access",
-        is_system=True,
-        permissions=["*:*"],
-    )
-    session.add(admin_role)
-    await session.flush()  # Get admin_role.id
-
-    # Assign Admin role to the first user
-    user_role = UserRole(
-        user_id=user.id,
-        role_id=admin_role.id,
-    )
-    session.add(user_role)
+    # Create all default roles for the tenant
+    owner_role = None
+    for role_def in DEFAULT_ROLES:
+        role = Role(
+            tenant_id=tenant.id,
+            name=role_def["name"],
+            description=role_def["description"],
+            is_system=role_def["is_system"],
+            permissions=role_def["permissions"],
+        )
+        session.add(role)
+        if role_def["name"] == "Owner":
+            await session.flush()  # Get owner role id
+            owner_role = role
+    
+    # Assign Owner role to the first user (tenant creator)
+    if owner_role:
+        user_role = UserRole(
+            user_id=user.id,
+            role_id=owner_role.id,
+        )
+        session.add(user_role)
+    
     await session.commit()
 
     return TenantResponse(

@@ -1,16 +1,15 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertCircle, Loader2, Package, CheckCircle } from "lucide-react";
+import { AlertCircle, Loader2, CheckCircle } from "lucide-react";
 import Link from "next/link";
+import { Logo } from "@/components/logo";
 
 function AcceptInviteForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
   
@@ -64,48 +63,52 @@ function AcceptInviteForm() {
 
   if (isSuccess) {
     return (
-      <Card className="w-full max-w-md mx-4">
-        <CardHeader className="space-y-1 text-center">
-          <div className="mx-auto h-12 w-12 rounded-full bg-green-100 flex items-center justify-center mb-2">
-            <CheckCircle className="h-6 w-6 text-green-600" />
-          </div>
-          <CardTitle className="text-2xl">Welcome to Copio!</CardTitle>
-          <CardDescription>
+      <div className="w-full max-w-sm space-y-8 text-center">
+        <div className="flex justify-center lg:hidden mb-6">
+          <Logo size="lg" />
+        </div>
+        
+        <div className="mx-auto h-16 w-16 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+          <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
+        </div>
+        
+        <div className="space-y-2">
+          <h1 className="text-3xl font-bold tracking-tight">Welcome to Copio!</h1>
+          <p className="text-muted-foreground">
             Your account is ready. You can now sign in.
-          </CardDescription>
-        </CardHeader>
-        <CardFooter>
-          <Button asChild className="w-full">
-            <Link href="/login">Go to Sign In</Link>
-          </Button>
-        </CardFooter>
-      </Card>
+          </p>
+        </div>
+        
+        <Button asChild className="w-full h-11">
+          <Link href="/login">Go to Sign In</Link>
+        </Button>
+      </div>
     );
   }
 
   return (
-    <Card className="w-full max-w-md mx-4">
-      <CardHeader className="space-y-1">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="h-10 w-10 rounded-lg bg-primary flex items-center justify-center">
-            <Package className="h-6 w-6 text-primary-foreground" />
-          </div>
-          <span className="text-2xl font-bold">Copio</span>
+    <div className="w-full max-w-sm space-y-8">
+      {/* Header */}
+      <div className="text-center lg:text-left space-y-2">
+        <div className="flex justify-center lg:hidden mb-6">
+          <Logo size="lg" />
         </div>
-        <CardTitle className="text-2xl">Accept Invitation</CardTitle>
-        <CardDescription>
-          Set your password to complete your account setup.
-        </CardDescription>
-      </CardHeader>
-      <form onSubmit={handleSubmit}>
-        <CardContent className="space-y-4">
-          {error && (
-            <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-md">
-              <AlertCircle className="h-4 w-4 flex-shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-          
+        <h1 className="text-3xl font-bold tracking-tight">Accept Invitation</h1>
+        <p className="text-muted-foreground">
+          Set your password to complete your account setup
+        </p>
+      </div>
+
+      {/* Form */}
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {error && (
+          <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-lg">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+        
+        <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
             <Input
@@ -117,9 +120,10 @@ function AcceptInviteForm() {
               required
               minLength={8}
               disabled={!token}
+              className="h-11"
             />
             <p className="text-xs text-muted-foreground">
-              Must be at least 8 characters.
+              Must be at least 8 characters
             </p>
           </div>
           
@@ -133,32 +137,46 @@ function AcceptInviteForm() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
               disabled={!token}
+              className="h-11"
             />
           </div>
-        </CardContent>
-        
-        <CardFooter className="flex flex-col gap-4">
-          <Button type="submit" className="w-full" disabled={isSubmitting || !token}>
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Set Password & Continue
-          </Button>
-          
-          <p className="text-sm text-muted-foreground text-center">
-            Already have an account?{" "}
-            <Link href="/login" className="text-primary hover:underline">
-              Sign in
-            </Link>
-          </p>
-        </CardFooter>
+        </div>
+
+        <Button type="submit" className="w-full h-11" disabled={isSubmitting || !token}>
+          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Set Password & Continue
+        </Button>
       </form>
-    </Card>
+
+      {/* Divider */}
+      <div className="relative">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t" />
+        </div>
+        <div className="relative flex justify-center text-xs uppercase">
+          <span className="bg-background px-2 text-muted-foreground">
+            Already have an account?
+          </span>
+        </div>
+      </div>
+
+      {/* Login link */}
+      <p className="text-center text-sm text-muted-foreground">
+        <Link 
+          href="/login" 
+          className="font-medium text-primary hover:underline underline-offset-4"
+        >
+          Sign in instead
+        </Link>
+      </p>
+    </div>
   );
 }
 
 export default function AcceptInvitePage() {
   return (
     <Suspense fallback={
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-[400px]">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     }>

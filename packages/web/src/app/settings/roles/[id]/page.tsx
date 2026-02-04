@@ -2,14 +2,18 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PermissionMatrix } from "@/components/permission-matrix";
-import { ArrowLeft, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 
 interface Role {
   id: string;
@@ -19,44 +23,101 @@ interface Role {
   permissions: string[];
 }
 
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-4">
+        <Skeleton className="h-10 w-10 rounded" />
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-4 w-32" />
+        </div>
+      </div>
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-6 w-32" />
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-6 w-32" />
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-48 w-full" />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function RoleEditorPage() {
   const params = useParams();
   const router = useRouter();
+  const { token } = useAuth();
   const [role, setRole] = useState<Role | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [allPermissions, setAllPermissions] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
+    if (!token) return;
+    
+    const headers = { Authorization: `Bearer ${token}` };
+    
     Promise.all([
-      fetch(`/api/v1/roles/${params.id}`).then((r) => r.json()),
-      fetch("/api/v1/permissions/by-resource").then((r) => r.json()),
+      fetch(`/api/v1/roles/${params.id}`, { headers }).then((r) => r.ok ? r.json() : null),
+      fetch("/api/v1/permissions/by-resource", { headers }).then((r) => r.ok ? r.json() : {}),
     ]).then(([roleData, perms]) => {
       setRole(roleData);
-      setAllPermissions(perms);
+      setAllPermissions(perms && typeof perms === 'object' ? perms as Record<string, string[]> : {});
+      setLoading(false);
+    }).catch(() => {
       setLoading(false);
     });
-  }, [params.id]);
+  }, [params.id, token]);
 
   const handleSave = async () => {
-    if (!role) return;
+    if (!role || !token) return;
     setSaving(true);
-    await fetch(`/api/v1/roles/${role.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: role.name,
-        description: role.description,
-        permissions: role.permissions,
-      }),
-    });
-    setSaving(false);
+    
+    try {
+      const res = await fetch(`/api/v1/roles/${role.id}`, {
+        method: "PATCH",
+        headers: { 
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: role.name,
+          description: role.description,
+          permissions: role.permissions,
+        }),
+      });
+      
+      if (res.ok) {
+        toast.success("Role saved");
+      } else {
+        toast.error("Failed to save role");
+      }
+    } catch {
+      toast.error("Failed to save role");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async () => {
-    if (!role || role.is_system) return;
+    if (!role || role.is_system || !token) return;
     if (!confirm("Delete this role?")) return;
-    await fetch(`/api/v1/roles/${role.id}`, { method: "DELETE" });
+    
+    await fetch(`/api/v1/roles/${role.id}`, { 
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
     router.push("/settings/roles");
   };
 
@@ -70,18 +131,39 @@ export default function RoleEditorPage() {
     });
   };
 
-  if (loading || !role) return <div>Loading...</div>;
+  if (loading) return <LoadingSkeleton />;
+  
+  if (!role) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Link href="/settings/roles">
+            <Button variant="ghost" size="icon">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Role not found</h1>
+            <p className="text-muted-foreground">This role doesn't exist or you don't have access.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div className="flex items-center gap-4 mb-6">
+    <div className="space-y-6">
+      <div className="flex items-center gap-4">
         <Link href="/settings/roles">
           <Button variant="ghost" size="icon">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold">{role.name}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold tracking-tight">{role.name}</h1>
+            {role.is_system && <Badge variant="secondary">System</Badge>}
+          </div>
           <p className="text-muted-foreground">Edit role permissions</p>
         </div>
         <div className="flex gap-2">
@@ -92,50 +174,59 @@ export default function RoleEditorPage() {
             </Button>
           )}
           <Button onClick={handleSave} disabled={saving}>
-            <Save className="mr-2 h-4 w-4" />
-            {saving ? "Saving..." : "Save Changes"}
+            {saving ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            {saving ? "Saving..." : "Save"}
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Role Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label>Name</Label>
-              <Input
-                value={role.name}
-                onChange={(e) => setRole({ ...role, name: e.target.value })}
-                disabled={role.is_system}
-              />
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Textarea
-                value={role.description || ""}
-                onChange={(e) => setRole({ ...role, description: e.target.value })}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Permissions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <PermissionMatrix
-              allPermissions={allPermissions}
-              selectedPermissions={role.permissions}
-              onChange={handlePermissionChange}
+      <Card>
+        <CardHeader>
+          <CardTitle>Role Details</CardTitle>
+          <CardDescription>Basic information about this role</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">Name</Label>
+            <Input
+              id="name"
+              value={role.name}
+              onChange={(e) => setRole({ ...role, name: e.target.value })}
               disabled={role.is_system}
             />
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="description">Description</Label>
+            <Textarea
+              id="description"
+              value={role.description || ""}
+              onChange={(e) => setRole({ ...role, description: e.target.value })}
+              rows={3}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Permissions</CardTitle>
+          <CardDescription>
+            {role.permissions.length} permission{role.permissions.length !== 1 ? "s" : ""} granted
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PermissionMatrix
+            allPermissions={allPermissions}
+            selectedPermissions={role.permissions}
+            onChange={handlePermissionChange}
+            disabled={role.is_system}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

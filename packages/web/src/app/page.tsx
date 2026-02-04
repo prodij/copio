@@ -13,12 +13,14 @@ async function getProducts() {
 
 async function getLocations() {
   const res = await fetch(`${API_URL}/locations`, { cache: 'no-store' });
-  return res.json();
+  const data = await res.json();
+  return data.data || data; // Handle paginated response
 }
 
 async function getStockItems() {
   const res = await fetch(`${API_URL}/stock-items`, { cache: 'no-store' });
-  return res.json();
+  const data = await res.json();
+  return data.data || data; // Handle paginated response
 }
 
 async function getMovements() {
@@ -30,7 +32,10 @@ async function getMovements() {
 async function getPurchaseOrders() {
   const res = await fetch(`${API_URL}/purchase-orders`, { cache: 'no-store' });
   if (!res.ok) return { purchaseOrders: [], total: 0 };
-  return res.json();
+  const data = await res.json();
+  // Handle paginated response - extract data array and map to expected structure
+  const purchaseOrders = data.data || data.purchaseOrders || [];
+  return { purchaseOrders, total: data.pagination?.total || data.total || purchaseOrders.length };
 }
 
 function MovementTypeBadge({ type }: { type: string }) {

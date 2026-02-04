@@ -45,7 +45,7 @@ function clearStoredToken(): void {
 
 // Auth API calls
 async function loginApi(email: string, password: string): Promise<{ access_token: string; token_type: string }> {
-  const res = await fetch("/api/auth/login", {
+  const res = await fetch("/api/v1/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ username: email, password }),
@@ -68,7 +68,7 @@ async function loginApi(email: string, password: string): Promise<{ access_token
 }
 
 async function getMeApi(token: string): Promise<User> {
-  const res = await fetch("/api/auth/me", {
+  const res = await fetch("/api/v1/auth/me", {
     headers: { Authorization: `Bearer ${token}` },
   });
   
@@ -90,7 +90,7 @@ async function getMeApi(token: string): Promise<User> {
 }
 
 async function logoutApi(token: string): Promise<void> {
-  await fetch("/api/auth/logout", {
+  await fetch("/api/v1/auth/logout", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });

@@ -3,10 +3,11 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.api.deps import DbSession, CurrentUser
 from src.db.models import Location, LocationType
+from src.schemas.common import PaginatedResponse, Pagination
 from src.schemas.inventory import (
     LocationCreate,
     LocationUpdate,
@@ -33,12 +34,14 @@ async def create_location(
     return location
 
 
-@router.get("/", response_model=list[LocationRead])
+@router.get("/", response_model=PaginatedResponse[LocationRead])
 async def list_locations(
     session: DbSession,
     current_user: CurrentUser,
     type: LocationType | None = None,
     active: bool | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
 ):
     """List all locations for the tenant."""
     query = select(Location).where(Location.tenant_id == current_user.tenant_id)
@@ -48,9 +51,27 @@ async def list_locations(
     if active is not None:
         query = query.where(Location.is_active == active)
 
-    query = query.order_by(Location.name)
+    # Count total
+    count_result = await session.execute(
+        select(func.count()).select_from(query.subquery())
+    )
+    total = count_result.scalar_one()
+
+    # Apply pagination
+    offset = (page - 1) * page_size
+    query = query.order_by(Location.name).offset(offset).limit(page_size)
     result = await session.execute(query)
-    return result.scalars().all()
+    locations = result.scalars().all()
+
+    return PaginatedResponse(
+        data=[LocationRead.model_validate(loc) for loc in locations],
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size,
+        ),
+    )
 
 
 @router.get("/{location_id}", response_model=LocationRead)

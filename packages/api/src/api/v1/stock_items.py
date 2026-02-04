@@ -2,13 +2,14 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import DbSession, CurrentUser
 from src.auth.dependencies import require_permission
 from src.db.models import StockItem, Product, Location
+from src.schemas.common import PaginatedResponse, Pagination
 from src.schemas.inventory import (
     StockItemCreate,
     StockItemUpdate,
@@ -84,13 +85,25 @@ async def create_stock_item(
     return result.scalar_one()
 
 
-@router.get("/", response_model=list[StockItemRead])
+@router.get("/", response_model=PaginatedResponse[StockItemRead])
 async def list_stock_items(
     session: DbSession,
     current_user: CurrentUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
     _perm=Depends(require_permission("inventory:view")),
 ):
     """List all stock items for the tenant."""
+    # Count total items
+    count_result = await session.execute(
+        select(func.count(StockItem.id)).where(
+            StockItem.tenant_id == current_user.tenant_id
+        )
+    )
+    total = count_result.scalar() or 0
+
+    # Fetch paginated items
+    offset = (page - 1) * page_size
     result = await session.execute(
         select(StockItem)
         .where(StockItem.tenant_id == current_user.tenant_id)
@@ -98,18 +111,43 @@ async def list_stock_items(
             selectinload(StockItem.product),
             selectinload(StockItem.location),
         )
+        .offset(offset)
+        .limit(page_size)
     )
-    return result.scalars().all()
+    items = result.scalars().all()
+
+    return PaginatedResponse(
+        data=items,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+        ),
+    )
 
 
-@router.get("/by-location/{location_id}", response_model=list[StockItemRead])
+@router.get("/by-location/{location_id}", response_model=PaginatedResponse[StockItemRead])
 async def list_stock_items_by_location(
     location_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
     _perm=Depends(require_permission("inventory:view")),
 ):
     """List stock items for a specific location."""
+    # Count total items
+    count_result = await session.execute(
+        select(func.count(StockItem.id)).where(
+            StockItem.location_id == location_id,
+            StockItem.tenant_id == current_user.tenant_id,
+        )
+    )
+    total = count_result.scalar() or 0
+
+    # Fetch paginated items
+    offset = (page - 1) * page_size
     result = await session.execute(
         select(StockItem)
         .where(
@@ -120,18 +158,43 @@ async def list_stock_items_by_location(
             selectinload(StockItem.product),
             selectinload(StockItem.location),
         )
+        .offset(offset)
+        .limit(page_size)
     )
-    return result.scalars().all()
+    items = result.scalars().all()
+
+    return PaginatedResponse(
+        data=items,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+        ),
+    )
 
 
-@router.get("/by-product/{product_id}", response_model=list[StockItemRead])
+@router.get("/by-product/{product_id}", response_model=PaginatedResponse[StockItemRead])
 async def list_stock_items_by_product(
     product_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
     _perm=Depends(require_permission("inventory:view")),
 ):
     """List stock items for a specific product."""
+    # Count total items
+    count_result = await session.execute(
+        select(func.count(StockItem.id)).where(
+            StockItem.product_id == product_id,
+            StockItem.tenant_id == current_user.tenant_id,
+        )
+    )
+    total = count_result.scalar() or 0
+
+    # Fetch paginated items
+    offset = (page - 1) * page_size
     result = await session.execute(
         select(StockItem)
         .where(
@@ -142,8 +205,20 @@ async def list_stock_items_by_product(
             selectinload(StockItem.product),
             selectinload(StockItem.location),
         )
+        .offset(offset)
+        .limit(page_size)
     )
-    return result.scalars().all()
+    items = result.scalars().all()
+
+    return PaginatedResponse(
+        data=items,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+        ),
+    )
 
 
 @router.get("/{stock_item_id}", response_model=StockItemRead)

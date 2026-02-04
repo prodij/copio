@@ -23,6 +23,7 @@ from src.db.models import (
     ShipmentStatus,
     MovementType,
 )
+from src.schemas.common import PaginatedResponse, Pagination
 from src.schemas.purchase_order import (
     PurchaseOrderCreate,
     PurchaseOrderUpdate,
@@ -82,15 +83,15 @@ def calculate_totals(lines: list) -> dict:
 # PURCHASE ORDER CRUD
 # =============================================================================
 
-@router.get("/", response_model=dict)
+@router.get("/", response_model=PaginatedResponse[PurchaseOrderRead])
 async def list_purchase_orders(
     session: DbSession,
     current_user: CurrentUser,
     status: POStatus | None = Query(None),
     vendor_id: UUID | None = Query(None, alias="vendorId"),
     destination_id: UUID | None = Query(None, alias="destinationId"),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100, alias="pageSize"),
     _perm=Depends(require_permission("purchase_orders:view")),
 ):
     """List purchase orders."""
@@ -107,6 +108,10 @@ async def list_purchase_orders(
     count_query = select(func.count()).select_from(query.subquery())
     total = (await session.execute(count_query)).scalar_one()
 
+    # Calculate offset from page
+    offset = (page - 1) * page_size
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
     # Get POs with relationships
     query = (
         query
@@ -117,22 +122,29 @@ async def list_purchase_orders(
         )
         .order_by(PurchaseOrder.created_at.desc())
         .offset(offset)
-        .limit(limit)
+        .limit(page_size)
     )
 
     result = await session.execute(query)
     purchase_orders = result.scalars().all()
 
-    return {
-        "purchaseOrders": [PurchaseOrderRead.model_validate(po) for po in purchase_orders],
-        "total": total,
-    }
+    return PaginatedResponse(
+        data=[PurchaseOrderRead.model_validate(po) for po in purchase_orders],
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=total_pages,
+        ),
+    )
 
 
-@router.get("/follow-ups/due", response_model=list[PurchaseOrderRead])
+@router.get("/follow-ups/due", response_model=PaginatedResponse[PurchaseOrderRead])
 async def get_follow_ups_due(
     session: DbSession,
     current_user: CurrentUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100, alias="pageSize"),
     _perm=Depends(require_permission("purchase_orders:view")),
 ):
     """Get POs needing follow-up."""
@@ -140,7 +152,7 @@ async def get_follow_ups_due(
     three_days_ago = now - timedelta(days=3)
     two_days_ago = now - timedelta(days=2)
 
-    result = await session.execute(
+    base_query = (
         select(PurchaseOrder)
         .where(
             PurchaseOrder.tenant_id == current_user.tenant_id,
@@ -158,23 +170,50 @@ async def get_follow_ups_due(
                 ),
             ),
         )
+    )
+
+    # Get total count
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = (await session.execute(count_query)).scalar_one()
+
+    # Calculate offset from page
+    offset = (page - 1) * page_size
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+    # Get paginated results
+    result = await session.execute(
+        base_query
         .options(
             selectinload(PurchaseOrder.vendor),
             selectinload(PurchaseOrder.destination),
         )
         .order_by(PurchaseOrder.next_follow_up_at.asc(), PurchaseOrder.ordered_at.asc())
+        .offset(offset)
+        .limit(page_size)
     )
-    return result.scalars().all()
+    purchase_orders = result.scalars().all()
+
+    return PaginatedResponse(
+        data=[PurchaseOrderRead.model_validate(po) for po in purchase_orders],
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=total_pages,
+        ),
+    )
 
 
-@router.get("/shipments/in-transit", response_model=list[PurchaseOrderRead])
+@router.get("/shipments/in-transit", response_model=PaginatedResponse[PurchaseOrderRead])
 async def get_shipments_in_transit(
     session: DbSession,
     current_user: CurrentUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100, alias="pageSize"),
     _perm=Depends(require_permission("purchase_orders:view")),
 ):
     """Get POs with shipments in transit."""
-    result = await session.execute(
+    base_query = (
         select(PurchaseOrder)
         .where(
             PurchaseOrder.tenant_id == current_user.tenant_id,
@@ -185,13 +224,38 @@ async def get_shipments_in_transit(
                 ShipmentStatus.OUT_FOR_DELIVERY,
             ]),
         )
+    )
+
+    # Get total count
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = (await session.execute(count_query)).scalar_one()
+
+    # Calculate offset from page
+    offset = (page - 1) * page_size
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+    # Get paginated results
+    result = await session.execute(
+        base_query
         .options(
             selectinload(PurchaseOrder.vendor),
             selectinload(PurchaseOrder.destination),
         )
         .order_by(PurchaseOrder.expected_at.asc())
+        .offset(offset)
+        .limit(page_size)
     )
-    return result.scalars().all()
+    purchase_orders = result.scalars().all()
+
+    return PaginatedResponse(
+        data=[PurchaseOrderRead.model_validate(po) for po in purchase_orders],
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=total_pages,
+        ),
+    )
 
 
 @router.get("/{po_id}", response_model=PurchaseOrderRead)

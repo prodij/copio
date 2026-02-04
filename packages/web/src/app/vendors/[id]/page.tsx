@@ -125,7 +125,7 @@ async function getPurchaseOrders(vendorId: string): Promise<PurchaseOrder[]> {
   const res = await fetch(`${API_URL}/purchase-orders?vendorId=${vendorId}`, { cache: "no-store" });
   if (!res.ok) return [];
   const data = await res.json();
-  return data.purchaseOrders || [];
+  return data.data || data.purchaseOrders || [];
 }
 
 const TIER_COLORS: Record<string, string> = {

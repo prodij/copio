@@ -6,7 +6,7 @@ from typing import List
 RESOURCES = [
     "products", "inventory", "vendors", "purchase_orders",
     "locations", "categories", "channels", "users", "roles",
-    "settings", "audit_log",
+    "settings", "audit_log", "company",
 ]
 
 ACTIONS = [
@@ -32,6 +32,7 @@ RESOURCE_ACTIONS = {
     "roles": CRUD_ACTIONS,
     "settings": ["view", "edit"],
     "audit_log": ["view", "export"],
+    "company": ["view", "edit"],
 }
 
 
@@ -90,6 +91,8 @@ class Permission(str, Enum):
     SETTINGS_EDIT = "settings:edit"
     AUDIT_LOG_VIEW = "audit_log:view"
     AUDIT_LOG_EXPORT = "audit_log:export"
+    COMPANY_VIEW = "company:view"
+    COMPANY_EDIT = "company:edit"
     ALL = "*:*"
 
 

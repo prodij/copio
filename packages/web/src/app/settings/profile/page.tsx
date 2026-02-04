@@ -1,21 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/lib/auth.tsx";
+import { useState, useEffect } from "react";
+import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertCircle, Loader2, Check } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ProfilePage() {
-  const router = useRouter();
-  const { user, token, refreshUser } = useAuth();
+  const { user, token, refreshUser, isLoading } = useAuth();
   
-  const [firstName, setFirstName] = useState(user?.firstName || "");
-  const [lastName, setLastName] = useState(user?.lastName || "");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   
   const [currentPassword, setCurrentPassword] = useState("");
@@ -23,6 +22,14 @@ export default function ProfilePage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+
+  // Sync form state when user loads
+  useEffect(() => {
+    if (user) {
+      setFirstName(user.firstName || "");
+      setLastName(user.lastName || "");
+    }
+  }, [user]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,6 +107,33 @@ export default function ProfilePage() {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <Skeleton className="h-9 w-32" />
+          <Skeleton className="h-5 w-48 mt-2" />
+        </div>
+        <div className="max-w-2xl space-y-6">
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-6 w-40" />
+              <Skeleton className="h-4 w-56" />
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Skeleton className="h-10 w-full" />
+              <div className="grid grid-cols-2 gap-4">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+              <Skeleton className="h-10 w-full" />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) {
     return null;
   }
@@ -149,7 +183,7 @@ export default function ProfilePage() {
               
               <div className="space-y-2">
                 <Label>Role</Label>
-                <Input value={user.role} disabled className="bg-muted capitalize" />
+                <Input value={user.role || "—"} disabled className="bg-muted capitalize" />
               </div>
               
               <Button type="submit" disabled={isUpdating}>

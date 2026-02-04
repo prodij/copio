@@ -3,7 +3,7 @@
 import csv
 import io
 from datetime import datetime
-from typing import List
+import math
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -15,6 +15,7 @@ from src.api.deps import DbSession, get_current_user_with_dev_bypass
 from src.auth.dependencies import require_permission
 from src.db.models.audit_log import AuditLog, AuditAction
 from src.db.models.user import User
+from src.schemas.common import PaginatedResponse, Pagination
 
 router = APIRouter(prefix="/audit-log", tags=["audit-log"])
 
@@ -33,15 +34,7 @@ class AuditLogEntry(BaseModel):
     created_at: datetime
 
 
-class AuditLogResponse(BaseModel):
-    """Paginated audit log response."""
-    items: List[AuditLogEntry]
-    total: int
-    page: int
-    page_size: int
-
-
-@router.get("", response_model=AuditLogResponse)
+@router.get("", response_model=PaginatedResponse[AuditLogEntry])
 async def list_audit_log(
     session: DbSession,
     user: User = Depends(get_current_user_with_dev_bypass),
@@ -70,8 +63,18 @@ async def list_audit_log(
     
     result = await session.execute(query)
     items = result.scalars().all()
-    
-    return AuditLogResponse(items=items, total=total, page=page, page_size=page_size)
+
+    total_pages = math.ceil(total / page_size) if total > 0 else 0
+
+    return PaginatedResponse(
+        data=items,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=total_pages,
+        ),
+    )
 
 
 @router.get("/export")

@@ -29,6 +29,27 @@ class Tenant(Base, TimestampMixin):
     timezone: Mapped[str] = mapped_column(String(50), default="America/Los_Angeles")
     base_currency: Mapped[str] = mapped_column(String(3), default="USD")
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)
+    
+    # Company identity
+    company_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    legal_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tax_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    
+    # Address
+    address_line1: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    address_line2: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(2), default="US")
+    
+    # Contact
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    website: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
+    # Branding
+    logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Relationships
     users: Mapped[list["User"]] = relationship("User", back_populates="tenant")

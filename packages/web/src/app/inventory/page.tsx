@@ -29,7 +29,8 @@ interface StockItem {
 async function getStockItems(): Promise<StockItem[]> {
   const res = await fetch(`${API_URL}/stock-items`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch stock items');
-  return res.json();
+  const result = await res.json();
+  return result.data || result; // Handle paginated response
 }
 
 async function getProducts(): Promise<Product[]> {
@@ -42,7 +43,8 @@ async function getProducts(): Promise<Product[]> {
 async function getLocations(): Promise<Location[]> {
   const res = await fetch(`${API_URL}/locations`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch locations');
-  return res.json();
+  const result = await res.json();
+  return result.data || result; // Handle paginated response
 }
 
 export default async function InventoryPage() {

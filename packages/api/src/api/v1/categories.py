@@ -2,8 +2,8 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import DbSession, CurrentUser
@@ -14,6 +14,7 @@ from src.schemas.category import (
     CategoryRead,
     CategoryWithChildren,
 )
+from src.schemas.common import PaginatedResponse, Pagination
 
 router = APIRouter()
 
@@ -56,18 +57,42 @@ async def create_category(
     return category
 
 
-@router.get("/", response_model=list[CategoryRead])
+@router.get("/", response_model=PaginatedResponse[CategoryRead])
 async def list_categories(
     session: DbSession,
     current_user: CurrentUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500, alias="pageSize"),
 ):
     """List all categories for the tenant."""
+    # Count total
+    count_result = await session.execute(
+        select(func.count(Category.id)).where(
+            Category.tenant_id == current_user.tenant_id
+        )
+    )
+    total = count_result.scalar() or 0
+
+    # Fetch paginated results
+    offset = (page - 1) * page_size
     result = await session.execute(
         select(Category)
         .where(Category.tenant_id == current_user.tenant_id)
         .order_by(Category.name)
+        .offset(offset)
+        .limit(page_size)
     )
-    return result.scalars().all()
+    categories = result.scalars().all()
+
+    return PaginatedResponse(
+        data=categories,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+        ),
+    )
 
 
 @router.get("/tree", response_model=list[CategoryWithChildren])

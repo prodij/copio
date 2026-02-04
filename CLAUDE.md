@@ -29,6 +29,11 @@ pnpm --filter @copio/web dev
 pnpm build          # Build all packages
 pnpm lint           # Lint (web package)
 pnpm typecheck      # TypeScript checking
+
+# Database migrations (from packages/api/)
+alembic upgrade head                           # Apply pending migrations
+alembic revision --autogenerate -m "desc"     # Create migration from model changes
+alembic downgrade -1                          # Rollback one migration
 ```
 
 ## Architecture
@@ -93,6 +98,12 @@ Models are in `packages/api/src/db/models/`. Key models:
 **Orders:**
 - **Order** → **OrderLine**
 
+**Multi-Tenancy & Auth:**
+- **Tenant** - Organization (company profile, timezone, currency)
+- **User** - App users (extends fastapi-users)
+- **Role** / **UserRole** - RBAC roles and assignments
+- **AuditLog** - Data change tracking
+
 ### API Routes (Python FastAPI)
 
 All routes use Pydantic for request validation. Pattern: `packages/api/src/api/v1/*.py`
@@ -110,6 +121,11 @@ All routes use Pydantic for request validation. Pattern: `packages/api/src/api/v
 | `/api/v1/purchase-orders` | Purchase order management |
 | `/api/v1/velocity` | Sales velocity analytics |
 | `/api/v1/sync` | Marketplace sync operations |
+| `/api/v1/auth` | Login, logout, register tenant |
+| `/api/v1/users` | User management |
+| `/api/v1/roles` | RBAC role management |
+| `/api/v1/company` | Company profile settings |
+| `/api/v1/audit-log` | Audit trail queries |
 
 ### Frontend (web)
 
@@ -128,23 +144,25 @@ All routes use Pydantic for request validation. Pattern: `packages/api/src/api/v
 - **Compliance** - Country of origin, certifications, hazmat
 - **Media** - Images, attributes
 
-## Testing Notes
+## Testing
 
 ### Python API
 ```bash
 cd packages/api
-pytest
-pytest --cov=src --cov-report=html
+pytest                                    # Run all tests
+pytest tests/test_products.py             # Run single test file
+pytest tests/test_products.py::test_name  # Run single test
+pytest --cov=src --cov-report=html        # With coverage
 ```
 
 ### Type Checking
 ```bash
-# Python
-cd packages/api && mypy src
-
-# TypeScript
-pnpm typecheck
+cd packages/api && mypy src   # Python
+pnpm typecheck                # TypeScript
 ```
+
+### API Documentation
+Interactive Swagger docs available at http://localhost:8000/docs when the API is running.
 
 ## Future Enhancements
 

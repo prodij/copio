@@ -3,11 +3,12 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import DbSession, CurrentUser
 from src.db.models import VendorProduct, Vendor, Product
+from src.schemas.common import PaginatedResponse, Pagination
 from src.schemas.vendor import (
     VendorProductCreate,
     VendorProductUpdate,
@@ -17,12 +18,14 @@ from src.schemas.vendor import (
 router = APIRouter()
 
 
-@router.get("/by-vendor/{vendor_id}", response_model=list[VendorProductRead])
+@router.get("/by-vendor/{vendor_id}", response_model=PaginatedResponse[VendorProductRead])
 async def list_vendor_products(
     vendor_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
     active: bool | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
 ):
     """List products for a vendor."""
     # Verify vendor exists
@@ -38,25 +41,45 @@ async def list_vendor_products(
             detail="Vendor not found",
         )
 
+    # Base query conditions
+    base_conditions = [VendorProduct.vendor_id == vendor_id]
+    if active is not None:
+        base_conditions.append(VendorProduct.is_active == active)
+
+    # Count query
+    count_query = select(func.count()).select_from(VendorProduct).where(*base_conditions)
+    total = (await session.execute(count_query)).scalar() or 0
+
+    # Data query with pagination
     query = (
         select(VendorProduct)
-        .where(VendorProduct.vendor_id == vendor_id)
+        .where(*base_conditions)
         .options(selectinload(VendorProduct.product))
+        .order_by(VendorProduct.is_preferred.desc(), VendorProduct.created_at)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    result = await session.execute(query)
+    items = result.scalars().all()
+
+    return PaginatedResponse(
+        data=items,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+        ),
     )
 
-    if active is not None:
-        query = query.where(VendorProduct.is_active == active)
 
-    query = query.order_by(VendorProduct.is_preferred.desc(), VendorProduct.created_at)
-    result = await session.execute(query)
-    return result.scalars().all()
-
-
-@router.get("/by-product/{product_id}", response_model=list[VendorProductRead])
+@router.get("/by-product/{product_id}", response_model=PaginatedResponse[VendorProductRead])
 async def list_product_vendors(
     product_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
 ):
     """List vendors that supply a product."""
     # Verify product exists
@@ -72,16 +95,36 @@ async def list_product_vendors(
             detail="Product not found",
         )
 
+    # Base query conditions
+    base_conditions = [
+        VendorProduct.product_id == product_id,
+        VendorProduct.is_active == True,
+    ]
+
+    # Count query
+    count_query = select(func.count()).select_from(VendorProduct).where(*base_conditions)
+    total = (await session.execute(count_query)).scalar() or 0
+
+    # Data query with pagination
     result = await session.execute(
         select(VendorProduct)
-        .where(
-            VendorProduct.product_id == product_id,
-            VendorProduct.is_active == True,
-        )
+        .where(*base_conditions)
         .options(selectinload(VendorProduct.product))
         .order_by(VendorProduct.is_preferred.desc(), VendorProduct.unit_cost)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
-    return result.scalars().all()
+    items = result.scalars().all()
+
+    return PaginatedResponse(
+        data=items,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+        ),
+    )
 
 
 @router.post("/", response_model=VendorProductRead, status_code=status.HTTP_201_CREATED)

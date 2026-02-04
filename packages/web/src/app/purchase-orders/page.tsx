@@ -22,10 +22,16 @@ interface PurchaseOrder {
   lines: Array<{ id: string }>;
 }
 
+interface PaginatedResponse {
+  data: PurchaseOrder[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
 async function getPurchaseOrders(): Promise<{ purchaseOrders: PurchaseOrder[]; total: number }> {
   const res = await fetch(`${API_URL}/purchase-orders`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch purchase orders");
-  return res.json();
+  const response: PaginatedResponse = await res.json();
+  return { purchaseOrders: response.data, total: response.pagination.total };
 }
 
 function formatDate(dateString: string | null) {

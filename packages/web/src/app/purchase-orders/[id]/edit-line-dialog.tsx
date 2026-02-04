@@ -27,7 +27,7 @@ interface POLine {
   product: {
     sku: string;
     name: string;
-  };
+  } | null;
 }
 
 interface EditLineDialogProps {
@@ -82,7 +82,7 @@ export function EditLineDialog({ poId, line, canDelete = true }: EditLineDialogP
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Remove ${line.product.name} from this order?`)) return;
+    if (!confirm(`Remove ${line.product?.name ?? "this item"} from this order?`)) return;
     
     setLoading(true);
     try {
@@ -119,7 +119,7 @@ export function EditLineDialog({ poId, line, canDelete = true }: EditLineDialogP
           <DialogHeader>
             <DialogTitle>Edit Line Item</DialogTitle>
             <DialogDescription>
-              {line.product.sku} — {line.product.name}
+              {line.product?.sku ?? "N/A"} — {line.product?.name ?? "Unknown Product"}
             </DialogDescription>
           </DialogHeader>
 

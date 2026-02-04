@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/lib/auth.tsx";
+import { useAuth } from "@/lib/auth";
 import { Sidebar } from "@/components/sidebar";
 import { Loader2 } from "lucide-react";
 

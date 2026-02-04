@@ -32,7 +32,8 @@ interface Vendor {
 async function getVendors(): Promise<Vendor[]> {
   const res = await fetch(`${API_URL}/vendors`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch vendors");
-  return res.json();
+  const result = await res.json();
+  return result.data || result; // Handle paginated response
 }
 
 const TIER_COLORS: Record<string, string> = {

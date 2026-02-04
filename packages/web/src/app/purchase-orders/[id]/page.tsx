@@ -26,8 +26,8 @@ interface POLine {
     id: string;
     sku: string;
     name: string;
-    images: Array<{ url: string }>;
-  };
+    images?: Array<{ url: string }>;
+  } | null;
 }
 
 interface PurchaseOrder {
@@ -336,7 +336,7 @@ export default async function PurchaseOrderDetailPage({
                 {po.lines.map((line) => (
                   <TableRow key={line.id}>
                     <TableCell>
-                      {line.product.images[0] ? (
+                      {line.product?.images?.[0] ? (
                         <img
                           src={line.product.images[0].url}
                           alt=""
@@ -349,9 +349,9 @@ export default async function PurchaseOrderDetailPage({
                       )}
                     </TableCell>
                     <TableCell>
-                      <Link href={`/products/${line.product.id}`} className="hover:underline">
-                        <div className="font-medium">{line.product.name}</div>
-                        <div className="text-xs text-muted-foreground">{line.product.sku}</div>
+                      <Link href={`/products/${line.product?.id || line.productId}`} className="hover:underline">
+                        <div className="font-medium">{line.product?.name || "Unknown Product"}</div>
+                        <div className="text-xs text-muted-foreground">{line.product?.sku || "—"}</div>
                       </Link>
                     </TableCell>
                     <TableCell className="text-right">

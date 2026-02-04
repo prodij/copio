@@ -18,7 +18,8 @@ interface Location {
 async function getLocations(): Promise<Location[]> {
   const res = await fetch(`${API_URL}/locations`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch locations');
-  return res.json();
+  const result = await res.json();
+  return result.data || result; // Handle paginated response
 }
 
 function getTypeBadgeVariant(type: string): "warehouse" | "fba" | "threepel" | "secondary" {

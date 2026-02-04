@@ -16,6 +16,7 @@ from src.db.models import (
     PurchaseOrder,
     VendorTier,
 )
+from src.schemas.common import PaginatedResponse, Pagination
 from src.schemas.vendor import (
     VendorCreate,
     VendorUpdate,
@@ -73,13 +74,15 @@ async def create_vendor(
     return result.scalar_one()
 
 
-@router.get("/", response_model=list[VendorListItem])
+@router.get("/", response_model=PaginatedResponse[VendorListItem])
 async def list_vendors(
     session: DbSession,
     current_user: CurrentUser,
     active: bool | None = Query(None),
     tier: VendorTier | None = None,
     search: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
     _perm=Depends(require_permission("vendors:view")),
 ):
     """List vendors with optional filtering."""
@@ -97,9 +100,16 @@ async def list_vendors(
         )
         query = query.where(search_filter)
 
+    # Get total count
+    count_result = await session.execute(
+        select(func.count()).select_from(query.subquery())
+    )
+    total = count_result.scalar_one()
+
+    # Apply pagination
     query = query.options(
         selectinload(Vendor.contacts),
-    ).order_by(Vendor.name)
+    ).order_by(Vendor.name).offset((page - 1) * page_size).limit(page_size)
 
     result = await session.execute(query)
     vendors = result.scalars().all()
@@ -114,7 +124,7 @@ async def list_vendors(
         po_count = await session.execute(
             select(func.count()).where(PurchaseOrder.vendor_id == vendor.id)
         )
-        
+
         vendor_item = VendorListItem(
             id=vendor.id,
             name=vendor.name,
@@ -128,7 +138,15 @@ async def list_vendors(
         )
         vendor_list.append(vendor_item)
 
-    return vendor_list
+    return PaginatedResponse(
+        data=vendor_list,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size,
+        ),
+    )
 
 
 @router.get("/stats/summary", response_model=VendorStatsSummary)

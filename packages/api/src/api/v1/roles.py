@@ -11,6 +11,7 @@ from src.api.deps import DbSession, get_current_user_with_dev_bypass
 from src.auth.permissions import ALL_PERMISSIONS
 from src.db.models.role import Role
 from src.db.models.user import User
+from src.schemas.common import PaginatedResponse, Pagination
 
 router = APIRouter()
 
@@ -67,12 +68,6 @@ class RoleResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class RoleListResponse(BaseModel):
-    """Schema for listing roles."""
-    data: List[RoleResponse]
-    total: int
 
 
 # =============================================================================
@@ -134,7 +129,7 @@ async def create_role(
     return role
 
 
-@router.get("", response_model=RoleListResponse)
+@router.get("", response_model=PaginatedResponse[RoleResponse])
 async def list_roles(
     session: DbSession,
     user: User = Depends(get_current_user_with_dev_bypass),
@@ -160,9 +155,14 @@ async def list_roles(
     )
     roles = result.scalars().all()
 
-    return RoleListResponse(
+    return PaginatedResponse(
         data=[RoleResponse.model_validate(r) for r in roles],
-        total=total,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size,
+        ),
     )
 
 

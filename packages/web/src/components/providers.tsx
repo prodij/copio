@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 import { useState, type ReactNode } from "react";
-import { AuthProvider } from "@/lib/auth.tsx";
+import { AuthProvider } from "@/lib/auth";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(

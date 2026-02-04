@@ -3,10 +3,11 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.api.deps import DbSession, CurrentUser
 from src.db.models import VendorDocument, Vendor, DocumentType
+from src.schemas.common import PaginatedResponse, Pagination
 from src.schemas.vendor import (
     VendorDocumentCreate,
     VendorDocumentUpdate,
@@ -16,13 +17,15 @@ from src.schemas.vendor import (
 router = APIRouter()
 
 
-@router.get("/by-vendor/{vendor_id}", response_model=list[VendorDocumentRead])
+@router.get("/by-vendor/{vendor_id}", response_model=PaginatedResponse[VendorDocumentRead])
 async def list_vendor_documents(
     vendor_id: UUID,
     session: DbSession,
     current_user: CurrentUser,
     type: DocumentType | None = None,
     active: bool | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100, alias="pageSize"),
 ):
     """List documents for a vendor."""
     # Verify vendor exists
@@ -38,16 +41,37 @@ async def list_vendor_documents(
             detail="Vendor not found",
         )
 
-    query = select(VendorDocument).where(VendorDocument.vendor_id == vendor_id)
-
+    # Base query conditions
+    base_conditions = [VendorDocument.vendor_id == vendor_id]
     if type:
-        query = query.where(VendorDocument.type == type)
+        base_conditions.append(VendorDocument.type == type)
     if active is not None:
-        query = query.where(VendorDocument.is_active == active)
+        base_conditions.append(VendorDocument.is_active == active)
 
-    query = query.order_by(VendorDocument.type, VendorDocument.uploaded_at.desc())
+    # Count query
+    count_query = select(func.count()).select_from(VendorDocument).where(*base_conditions)
+    total = (await session.execute(count_query)).scalar() or 0
+
+    # Data query with pagination
+    query = (
+        select(VendorDocument)
+        .where(*base_conditions)
+        .order_by(VendorDocument.type, VendorDocument.uploaded_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     result = await session.execute(query)
-    return result.scalars().all()
+    items = result.scalars().all()
+
+    return PaginatedResponse(
+        data=items,
+        pagination=Pagination(
+            page=page,
+            page_size=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+        ),
+    )
 
 
 @router.post("/", response_model=VendorDocumentRead, status_code=status.HTTP_201_CREATED)
