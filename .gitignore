@@ -44,3 +44,8 @@ postgres-data/
 
 # Inngest
 .inngest/
+
+# Marp generated outputs (regenerated on demand)
+obsidian/decks/*.html
+obsidian/decks/*.pdf
+obsidian/decks/*.pptx
