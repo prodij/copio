@@ -1,0 +1,189 @@
+@import "tailwindcss";
+
+/*
+  Copio design tokens (DESIGN.md rev 2). Apple-aesthetic, light-mode primary.
+  Dark mode is a Phase 1.1 deliverable but the tokens are defined now so that
+  the toggle ships without revisiting CSS later.
+*/
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-display: "Inter Display", "Inter", system-ui, sans-serif;
+}
+
+:root {
+  /* Surfaces */
+  --bg-base:        #FFFFFF;
+  --bg-page:        #F5F5F7;
+  --bg-elevated:    #FAFAFA;
+  --bg-sidebar:     #FAFAFA;
+  --bg-message:     transparent;
+  --bg-bento-cell:  #FFFFFF;
+  --bg-bento-tint:  #F5F5F7;
+
+  /* Text */
+  --text-primary:   #1D1D1F;
+  --text-secondary: #515154;
+  --text-muted:     #86868B;
+  --text-disabled:  #C7C7CC;
+
+  /* Apple Blue accent */
+  --accent:         #007AFF;
+  --accent-hover:   #0071EB;
+  --accent-text:    #0066CC;
+  --accent-fg:      #FFFFFF;
+
+  /* Borders */
+  --border-subtle:  #E5E5EA;
+  --border-strong:  #D1D1D6;
+
+  /* States */
+  --success:        #34C759;
+  --warning:        #FF9500;
+  --error:          #FF3B30;
+
+  /* Degraded-answer rail */
+  --degraded-rail:  #B8956A66;
+
+  /* Spacing scale (8pt base) */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+  --space-32: 128px;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/Inter-Variable.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/Inter-Italic-Variable.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "Inter Display";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/InterDisplay-Variable.woff2") format("woff2-variations");
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
+
+input, textarea {
+  font-family: inherit;
+}
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ----- honest-voice typography (THE load-bearing visual rule) ----- */
+
+.prose-body {
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  font-weight: 400;
+}
+
+.prose-body p + p {
+  margin-top: 0.85rem;
+}
+
+.inferred {
+  font-style: italic;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+sup.cite {
+  color: var(--accent-text);
+  font-size: 0.7em;
+  vertical-align: super;
+  cursor: pointer;
+  font-weight: 600;
+  font-feature-settings: "tnum";
+}
+
+sup.cite + .cite-dot {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--text-muted);
+  text-underline-offset: 2px;
+}
+
+@keyframes copio-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.streaming-caret {
+  display: inline-block;
+  width: 1px;
+  height: 1em;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: -0.1em;
+  animation: copio-blink 0.83s step-end infinite;
+}
+
+@keyframes copio-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.capability-syncing {
+  animation: copio-pulse 1.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streaming-caret,
+  .capability-syncing {
+    animation: none;
+  }
+}

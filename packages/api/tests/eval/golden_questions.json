@@ -1,0 +1,87 @@
+{
+  "version": "0.1.0-phase-1.0-scaffold",
+  "_note": "Phase 1.0 deliverable: 20 founder-authored golden questions against Nutragroup. This file ships with 5 scaffold templates so the runner is exercisable end-to-end. Replace and expand to 20 in the founder authoring sprint.",
+  "questions": [
+    {
+      "id": "Q01",
+      "question": "Why are conversions down on B0CABCD123 this past week?",
+      "expected_facts": [
+        "must compare conversion rate week-over-week with cited numbers",
+        "must reference Buy Box ownership OR inventory state OR price as one candidate cause"
+      ],
+      "forbidden_facts": [
+        "must NOT mention competitors by name",
+        "must NOT use placeholder strings like 'SKU-A' or '$XYZ'"
+      ],
+      "narrative_properties": {
+        "uncertainty_marker_required": true,
+        "citation_required": true,
+        "voice": "honest"
+      }
+    },
+    {
+      "id": "Q02",
+      "question": "Returns on B0CWXYZ987 jumped this week. Why?",
+      "expected_facts": [
+        "must read the return-reason text and name a pattern",
+        "must give a recommended action"
+      ],
+      "forbidden_facts": [
+        "must NOT refuse without reading available return-reason data"
+      ],
+      "narrative_properties": {
+        "uncertainty_marker_required": true,
+        "citation_required": true,
+        "voice": "honest"
+      }
+    },
+    {
+      "id": "Q03",
+      "question": "Did our April ad spend increase on B0CMNOP456 actually drive sales, or did we just burn cash?",
+      "expected_facts": [
+        "must compute and cite ACoS or ROAS",
+        "must hold a position on whether the spend was efficient"
+      ],
+      "forbidden_facts": [
+        "must NOT punt with 'depends on your strategy'"
+      ],
+      "narrative_properties": {
+        "uncertainty_marker_required": true,
+        "citation_required": true,
+        "voice": "honest"
+      }
+    },
+    {
+      "id": "Q04",
+      "question": "Which Nutragroup SKUs need re-buying this week?",
+      "expected_facts": [
+        "must use FBA inventory data",
+        "must factor in sales velocity"
+      ],
+      "forbidden_facts": [
+        "must NOT recommend re-buying without citing inventory + velocity"
+      ],
+      "narrative_properties": {
+        "uncertainty_marker_required": false,
+        "citation_required": true,
+        "voice": "honest"
+      }
+    },
+    {
+      "id": "Q05",
+      "question": "Anything weird in yesterday's Orders?",
+      "expected_facts": [
+        "must summarize order count + value vs trailing baseline",
+        "must explicitly say 'nothing material' if true"
+      ],
+      "forbidden_facts": [
+        "must NOT manufacture an anomaly to look useful"
+      ],
+      "narrative_properties": {
+        "uncertainty_marker_required": false,
+        "citation_required": true,
+        "voice": "honest"
+      }
+    }
+  ]
+}

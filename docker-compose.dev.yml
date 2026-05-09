@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: copio-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-copio}
+      POSTGRES_USER: ${POSTGRES_USER:-copio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-copio_dev}
+    ports:
+      - "${POSTGRES_PORT:-5435}:5432"
+    volumes:
+      - copio-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-copio} -d ${POSTGRES_DB:-copio}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  copio-postgres-data:
