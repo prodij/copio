@@ -45,7 +45,5 @@ postgres-data/
 # Inngest
 .inngest/
 
-# Marp generated outputs (regenerated on demand)
-obsidian/decks/*.html
-obsidian/decks/*.pdf
+# Marp pptx outputs (commit pdf+html, but not pptx)
 obsidian/decks/*.pptx
