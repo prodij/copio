@@ -44,3 +44,6 @@ postgres-data/
 
 # Inngest
 .inngest/
+
+# Marp pptx outputs (commit pdf+html, but not pptx)
+obsidian/decks/*.pptx
