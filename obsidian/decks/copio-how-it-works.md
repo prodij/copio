@@ -528,6 +528,154 @@ The colleague who already read everything overnight. Ask why. Get an honest writ
 
 ---
 
+### Connectors phase 1.0 to 1.6
+
+# Now, and the next two phases
+
+<div style="margin-top: 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;">
+  <div style="background: var(--s); border: 1px solid var(--b); border-radius: 10px; padding: 16px; position: relative; overflow: hidden;">
+    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, var(--g), transparent);"></div>
+    <span class="tag" style="background: #22c55e15; color: var(--g); border: 1px solid #22c55e22;">Phase 1.0</span>
+    <div style="font-family: 'Outfit'; font-weight: 700; font-size: 1em; color: var(--t); margin-top: 12px;">Amazon SP-API</div>
+    <div style="font-size: 0.6em; color: var(--label); margin-top: 4px; font-weight: 200; letter-spacing: 0.05em; text-transform: uppercase;">read</div>
+    <div style="font-size: 0.72em; color: var(--body); margin-top: 10px; font-weight: 200; line-height: 1.55;">Orders. FBA Inventory. Reports (Brand Analytics, SQP, Sales &amp; Traffic). Cached 15min hot, 24h cold.</div>
+  </div>
+  <div style="background: var(--s); border: 1px solid var(--b); border-radius: 10px; padding: 16px; position: relative; overflow: hidden;">
+    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, var(--a), transparent);"></div>
+    <span class="tag" style="background: #007AFF15; color: var(--a); border: 1px solid #007AFF22;">Phase 1.5</span>
+    <div style="font-family: 'Outfit'; font-weight: 700; font-size: 1em; color: var(--t); margin-top: 12px;">Slack</div>
+    <div style="font-size: 0.6em; color: var(--label); margin-top: 4px; font-weight: 200; letter-spacing: 0.05em; text-transform: uppercase;">surface</div>
+    <div style="font-size: 0.72em; color: var(--body); margin-top: 10px; font-weight: 200; line-height: 1.55;">OAuth, slash command, DM, native reaction emojis. Cross-surface memory bridges with web chat.</div>
+  </div>
+  <div style="background: var(--s); border: 1px solid var(--b); border-radius: 10px; padding: 16px; position: relative; overflow: hidden;">
+    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, var(--a), transparent);"></div>
+    <span class="tag" style="background: #007AFF15; color: var(--a); border: 1px solid #007AFF22;">Phase 1.5</span>
+    <div style="font-family: 'Outfit'; font-weight: 700; font-size: 1em; color: var(--t); margin-top: 12px;">Email</div>
+    <div style="font-size: 0.6em; color: var(--label); margin-top: 4px; font-weight: 200; letter-spacing: 0.05em; text-transform: uppercase;">surface</div>
+    <div style="font-size: 0.72em; color: var(--body); margin-top: 10px; font-weight: 200; line-height: 1.55;">Resend or Postmark. Fallback for long diagnostics. Lands the answer if the CEO closes the tab.</div>
+  </div>
+  <div style="background: var(--s); border: 1px solid var(--b); border-radius: 10px; padding: 16px; position: relative; overflow: hidden;">
+    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, var(--y), transparent);"></div>
+    <span class="tag" style="background: #f5a62315; color: var(--y); border: 1px solid #f5a62322;">Phase 1.6</span>
+    <div style="font-family: 'Outfit'; font-weight: 700; font-size: 1em; color: var(--t); margin-top: 12px;">Amazon HITL writes</div>
+    <div style="font-size: 0.6em; color: var(--label); margin-top: 4px; font-weight: 200; letter-spacing: 0.05em; text-transform: uppercase;">write</div>
+    <div style="font-size: 0.72em; color: var(--body); margin-top: 10px; font-weight: 200; line-height: 1.55;">PO. Listing edit. Inventory adjustment. Pricing change. Each drafted, CEO approves with one tap.</div>
+  </div>
+</div>
+
+<div style="margin-top: 28px; display: flex; gap: 24px; font-size: 0.72em; color: var(--body); font-weight: 200; line-height: 1.6;">
+  <div style="flex: 1;">
+    <span style="font-family: 'Outfit'; font-weight: 600; font-size: 0.85em; color: var(--label); letter-spacing: 0.1em; text-transform: uppercase;">Compliance.</span> Phase 1.0 is Amazon Tier 1 read-only. Tier 2 + Tier 3 writes gate on Phase 1.6 HITL with full audit log.
+  </div>
+  <div style="flex: 1;">
+    <span style="font-family: 'Outfit'; font-weight: 600; font-size: 0.85em; color: var(--label); letter-spacing: 0.1em; text-transform: uppercase;">Reuse.</span> The HITL pattern built once for Amazon writes is the substrate for every Phase 2.0 channel. <strong>Compliance is a moat, not a tax.</strong>
+  </div>
+</div>
+
+---
+
+### Connectors phase 2.0 onward
+
+# The multichannel expansion
+
+<div style="margin-top: 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;">
+  <div style="background: var(--s); border: 1px solid var(--b); border-radius: 10px; padding: 16px; position: relative; overflow: hidden;">
+    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, #cc5515, transparent);"></div>
+    <span class="tag" style="background: #cc551515; color: #cc5515; border: 1px solid #cc551533;">Phase 2.0</span>
+    <div style="font-family: 'Outfit'; font-weight: 700; font-size: 1em; color: var(--t); margin-top: 12px;">Walmart Marketplace</div>
+    <div style="font-size: 0.6em; color: var(--label); margin-top: 4px; font-weight: 200; letter-spacing: 0.05em; text-transform: uppercase;">read + write</div>
+    <div style="font-size: 0.72em; color: var(--body); margin-top: 10px; font-weight: 200; line-height: 1.55;">Item Setup API. Listings drafted from the Amazon catalogue. Velocity-aware inventory buffer.</div>
+  </div>
+  <div style="background: var(--s); border: 1px solid var(--b); border-radius: 10px; padding: 16px; position: relative; overflow: hidden;">
+    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, #cc5515, transparent);"></div>
+    <span class="tag" style="background: #cc551515; color: #cc5515; border: 1px solid #cc551533;">Phase 2.0</span>
+    <div style="font-family: 'Outfit'; font-weight: 700; font-size: 1em; color: var(--t); margin-top: 12px;">Shopify</div>
+    <div style="font-size: 0.6em; color: var(--label); margin-top: 4px; font-weight: 200; letter-spacing: 0.05em; text-transform: uppercase;">read + write</div>
+    <div style="font-size: 0.72em; color: var(--body); margin-top: 10px; font-weight: 200; line-height: 1.55;">Admin API. Storefront drafted from Amazon catalogue. Inventory sync. Order convergence.</div>
+  </div>
+  <div style="background: var(--s); border: 1px solid var(--b); border-radius: 10px; padding: 16px; position: relative; overflow: hidden;">
+    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, #cc5515, transparent);"></div>
+    <span class="tag" style="background: #cc551515; color: #cc5515; border: 1px solid #cc551533;">Phase 2.0</span>
+    <div style="font-family: 'Outfit'; font-weight: 700; font-size: 1em; color: var(--t); margin-top: 12px;">eBay</div>
+    <div style="font-size: 0.6em; color: var(--label); margin-top: 4px; font-weight: 200; letter-spacing: 0.05em; text-transform: uppercase;">read + write</div>
+    <div style="font-size: 0.72em; color: var(--body); margin-top: 10px; font-weight: 200; line-height: 1.55;">Inventory API. Returns triage. Per-channel attribute mapping with untranslatable handling.</div>
+  </div>
+  <div style="background: var(--s); border: 1px solid var(--b); border-radius: 10px; padding: 16px; position: relative; overflow: hidden;">
+    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, var(--m), transparent);"></div>
+    <span class="tag" style="background: #ffffff10; color: var(--m); border: 1px solid #ffffff20;">Phase 2.5</span>
+    <div style="font-family: 'Outfit'; font-weight: 700; font-size: 1em; color: var(--t); margin-top: 12px;">TikTok Shop</div>
+    <div style="font-size: 0.6em; color: var(--label); margin-top: 4px; font-weight: 200; letter-spacing: 0.05em; text-transform: uppercase;">read + write</div>
+    <div style="font-size: 0.72em; color: var(--body); margin-top: 10px; font-weight: 200; line-height: 1.55;">Fastest-growing channel. Own agent rules and content moderation surface. Separate eng-review pass.</div>
+  </div>
+</div>
+
+<div style="margin-top: 28px; font-size: 0.72em; color: var(--body); font-weight: 200; line-height: 1.7;">
+  <span style="font-family: 'Outfit'; font-weight: 600; font-size: 0.85em; color: var(--label); letter-spacing: 0.1em; text-transform: uppercase;">Phase 3 surfaces.</span> iMessage and SMS (most intimate channel). Calendar awareness (agent learns when not to brief). Multi-seat tenancy (invite team, per-seat permissions, shared memory). The agent reaches the CEO where they live.
+</div>
+
+---
+
+### Phase 2.0 architecture
+
+# Amazon catalogue is the canonical source
+
+<div style="display: flex; gap: 24px; margin-top: 12px;">
+  <div style="flex: 1.4;">
+    <svg width="100%" height="380" viewBox="0 0 580 380">
+      <defs>
+        <marker id="m2-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#444"/></marker>
+        <marker id="m2-arr-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#007AFF"/></marker>
+      </defs>
+      <rect x="220" y="10" width="140" height="40" rx="8" fill="#22c55e15" stroke="#22c55e"/>
+      <text x="290" y="34" text-anchor="middle" fill="#22c55e" font-family="Outfit" font-size="13" font-weight="700">AMAZON CATALOGUE</text>
+      <text x="290" y="48" text-anchor="middle" fill="#22c55e" font-family="Raleway" font-size="9" font-weight="200" opacity="0.8">canonical source of truth</text>
+      <line x1="290" y1="60" x2="290" y2="86" stroke="#444" stroke-width="1.2" marker-end="url(#m2-arr)"/>
+      <rect x="200" y="92" width="180" height="40" rx="8" fill="#080808" stroke="#222"/>
+      <text x="290" y="116" text-anchor="middle" fill="#ddd" font-family="Outfit" font-size="13" font-weight="700">CATALOG READER</text>
+      <text x="290" y="130" text-anchor="middle" fill="#666" font-family="Raleway" font-size="9" font-weight="200">normalized form per (tenant, ASIN)</text>
+      <line x1="290" y1="142" x2="290" y2="168" stroke="#444" stroke-width="1.2" marker-end="url(#m2-arr)"/>
+      <rect x="160" y="174" width="260" height="56" rx="8" fill="#007AFF15" stroke="#007AFF"/>
+      <text x="290" y="198" text-anchor="middle" fill="#fff" font-family="Outfit" font-size="13" font-weight="700">HYBRID MAPPING ENGINE</text>
+      <text x="290" y="216" text-anchor="middle" fill="#007AFFcc" font-family="Raleway" font-size="10" font-weight="200">70% rule-based  +  30% LLM-assisted  +  untranslatable detection</text>
+      <line x1="290" y1="240" x2="290" y2="266" stroke="#007AFF" stroke-width="1.2" marker-end="url(#m2-arr-a)"/>
+      <rect x="200" y="272" width="180" height="40" rx="8" fill="#080808" stroke="#222"/>
+      <text x="290" y="290" text-anchor="middle" fill="#ddd" font-family="Outfit" font-size="13" font-weight="700">DRAFTED LISTINGS</text>
+      <text x="290" y="304" text-anchor="middle" fill="#666" font-family="Raleway" font-size="9" font-weight="200">batched 10 at a time, untranslatable flagged</text>
+      <line x1="290" y1="324" x2="290" y2="346" stroke="#007AFF" stroke-width="1.2" marker-end="url(#m2-arr-a)"/>
+      <rect x="220" y="346" width="140" height="30" rx="8" fill="#007AFF22" stroke="#007AFF"/>
+      <text x="290" y="365" text-anchor="middle" fill="#fff" font-family="Outfit" font-size="12" font-weight="700">CEO HITL APPROVAL</text>
+      <line x1="220" y1="361" x2="80" y2="361" stroke="#007AFF" stroke-width="1.2" opacity="0.5"/>
+      <line x1="80" y1="361" x2="80" y2="200" stroke="#007AFF" stroke-width="1.2" opacity="0.5"/>
+      <text x="40" y="280" fill="#666" font-family="Raleway" font-size="9" font-weight="200">decision</text>
+      <text x="40" y="293" fill="#666" font-family="Raleway" font-size="9" font-weight="200">memory</text>
+      <text x="40" y="306" fill="#666" font-family="Raleway" font-size="9" font-weight="200">override</text>
+      <line x1="80" y1="200" x2="158" y2="200" stroke="#007AFF" stroke-width="1.2" marker-end="url(#m2-arr-a)" opacity="0.5"/>
+      <rect x="450" y="92" width="120" height="32" rx="6" fill="#080808" stroke="#cc5515"/>
+      <text x="510" y="113" text-anchor="middle" fill="#cc5515" font-family="Outfit" font-size="11" font-weight="700">WALMART API</text>
+      <rect x="450" y="134" width="120" height="32" rx="6" fill="#080808" stroke="#cc5515"/>
+      <text x="510" y="155" text-anchor="middle" fill="#cc5515" font-family="Outfit" font-size="11" font-weight="700">SHOPIFY ADMIN</text>
+      <rect x="450" y="176" width="120" height="32" rx="6" fill="#080808" stroke="#cc5515"/>
+      <text x="510" y="197" text-anchor="middle" fill="#cc5515" font-family="Outfit" font-size="11" font-weight="700">EBAY INVENTORY</text>
+      <line x1="362" y1="361" x2="510" y2="361" stroke="#22c55e" stroke-width="1.2" opacity="0.4"/>
+      <line x1="510" y1="361" x2="510" y2="212" stroke="#22c55e" stroke-width="1.2" opacity="0.4"/>
+      <line x1="510" y1="212" x2="510" y2="208" stroke="#22c55e" stroke-width="1.2" marker-end="url(#m2-arr)"/>
+      <text x="510" y="230" text-anchor="middle" fill="#22c55e" font-family="Outfit" font-size="9" font-weight="700" opacity="0.7">approved batch</text>
+    </svg>
+  </div>
+  <div style="width: 240px; padding-top: 20px;">
+    <div style="font-family: 'Outfit'; font-weight: 600; font-size: 0.55em; color: var(--label); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 10px;">Why this beats incumbents</div>
+    <div style="font-size: 0.66em; color: var(--body); line-height: 1.65; font-weight: 200;">
+      Incumbents treat each channel as independent. <strong>Hours of form-filling per SKU per channel.</strong>
+      <br><br>
+      Copio treats Amazon as canonical. Every other channel is a derived view. <strong>Forty-seven listings replicated to Walmart in one approval session.</strong>
+      <br><br>
+      <strong>HITL built in Phase 1.6 reuses across every Phase 2.0 channel.</strong>
+    </div>
+  </div>
+</div>
+
+---
+
 ### What ships in Phase 1.0
 
 # The dogfood box
