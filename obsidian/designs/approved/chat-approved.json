@@ -1,0 +1,8 @@
+{
+  "approved_variant": "B",
+  "feedback": "Amazon-domain sidebar with real diagnostic titles, '+ New diagnostic' button at top, persona avatar 'AK', user question quietly above, agent prose answer with citation superscript, italic uncertainty marker line, 5-emoji reaction widget, blue send button. 'Fetching SP-API…' sub-state visible.",
+  "date": "2026-05-09T02:38:53Z",
+  "screen": "chat-ui",
+  "branch": "main",
+  "supersedes": "/Users/james/.gstack/projects/Copio/designs/chat-ui-20260508/variant-C.png"
+}
