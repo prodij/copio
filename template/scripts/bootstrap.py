@@ -385,7 +385,7 @@ def apply_stripe_webhook_secret(secret: str) -> None:
 # -- S3 storage, backend ---------------------------------------------------------------------
 
 
-def ensure_bucket(name: str = "raw") -> None:
+def ensure_bucket(name: str = "data") -> None:
     """Create the jobs' bucket in SeaweedFS unless `s3.bucket.list` shows it (`weed shell`, which
     talks to the master inside the container, prints its results on stderr)."""
     shell = "weed shell -master=localhost:9333 2>&1"
@@ -422,7 +422,7 @@ Ready.
   API          {public_url("api", "API_PORT")}
   Zitadel      {zitadel}/ui/console
   Lago         {public_url("lago", "LAGO_FRONT_PORT")}
-  S3           http://localhost:{env("S3_PORT")} (SeaweedFS, bucket raw)
+  S3           http://localhost:{env("S3_PORT")} (SeaweedFS, bucket data)
 Open {app_url()}""")
 
 

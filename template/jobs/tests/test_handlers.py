@@ -218,7 +218,7 @@ FEED_BODY = b'{"amount":1.0,"base":"USD","date":"2026-10-30","rates":{"EUR":0.89
 
 @pytest.fixture
 def sample_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
-    """sqlite with the 0003 shape (unique raw_key), moto S3 with bucket `raw`, and the feed faked."""
+    """sqlite with the 0003 shape (unique raw_key), moto S3 with bucket `data`, and the feed faked."""
     url = f"sqlite:///{tmp_path / 'jobs.db'}"
     engine = create_engine(url)
     with engine.begin() as c:
@@ -226,13 +226,13 @@ def sample_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Engi
         c.exec_driver_sql("insert into workspaces values ('a', 'ready'), ('b', 'ready'), ('c', 'creating')")
         c.exec_driver_sql("create table sample_rows (id integer primary key, workspace_id text not null,"
                           " raw_key text not null unique, value text not null)")
-    for name, value in {"DATABASE_URL": url, "RAW_BUCKET": "raw", "AWS_ACCESS_KEY_ID": "testing",
+    for name, value in {"DATABASE_URL": url, "RAW_BUCKET": "data", "AWS_ACCESS_KEY_ID": "testing",
                         "AWS_SECRET_ACCESS_KEY": "testing", "AWS_DEFAULT_REGION": "us-east-1"}.items():
         monkeypatch.setenv(name, value)
     monkeypatch.delenv("S3_ENDPOINT_URL", raising=False)
     with mock_aws(), respx.mock:
         respx.get(sample_fetch.FEED).respond(200, content=FEED_BODY)
-        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="raw")
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="data")
         yield engine
     engine.dispose()
 
@@ -249,7 +249,7 @@ def test_sample_fetch_stores_raw_then_one_row_per_workspace(sample_env: Engine) 
     rows = _sample_rows(sample_env)
     assert rows == [(ws, f"raw/fx/{ws}/{day}/{result['run_id']}.json", "0.89509") for ws in "ab"]
     s3 = boto3.client("s3", region_name="us-east-1")
-    assert s3.get_object(Bucket="raw", Key=rows[0][1])["Body"].read() == FEED_BODY
+    assert s3.get_object(Bucket="data", Key=rows[0][1])["Body"].read() == FEED_BODY
 
 
 def test_sample_fetch_reprocesses_from_storage(sample_env: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
