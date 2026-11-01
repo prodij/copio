@@ -6,7 +6,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings
+from app.config import DatabaseSettings, Settings
 from tests.conftest import TEST_SETTINGS
 
 
@@ -40,3 +40,10 @@ def test_missing_service_token_file_is_clear(tmp_path: pathlib.Path) -> None:
     data = TEST_SETTINGS.model_dump() | {"zitadel_service_token": "", "zitadel_service_token_file": str(tmp_path / "missing.pat")}
     with pytest.raises(ValidationError, match="make bootstrap"):
         Settings(**data)
+
+
+def test_migrations_need_only_the_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name.upper(), raising=False)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@db/x")
+    assert DatabaseSettings().database_url == "postgresql+psycopg://u:p@db/x"

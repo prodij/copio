@@ -59,3 +59,12 @@ def test_env_example_lists_names_only(product_dir: pathlib.Path) -> None:
 def test_local_state_is_ignored(product_dir: pathlib.Path) -> None:
     ignored = (product_dir / ".gitignore").read_text().splitlines()
     assert ".env" in ignored and ".bootstrap/" in ignored
+
+
+def test_make_keeps_container_secrets_out_of_host_tools(product_dir: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    (tmp_path / "Makefile").write_text((product_dir / "Makefile").read_text())
+    (tmp_path / ".env").write_text("ZITADEL_MASTERKEY=m\nLAGO_RSA_PRIVATE_KEY=r\nLAGO_API_KEY=k\n")
+    env = subprocess.run(["make", "-s", "--eval", "show-env: ; @env", "show-env"],
+                         cwd=tmp_path, capture_output=True, text=True, check=True).stdout.splitlines()
+    assert "LAGO_API_KEY=k" in env  # bootstrap needs it
+    assert not any(line.startswith(("ZITADEL_MASTERKEY=", "LAGO_RSA_PRIVATE_KEY=")) for line in env)

@@ -7,6 +7,7 @@ import pytest
 import respx
 
 import bootstrap
+import product
 from bootstrap import (
     ensure_backend_machine_user,
     ensure_project,
@@ -139,7 +140,7 @@ def test_backend_user_gets_memberships_and_a_private_pat(
 
 
 @respx.mock
-@pytest.mark.parametrize(("status", "creates"), [(200, False), (401, True)])
+@pytest.mark.parametrize(("status", "creates"), [(200, False), (401, True), (403, True)])
 def test_backend_pat_is_replaced_only_when_zitadel_rejects_it(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, status: int, creates: bool
 ) -> None:
@@ -244,3 +245,107 @@ def test_admin_token_missing_is_clear(tmp_path: pathlib.Path, monkeypatch: pytes
     monkeypatch.setattr(bootstrap, "ADMIN_PAT", tmp_path / ".bootstrap" / "zitadel" / "admin.pat")
     with pytest.raises(SystemExit, match=r"admin.pat not found; run `make up`"):
         bootstrap.zitadel_admin_token()
+
+
+LAGO_API = "http://127.0.0.1:3000"
+HOOK_URL = "http://backend:8000/billing/webhooks/lago"
+
+
+@pytest.fixture
+def lago_rest(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> pathlib.Path:
+    monkeypatch.setenv("LAGO_API_PORT", "3000")
+    monkeypatch.setenv("LAGO_API_KEY", "key")
+    monkeypatch.setattr(bootstrap, "lago_session", lambda: ("jwt", "o1"))
+    monkeypatch.setattr(bootstrap, "IDS", tmp_path / "ids.env")
+    return tmp_path / "ids.env"
+
+
+@respx.mock
+def test_bootstrap_lago_creates_jwt_webhook_and_metric_once(lago_rest: pathlib.Path) -> None:
+    respx.get(f"{LAGO_API}/api/v1/webhook_endpoints").respond(200, json={"webhook_endpoints": []})
+    hook = respx.post(f"{LAGO_API}/api/v1/webhook_endpoints").respond(200, json={})
+    respx.get(f"{LAGO_API}/api/v1/billable_metrics/reports_generated").respond(404, json={})
+    metric = respx.post(f"{LAGO_API}/api/v1/billable_metrics").respond(200, json={})
+    bootstrap.bootstrap_lago()
+    assert body(hook) == {"webhook_endpoint": {"webhook_url": HOOK_URL, "signature_algo": "jwt"}}
+    assert body(metric)["billable_metric"]["aggregation_type"] == "count_agg"  # type: ignore[index]
+    assert read_ids(lago_rest) == {"LAGO_ORGANIZATION_ID": "o1"}
+
+
+@respx.mock
+def test_bootstrap_lago_leaves_existing_jwt_webhook_and_metric(lago_rest: pathlib.Path) -> None:
+    respx.get(f"{LAGO_API}/api/v1/webhook_endpoints").respond(200, json={"webhook_endpoints": [
+        {"lago_id": "h1", "webhook_url": HOOK_URL, "signature_algo": "jwt"}]})
+    respx.get(f"{LAGO_API}/api/v1/billable_metrics/reports_generated").respond(200, json={"billable_metric": {}})
+    writes = respx.route(method__in=["POST", "PUT"])
+    bootstrap.bootstrap_lago()
+    assert writes.call_count == 0
+
+
+@respx.mock
+def test_bootstrap_lago_switches_an_hmac_webhook_to_jwt(lago_rest: pathlib.Path) -> None:
+    respx.get(f"{LAGO_API}/api/v1/webhook_endpoints").respond(200, json={"webhook_endpoints": [
+        {"lago_id": "h1", "webhook_url": HOOK_URL, "signature_algo": "hmac"}]})
+    update = respx.put(f"{LAGO_API}/api/v1/webhook_endpoints/h1").respond(200, json={})
+    respx.get(f"{LAGO_API}/api/v1/billable_metrics/reports_generated").respond(200, json={})
+    bootstrap.bootstrap_lago()
+    assert body(update)["webhook_endpoint"]["signature_algo"] == "jwt"  # type: ignore[index]
+
+
+class FakeStripeSetup:
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, providers: list[dict[str, str]], printed: str) -> None:
+        self.graphql: list[tuple[str, dict[str, object]]] = []
+        self.compose_calls: list[tuple[str, ...]] = []
+        self.providers, self.printed = providers, printed
+        monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+        monkeypatch.setenv("APP_PORT", "5173")
+        monkeypatch.setattr(bootstrap, "lago_session", lambda: ("jwt", "o1"))
+        monkeypatch.setattr(bootstrap, "lago_graphql", self.lago_graphql)
+        monkeypatch.setattr(bootstrap, "compose", self.compose)
+
+    def lago_graphql(self, query: str, variables: dict[str, object]) -> dict[str, object]:
+        self.graphql.append((query, variables))
+        if query == bootstrap.STRIPE_PROVIDERS:
+            return {"paymentProviders": {"collection": self.providers}}
+        return {"addStripePaymentProvider": {"id": "p1"}}
+
+    def compose(self, *args: str, capture: bool = False) -> str:
+        self.compose_calls.append(args)
+        return self.printed if "--print-secret" in args else ""
+
+
+def test_bootstrap_stripe_adds_the_provider_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc\n")
+    bootstrap.bootstrap_stripe()
+    added = [v for q, v in fake.graphql if q == bootstrap.ADD_STRIPE]
+    assert added == [{"i": {"name": "Stripe", "code": "stripe", "secretKey": "sk_test_x",
+                            "successRedirectUrl": f"http://{product.DOMAIN}:5173/billing/return"}}]
+    runner = next(c for c in fake.compose_calls if "runner" in c)
+    assert "STRIPE_CLI_WEBHOOK_SECRET=whsec_abc" in runner and "LAGO_ORGANIZATION_ID=o1" in runner
+    assert fake.compose_calls[-1] == ("up", "-d", "--force-recreate", "stripe-cli")
+
+
+def test_bootstrap_stripe_keeps_an_existing_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], "whsec_abc")
+    bootstrap.bootstrap_stripe()
+    assert all(q != bootstrap.ADD_STRIPE for q, _ in fake.graphql)
+
+
+@pytest.mark.parametrize("printed", ["", "\n", "Getting ready...\nnot a secret"])
+def test_bootstrap_stripe_needs_a_whsec_secret(monkeypatch: pytest.MonkeyPatch, printed: str) -> None:
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], printed)
+    with pytest.raises(SystemExit, match="printed no whsec_ secret"):
+        bootstrap.bootstrap_stripe()
+    assert not any("runner" in c for c in fake.compose_calls)
+
+
+@respx.mock
+def test_backend_pat_check_other_errors_are_reported(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pat = tmp_path / "backend.pat"
+    pat.write_text("old")
+    monkeypatch.setattr(bootstrap, "BACKEND_PAT", pat)
+    respx.get(f"{Z}/auth/v1/users/me").respond(500, json={"message": "db down"})
+    with httpx.Client(base_url=Z) as http, pytest.raises(SystemExit, match="backend token check failed: HTTP 500"):
+        bootstrap.backend_pat_works(http)

@@ -34,9 +34,18 @@ def run(http: httpx.Client, project_id: str, instance_org: str) -> None:
         call("POST", f"/management/v1/users/{user_id}/grants", "add member role in the new org", org=org_id,
              projectId=project_id, projectGrantId=str(grant["grantId"]), roleKeys=["member"])
     finally:
+        # Best effort: a failed cleanup is reported but never hides the failure that got us here.
+        cleanup = [(f"/v2/organizations/{org_id}", f"org smoke-{tag}")]
         if user_id:
-            call("DELETE", f"/v2/users/{user_id}", "delete user")
-        call("DELETE", f"/v2/organizations/{org_id}", "delete org")
+            cleanup.insert(0, (f"/v2/users/{user_id}", f"user smoke-{tag}"))
+        for path, what in cleanup:
+            try:
+                reply = http.delete(path)
+            except httpx.HTTPError as exc:
+                print(f"smoke: could not delete {what}: {exc}", file=sys.stderr)
+                continue
+            if reply.is_error:
+                print(f"smoke: could not delete {what}: HTTP {reply.status_code}", file=sys.stderr)
 
 
 def main() -> None:

@@ -1,4 +1,4 @@
-"""`make bootstrap`: configure the local Zitadel, Lago and MinIO once. Safe to re-run.
+"""`make bootstrap`: configure the local Zitadel, Lago and S3 storage once. Safe to re-run.
 
 Every step looks before it creates, so a failed run is fixed by fixing the cause and running again.
 IDs go to .bootstrap/ids.env and the backend's token to .bootstrap/backend/backend.pat (both
@@ -92,7 +92,8 @@ def write_ids(path: Path, ids: dict[str, str]) -> None:
     path.write_text("".join(f"{k}={v}\n" for k, v in ids.items()))
 
 
-def read_ids(path: Path = IDS) -> dict[str, str]:
+def read_ids(path: Path | None = None) -> dict[str, str]:
+    path = path or IDS  # looked up per call, so tests (and callers) can point IDS elsewhere
     if not path.exists():
         return {}
     pairs = (line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
@@ -126,7 +127,10 @@ def wait_for(what: str, ready: Any, timeout: float = 300.0) -> None:
         except (httpx.HTTPError, OSError):
             pass
         time.sleep(2)
-    raise SystemExit(f"bootstrap: timed out waiting for {what}; is `make up` running? (`make logs`)")
+    raise SystemExit(
+        f"bootstrap: timed out waiting for {what}; is `make up` running? (`make logs`). If the local "
+        "data is from an older setup, `make reset` deletes it and `make up` starts fresh."
+    )
 
 
 def http_ok(url: str, path: str) -> bool:
@@ -203,7 +207,10 @@ def backend_pat_works(http: httpx.Client) -> bool:
     if not BACKEND_PAT.is_file():
         return False
     me = http.get("/auth/v1/users/me", headers={"Authorization": f"Bearer {BACKEND_PAT.read_text().strip()}"})
-    return me.status_code == 200
+    if me.status_code in (401, 403):
+        return False
+    check(me, "Zitadel backend token check")
+    return True
 
 
 def ensure_backend_machine_user(http: httpx.Client) -> None:
@@ -302,9 +309,12 @@ def bootstrap_lago() -> None:
     save_ids(LAGO_ORGANIZATION_ID=org_id)
     with lago_api() as api:
         hooks = check(api.get("/api/v1/webhook_endpoints"), "Lago webhook list")
-        if not any(h["webhook_url"] == LAGO_WEBHOOK_URL for h in hooks.get("webhook_endpoints", [])):
-            check(api.post("/api/v1/webhook_endpoints", json={"webhook_endpoint": {
-                "webhook_url": LAGO_WEBHOOK_URL, "signature_algo": "jwt"}}), "Lago webhook create")
+        hook = next((h for h in hooks.get("webhook_endpoints", []) if h["webhook_url"] == LAGO_WEBHOOK_URL), None)
+        wanted = {"webhook_endpoint": {"webhook_url": LAGO_WEBHOOK_URL, "signature_algo": "jwt"}}
+        if hook is None:
+            check(api.post("/api/v1/webhook_endpoints", json=wanted), "Lago webhook create")
+        elif hook.get("signature_algo") != "jwt":  # the backend verifies only JWT signatures
+            check(api.put(f"/api/v1/webhook_endpoints/{hook['lago_id']}", json=wanted), "Lago webhook update")
         metric = api.get(f"/api/v1/billable_metrics/{USAGE_METRIC}")
         if metric.status_code == 404:
             check(api.post("/api/v1/billable_metrics", json={"billable_metric": {
@@ -342,8 +352,9 @@ def bootstrap_stripe() -> None:
     if not any(p.get("code") == "stripe" for p in providers):
         lago_graphql(ADD_STRIPE, {"i": {"name": "Stripe", "code": "stripe", "secretKey": key,
                                         "successRedirectUrl": f"{app_url()}/billing/return"}})
-    secret = compose("run", "--rm", "--no-deps", "--entrypoint", "stripe", "stripe-cli",
-                     "listen", "--print-secret", capture=True).splitlines()[-1]
+    printed = compose("run", "--rm", "--no-deps", "--entrypoint", "stripe", "stripe-cli",
+                      "listen", "--print-secret", capture=True).splitlines()
+    secret = printed[-1].strip() if printed else ""
     if not secret.startswith("whsec_"):
         raise SystemExit("bootstrap: `stripe listen --print-secret` printed no whsec_ secret")
     _, org_id = lago_session()
@@ -353,12 +364,16 @@ def bootstrap_stripe() -> None:
     print("Stripe: Lago connected; `stripe listen` forwards test webhooks to Lago")
 
 
-# -- MinIO, backend --------------------------------------------------------------------------
+# -- S3 storage, backend ---------------------------------------------------------------------
 
 
 def ensure_bucket(name: str = "raw") -> None:
-    compose("exec", "-T", "minio", "sh", "-c",
-            f"mc alias set local http://localhost:9000 minio minio-local >/dev/null && mc mb --ignore-existing local/{name}")
+    """Create the jobs' bucket in SeaweedFS unless `s3.bucket.list` shows it (`weed shell`, which
+    talks to the master inside the container, prints its results on stderr)."""
+    shell = "weed shell -master=localhost:9333 2>&1"
+    script = (f"echo s3.bucket.list | {shell} | grep -qE '^>? *{name}[[:space:]]' "
+              f"|| echo 's3.bucket.create -name {name}' | {shell} | grep -q 'created bucket {name}'")
+    compose("exec", "-T", "s3", "sh", "-c", script)
 
 
 def backend(*args: str) -> None:
@@ -375,23 +390,26 @@ def main() -> None:
     ensure_bucket()
     if subprocess.run(["uv", "run", "python", "brand.py"], cwd=ROOT / "scripts", check=False).returncode:  # noqa: S607
         raise SystemExit("bootstrap: `make brand` failed (see above); fix it and run `make bootstrap` again")
-    compose("up", "-d", "--force-recreate", "frontend")  # picks up .bootstrap/frontend.env
-    bootstrap_stripe()
-    # The backend's settings need the Stripe key and the ids above; migrations run inside it.
-    compose("up", "-d", "--force-recreate", "backend")
+    compose("up", "-d", "--force-recreate", "backend")  # picks up .bootstrap/ids.env and the PAT
     wait_for("the backend", lambda: http_ok(public_url("api", "API_PORT"), "/health"))
-    backend("alembic", "upgrade", "head")
-    backend("python", "-m", "app.billing.sync")
+    backend("alembic", "upgrade", "head")  # needs only DATABASE_URL
+    backend("python", "-m", "app.billing.sync")  # needs only the Lago settings
     compose("up", "-d", "--force-recreate", "jobs")  # its first run needs the migrated tables
+    bootstrap_stripe()  # the backend already has the key: it was recreated from the same .env
+    # Last: the app gets its client id only once everything behind it is configured.
+    compose("up", "-d", "--force-recreate", "frontend")
     print(f"""
 Ready.
   App          {app_url()}
   API          {public_url("api", "API_PORT")}
   Zitadel      {zitadel}/ui/console
   Lago         {public_url("lago", "LAGO_FRONT_PORT")}
-  MinIO        http://localhost:{env("MINIO_CONSOLE_PORT")}
+  S3           http://localhost:{env("S3_PORT")} (SeaweedFS, bucket raw)
 Open {app_url()}""")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except httpx.HTTPError as exc:
+        raise SystemExit(f"bootstrap: request failed ({type(exc).__name__}): {exc}") from None

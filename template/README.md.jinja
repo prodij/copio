@@ -6,6 +6,6 @@ Generated from [prodij/copio](https://github.com/prodij/copio). Update with `cop
     make up && make bootstrap
     open http://{{ domain }}:5173
 
-Ports are in `.env` (Zitadel 8085, its login page 3100, Lago 3000/8088, Postgres 5432, MinIO
-9000/9001, API 8000, app 5173); change any that clash, then `make up`. `make doctor` lists stuck
+Ports are in `.env` (Zitadel 8085, its login page 3100, Lago 3000/8088, Postgres 5432, S3
+(SeaweedFS) 8333, API 8000, app 5173); change any that clash, then `make up`. `make doctor` lists stuck
 workspaces, checkouts and webhooks; `make reset` deletes all local data.

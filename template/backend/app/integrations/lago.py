@@ -36,7 +36,7 @@ class LagoClient:
             },
         }}
         response = self._call("POST", "/api/v1/customers", body)
-        response.raise_for_status()
+        self._check(response)
         return str(response.json()["customer"]["lago_id"])
 
     def upsert_plan(self, body: dict[str, Any]) -> None:
@@ -44,7 +44,7 @@ class LagoClient:
         response = self._call("PUT", f"/api/v1/plans/{code}", body)
         if response.status_code == 404:
             response = self._call("POST", "/api/v1/plans", body)
-        response.raise_for_status()
+        self._check(response)
 
     @staticmethod
     def _errors(response: httpx.Response) -> dict[str, Any]:
@@ -107,7 +107,7 @@ class LagoClient:
         response = self._call("GET", f"/api/v1/subscriptions/{external_id}")
         if response.status_code == 404:
             return None
-        response.raise_for_status()
+        self._check(response)
         result: dict[str, Any] = response.json()["subscription"]
         return result
 
@@ -115,9 +115,9 @@ class LagoClient:
                      properties: dict[str, Any]) -> None:
         body = {"event": {"transaction_id": transaction_id, "external_subscription_id": external_subscription_id,
                           "code": code, "properties": properties}}
-        self._call("POST", "/api/v1/events", body).raise_for_status()
+        self._check(self._call("POST", "/api/v1/events", body))
 
     def webhook_public_key(self) -> str:
         response = self._call("GET", "/api/v1/webhooks/json_public_key")
-        response.raise_for_status()
+        self._check(response)
         return base64.b64decode(response.json()["webhook"]["public_key"]).decode()

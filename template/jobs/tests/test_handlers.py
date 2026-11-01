@@ -265,3 +265,11 @@ def test_sample_fetch_reprocesses_from_storage(sample_env: Engine, monkeypatch: 
 def test_sample_fetch_refuses_foreign_keys(sample_env: Engine, key: str) -> None:
     with pytest.raises(ValueError, match="not a raw fx key"):
         sample_fetch.handler({"reprocess": [key]}, None)
+
+
+def test_s3_client_is_path_style_for_a_local_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("S3_ENDPOINT_URL", "http://seaweedfs:8333")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    s3 = sample_fetch.s3_client()
+    assert s3.meta.config.s3 == {"addressing_style": "path"}
+    assert s3.meta.endpoint_url == "http://seaweedfs:8333"

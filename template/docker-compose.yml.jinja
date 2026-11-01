@@ -43,13 +43,23 @@ services:
     image: redis:7-alpine
     healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 3s, retries: 30}
 
-  minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /data --console-address :9001
-    environment: {MINIO_ROOT_USER: minio, MINIO_ROOT_PASSWORD: minio-local}
-    volumes: [minio:/data]
-    ports: ["${MINIO_PORT:-9000}:9000", "${MINIO_CONSOLE_PORT:-9001}:9001"]
-    healthcheck: {test: ["CMD", "mc", "ready", "local"], interval: 3s, retries: 30}
+  # S3-compatible object storage for the jobs' raw-first data (SeaweedFS: master, volume, filer and
+  # S3 gateway in one process). The S3 identity comes from .env; `make bootstrap` creates the bucket.
+  s3:
+    image: chrislusf/seaweedfs:3.97
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        printf '{"identities":[{"name":"app","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}'
+        "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY" > /tmp/s3.json &&
+        exec weed -logtostderr=true server -dir=/data -volume.max=0 -master.volumeSizeLimitMB=1024
+        -s3 -s3.port=8333 -s3.config=/tmp/s3.json
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+    volumes: [s3:/data]
+    ports: ["${S3_PORT:-8333}:8333"]
+    healthcheck: {test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8333/status"], interval: 3s, retries: 40}
 
   zitadel-api:
     image: ghcr.io/zitadel/zitadel:v4.20.0
@@ -149,23 +159,21 @@ services:
   lago-pdf:
     image: getlago/lago-gotenberg:7.8.2
 
-  # Forwards Stripe test webhooks to Lago. It needs the Lago organization id, which `make bootstrap`
-  # writes to .bootstrap/ids.env before recreating this service; until then it exits with a hint.
+  # Forwards Stripe test webhooks to Lago (scripts/stripe-listen.sh). It needs the Lago organization
+  # id, which `make bootstrap` writes to .bootstrap/ids.env before recreating this service.
   stripe-cli:
     image: stripe/stripe-cli:v1.55.6
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        if [ -z "$$STRIPE_API_KEY" ] || [ -z "$$LAGO_ORGANIZATION_ID" ]; then
-        echo "stripe-cli: idle until STRIPE_SECRET_KEY is in .env and make bootstrap has run"; exit 0; fi;
-        exec stripe listen --forward-to "http://lago-api:3000/webhooks/stripe/$$LAGO_ORGANIZATION_ID?code=stripe"
+    entrypoint: ["/bin/sh", "/stripe-listen.sh"]
+    restart: on-failure:5
     env_file: [{path: .bootstrap/ids.env, required: false}]
     environment:
-      STRIPE_API_KEY: ${STRIPE_API_KEY:-${STRIPE_SECRET_KEY:-}}
+      STRIPE_API_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_DEVICE_NAME: {{ product_slug }}-local
+    volumes: [./scripts/stripe-listen.sh:/stripe-listen.sh:ro]
 
   backend:
     build: ./backend
+    restart: unless-stopped
     env_file: [{path: .bootstrap/ids.env, required: false}]
     environment:
       DATABASE_URL: postgresql+psycopg://app:app@postgres:5432/app
@@ -183,13 +191,14 @@ services:
 
   jobs:
     build: ./jobs
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://app:app@postgres:5432/app
       LAGO_API_URL: http://lago-api:3000
       LAGO_API_KEY: ${LAGO_API_KEY}
-      S3_ENDPOINT_URL: http://minio:9000
-      AWS_ACCESS_KEY_ID: minio
-      AWS_SECRET_ACCESS_KEY: minio-local
+      S3_ENDPOINT_URL: http://s3:8333
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
       AWS_DEFAULT_REGION: us-east-1
       RAW_BUCKET: raw
     depends_on: {postgres: {condition: service_healthy}}
@@ -210,4 +219,4 @@ services:
       - /app/node_modules
     ports: ["${APP_PORT:-5173}:5173"]
 
-volumes: {pg: {}, minio: {}, lago-storage: {}}
+volumes: {pg: {}, s3: {}, lago-storage: {}}

@@ -56,3 +56,26 @@ def test_cors_preflight_ignores_other_origins(client: TestClient) -> None:
     response = client.options("/me/access", headers={
         "Origin": "http://evil.test", "Access-Control-Request-Method": "GET"})
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_unhandled_error_is_json_500_that_keeps_cors(client: TestClient, settings: Settings) -> None:
+    app = client.app
+
+    @app.get("/crash")  # type: ignore[attr-defined]
+    def crash() -> None:
+        raise RuntimeError("bug")
+
+    response = client.get("/crash", headers={"Origin": settings.frontend_url})
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Internal Server Error"}
+    assert response.headers["access-control-allow-origin"] == settings.frontend_url
+
+
+def test_cors_needs_only_frontend_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("DATABASE_URL", "STRIPE_SECRET_KEY", "ZITADEL_PROJECT_ID"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("FRONTEND_URL", "http://app.example")
+    get_settings.cache_clear()
+    with TestClient(create_app()) as c:
+        response = c.get("/health", headers={"Origin": "http://app.example"})
+    assert response.headers["access-control-allow-origin"] == "http://app.example"

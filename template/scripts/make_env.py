@@ -95,10 +95,8 @@ def main(root: Path = ROOT) -> None:
     target.write_text(text)
     target.chmod(0o600)
     print(f"wrote {target.name}")
-    optional = {"STRIPE_API_KEY"}
-    needed = [k for k in missing if k not in optional]
-    if needed:
-        print("still empty, fill these in .env: " + ", ".join(needed))
+    if missing:
+        print("still empty, fill these in .env: " + ", ".join(missing))
 
 
 if __name__ == "__main__":

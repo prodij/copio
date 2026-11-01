@@ -21,7 +21,7 @@ ignore = ["E501"]
 strict = true
 files = ["jobs"]
 [[tool.mypy.overrides]]
-module = ["boto3", "croniter"]
+module = ["boto3", "botocore.*", "croniter"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

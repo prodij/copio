@@ -13,6 +13,7 @@ from typing import Any
 
 import boto3
 import httpx
+from botocore.config import Config
 from sqlalchemy import create_engine
 
 from jobs.db import ScopedDb
@@ -46,11 +47,19 @@ def process(db: ScopedDb, store: RawStore, workspace_id: str, key: str) -> None:
     )
 
 
+def s3_client() -> Any:
+    """AWS S3, or a local S3 server at S3_ENDPOINT_URL (SeaweedFS in Compose), addressed path-style
+    (`http://host/bucket/key`) since a bucket subdomain does not resolve locally."""
+    endpoint = os.environ.get("S3_ENDPOINT_URL")
+    config = Config(s3={"addressing_style": "path"}) if endpoint else None
+    return boto3.client("s3", endpoint_url=endpoint, config=config)
+
+
 def handler(event: dict[str, Any], context: object | None) -> dict[str, Any]:
     engine = create_engine(os.environ["DATABASE_URL"])
     try:
         db = ScopedDb(engine)
-        s3 = boto3.client("s3", endpoint_url=os.environ.get("S3_ENDPOINT_URL"))
+        s3 = s3_client()
         store = RawStore(os.environ["RAW_BUCKET"], s3)
         if keys := event.get("reprocess"):
             for key in keys:

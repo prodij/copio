@@ -40,6 +40,28 @@ class Settings(BaseSettings):
         return self
 
 
+class DatabaseSettings(BaseSettings):
+    """Just the database, for migrations: they must run before the rest is configured."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+    database_url: str
+
+
+class LagoSettings(BaseSettings):
+    """Just Lago, for `python -m app.billing.sync`."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+    lago_api_url: str
+    lago_api_key: str
+
+
+class FrontendSettings(BaseSettings):
+    """Just the app origin, for CORS: error responses must stay readable while the rest is misconfigured."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+    frontend_url: str
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

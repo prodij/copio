@@ -1,11 +1,10 @@
 import logging
 import uuid
 
-import httpx
 from sqlalchemy.orm import Session
 
 from app.billing.models import Subscription
-from app.errors import DependencyUnavailable
+from app.errors import DependencyRejected, DependencyUnavailable
 from app.integrations.lago import LagoClient
 
 log = logging.getLogger(__name__)
@@ -23,5 +22,5 @@ def record_usage(lago: LagoClient, session: Session, workspace_id: uuid.UUID, me
         return
     try:
         lago.record_event(str(uuid.uuid4()), sub.lago_subscription_id, metric, {"value": value})
-    except (DependencyUnavailable, httpx.HTTPError) as exc:
+    except (DependencyUnavailable, DependencyRejected) as exc:
         log.warning("Usage event lost: workspace=%s metric=%s error=%s", workspace_id, metric, type(exc).__name__)

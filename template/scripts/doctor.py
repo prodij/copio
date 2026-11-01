@@ -2,7 +2,8 @@
 
 - workspaces stuck in `creating` for over 5 minutes (a retry of POST /workspaces resumes them),
 - subscriptions `pending` for over a day (checkout never finished; billing_reconcile retries),
-- Lago webhooks stored but never processed.
+- Lago webhooks stored but never processed. The backend stores and processes a webhook in one
+  transaction, so a hit here means that code changed or a row was written by hand.
 """
 
 import os

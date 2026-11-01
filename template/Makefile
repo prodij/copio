@@ -2,6 +2,11 @@
 # `make bootstrap`. `make check` needs only Postgres (`make up`, or TEST_DATABASE_URL).
 -include .env
 export
+# Secrets only the containers need (Compose reads .env itself). Keep them out of every host
+# process make starts: Vite exposes any ZITADEL_* variable to the browser bundle.
+unexport ZITADEL_MASTERKEY LOGIN_SESSION_COOKIE_SECRET SECRET_KEY_BASE LAGO_RSA_PRIVATE_KEY \
+  LAGO_ENCRYPTION_PRIMARY_KEY LAGO_ENCRYPTION_DETERMINISTIC_KEY LAGO_ENCRYPTION_KEY_DERIVATION_SALT \
+  S3_ACCESS_KEY S3_SECRET_KEY
 
 # Zitadel writes its PATs into .bootstrap/zitadel as this user, so the host can read them.
 export HOST_UID := $(shell id -u)
