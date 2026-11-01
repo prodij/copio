@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
@@ -34,9 +34,18 @@ class CheckoutOut(BaseModel):
     checkout_url: str | None
 
 
-@router.get("/plans")
-def list_plans(plans: Annotated[dict[str, Plan], Depends(get_plans)]) -> list[dict[str, Any]]:
-    return [p.public() for p in plans.values()]
+class PlanOut(BaseModel):
+    code: str
+    name: str
+    amount_cents: int
+    currency: str
+    interval: str
+    features: dict[str, bool | int]
+
+
+@router.get("/plans", response_model=list[PlanOut])
+def list_plans(plans: Annotated[dict[str, Plan], Depends(get_plans)]) -> list[PlanOut]:
+    return [PlanOut(**p.public()) for p in plans.values()]
 
 
 @router.post("/checkout", response_model=CheckoutOut)
