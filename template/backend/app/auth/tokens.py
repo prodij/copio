@@ -3,6 +3,7 @@ from typing import Any
 import jwt
 
 from app.auth.principal import Principal
+from app.errors import DependencyUnavailable
 
 ROLE_RANK = {"member": 1, "owner": 2}
 
@@ -28,6 +29,8 @@ class TokenVerifier:
                 audience=self.project_id,
                 options={"require": ["exp", "iss", "sub", "aud"]},
             )
+        except jwt.PyJWKClientConnectionError as exc:
+            raise DependencyUnavailable("zitadel") from exc
         except (jwt.PyJWTError, ValueError) as exc:
             raise InvalidToken(str(exc)) from exc
         return Principal(
@@ -37,7 +40,9 @@ class TokenVerifier:
         )
 
     def _roles(self, claims: dict[str, Any]) -> dict[str, str]:
-        raw = claims.get(f"urn:zitadel:iam:org:project:{self.project_id}:roles") or {}
+        raw = claims.get(f"urn:zitadel:iam:org:project:{self.project_id}:roles")
+        if not isinstance(raw, dict):
+            return {}
         result: dict[str, str] = {}
         for role, orgs in raw.items():
             if role not in ROLE_RANK or not isinstance(orgs, dict):
