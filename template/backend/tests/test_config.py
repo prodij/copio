@@ -1,3 +1,7 @@
+import os
+import subprocess
+import sys
+
 import pytest
 from pydantic import ValidationError
 
@@ -12,8 +16,8 @@ def test_live_stripe_key_is_rejected() -> None:
 
 
 def test_importing_app_main_needs_no_env() -> None:
-    import importlib
-
-    import app.main
-
-    importlib.reload(app.main)
+    env = {k: v for k, v in os.environ.items() if k.lower() not in Settings.model_fields}
+    result = subprocess.run(
+        [sys.executable, "-c", "import app.main"], env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
