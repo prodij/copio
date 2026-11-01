@@ -191,6 +191,28 @@ def test_zitadel_timeout_returns_503(client: TestClient, auth: AuthHeaders, db_s
     assert db_session.scalars(select(Workspace)).one().status == "creating"
 
 
+@respx.mock
+@pytest.mark.parametrize("step", ["org", "grant", "user_grant"])
+def test_zitadel_rejection_is_a_502_naming_zitadel(client: TestClient, auth: AuthHeaders, db_session: Session,
+                                                   step: str) -> None:
+    z = fake_zitadel(respx.mock)
+    z[step].mock(return_value=httpx.Response(403, json={"code": 7, "message": "secret-looking detail"}))
+    r = client.post("/workspaces", json={"name": "Acme"}, headers=auth("user-1"))
+    assert r.status_code == 502
+    assert r.json() == {"detail": "Zitadel rejected the request: HTTP 403"}
+    assert db_session.scalars(select(Workspace)).one().status == "creating"
+
+
+@respx.mock
+def test_zitadel_rejecting_the_grant_search_is_a_502(client: TestClient, auth: AuthHeaders) -> None:
+    z = fake_zitadel(respx.mock)
+    z["grant"].mock(return_value=httpx.Response(409, json={"code": 6, "message": "exists"}))
+    respx.post(f"{ZITADEL}/management/v1/projectgrants/_search").mock(return_value=httpx.Response(400, text="nope"))
+    r = client.post("/workspaces", json={"name": "Acme"}, headers=auth("user-1"))
+    assert r.status_code == 502
+    assert r.json() == {"detail": "Zitadel rejected the request: HTTP 400"}
+
+
 def test_me_without_workspace(client: TestClient, auth: AuthHeaders) -> None:
     r = client.get("/me", headers=auth("user-1", email="a@b.c"))
     assert r.json() == {"user_id": "user-1", "email": "a@b.c", "workspace": None}
