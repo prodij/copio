@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from app import errors
 from app.config import Settings, get_settings
+from app.workspaces.routes import router as workspaces_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -10,6 +11,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is not None:
         app.dependency_overrides[get_settings] = lambda: settings
     errors.install(app)
+    app.include_router(workspaces_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

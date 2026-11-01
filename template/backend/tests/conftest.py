@@ -9,8 +9,11 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_verifier
 from app.config import Settings, get_settings
 from app.db import Base, engine_for, get_session
+from app.integrations import get_lago, get_zitadel
+from app.integrations.lago import LagoClient
+from app.integrations.zitadel import ZitadelClient
 from app.main import create_app
-from tests.auth_helpers import TokenFactory
+from tests.auth_helpers import AuthHeaders, TokenFactory
 
 TEST_SETTINGS = Settings(
     database_url=os.environ.get("TEST_DATABASE_URL", "postgresql+psycopg://app:app@localhost:5432/app_test"),
@@ -59,10 +62,22 @@ def tokens(settings: Settings) -> TokenFactory:
 
 
 @pytest.fixture
+def auth(tokens: TokenFactory) -> AuthHeaders:
+    def headers(user_id: str, orgs: dict[str, str] | None = None, **claims: object) -> dict[str, str]:
+        return {"Authorization": f"Bearer {tokens.make(user_id, orgs or {}, **claims)}"}  # type: ignore[arg-type]
+
+    return headers
+
+
+@pytest.fixture
 def client(db_session: Session, settings: Settings, tokens: TokenFactory) -> Iterator[TestClient]:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: db_session
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_verifier] = tokens.verifier
+    app.dependency_overrides[get_zitadel] = lambda: ZitadelClient(
+        settings.zitadel_api_url, "t", settings.zitadel_instance_org_id, settings.zitadel_project_id
+    )
+    app.dependency_overrides[get_lago] = lambda: LagoClient(settings.lago_api_url, "k")
     with TestClient(app) as c:
         yield c

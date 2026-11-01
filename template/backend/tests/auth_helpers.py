@@ -1,4 +1,5 @@
 import time
+from typing import Protocol
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -13,6 +14,12 @@ class _StaticJwks:
 
     def get_signing_key_from_jwt(self, _token: str) -> jwt.PyJWK:
         return jwt.PyJWK.from_dict(jwt.algorithms.RSAAlgorithm.to_jwk(self._key, as_dict=True) | {"alg": "RS256"})
+
+
+class AuthHeaders(Protocol):
+    """The `auth` fixture: headers carrying a signed token for this user and these org roles."""
+
+    def __call__(self, user_id: str, orgs: dict[str, str] | None = None, **claims: object) -> dict[str, str]: ...
 
 
 class TokenFactory:
