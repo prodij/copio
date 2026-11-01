@@ -261,6 +261,12 @@ def test_sample_fetch_reprocesses_from_storage(sample_env: Engine, monkeypatch: 
     assert len(_sample_rows(sample_env)) == 2
 
 
+def test_sample_fetch_empty_reprocess_list_fetches_nothing(sample_env: Engine) -> None:
+    assert sample_fetch.handler({"reprocess": []}, None) == {"reprocessed": 0}
+    assert not respx.calls
+    assert _sample_rows(sample_env) == []
+
+
 @pytest.mark.parametrize("key", ["raw/zen/a/2026/10/31/r.json", "raw/fx//2026/10/31/r.json", "other/fx/a/x"])
 def test_sample_fetch_refuses_foreign_keys(sample_env: Engine, key: str) -> None:
     with pytest.raises(ValueError, match="not a raw fx key"):

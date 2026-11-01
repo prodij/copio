@@ -322,7 +322,22 @@ def test_bootstrap_stripe_adds_the_provider_when_missing(monkeypatch: pytest.Mon
                             "successRedirectUrl": f"http://{product.DOMAIN}:5173/billing/return"}}]
     runner = next(c for c in fake.compose_calls if "runner" in c)
     assert "STRIPE_CLI_WEBHOOK_SECRET=whsec_abc" in runner and "LAGO_ORGANIZATION_ID=o1" in runner
-    assert fake.compose_calls[-1] == ("up", "-d", "--force-recreate", "stripe-cli")
+
+
+def test_bootstrap_stripe_sets_the_webhook_secret_last(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Lago's RegisterWebhookJob (queued when the provider is added) would overwrite the secret, so
+    # the secret is written after everything else, each run, and only when Lago's value differs.
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
+    bootstrap.bootstrap_stripe()
+    bootstrap.bootstrap_stripe()
+    runs = [i for i, c in enumerate(fake.compose_calls) if "runner" in c]
+    recreates = [i for i, c in enumerate(fake.compose_calls) if c == ("up", "-d", "--force-recreate", "stripe-cli")]
+    assert len(runs) == len(recreates) == 2
+    assert all(run > recreate for run, recreate in zip(runs, recreates, strict=True))
+    assert fake.compose_calls[-1] == fake.compose_calls[runs[0]]
+    ruby = bootstrap.STRIPE_WEBHOOK_RUBY
+    assert ruby.index("RegisterWebhookJob") < ruby.index("sleep 1 while queued.call") < ruby.index("update!")
+    assert "if provider.webhook_secret == secret" in ruby
 
 
 def test_bootstrap_stripe_keeps_an_existing_provider(monkeypatch: pytest.MonkeyPatch) -> None:

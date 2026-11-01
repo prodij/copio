@@ -2,6 +2,12 @@ import pathlib
 import re
 import subprocess
 
+import pytest
+import yaml
+from copier import run_copy
+
+from conftest import ANSWERS, ROOT
+
 SECRET_PATTERNS = [
     re.compile(r"sk_(live|test)_[0-9A-Za-z]{10,}"),
     re.compile(r"whsec_[0-9A-Za-z]{10,}"),
@@ -61,11 +67,77 @@ def test_local_state_is_ignored(product_dir: pathlib.Path) -> None:
     assert ".env" in ignored and ".bootstrap/" in ignored
 
 
-def test_make_keeps_container_secrets_out_of_host_tools(product_dir: pathlib.Path, tmp_path: pathlib.Path) -> None:
-    # A probe target appended to the real Makefile (macOS make 3.81 has no --eval).
-    (tmp_path / "Makefile").write_text((product_dir / "Makefile").read_text() + "\nshow-env:\n\t@env\n")
-    (tmp_path / ".env").write_text("ZITADEL_MASTERKEY=m\nLAGO_RSA_PRIVATE_KEY=r\nLAGO_API_KEY=k\n")
-    env = subprocess.run(["make", "-s", "show-env"],
-                         cwd=tmp_path, capture_output=True, text=True, check=True).stdout.splitlines()
-    assert "LAGO_API_KEY=k" in env  # bootstrap needs it
-    assert not any(line.startswith(("ZITADEL_MASTERKEY=", "LAGO_RSA_PRIVATE_KEY=")) for line in env)
+def test_every_env_file_but_the_example_is_ignored(product_dir: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".gitignore").write_text((product_dir / ".gitignore").read_text())
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    names = [".env", ".env.local", ".env.production", ".env.example"]
+    result = subprocess.run(["git", "check-ignore", *names], cwd=repo, capture_output=True, text=True, check=False)
+    assert result.stdout.split() == [".env", ".env.local", ".env.production"]
+
+
+SECRETS = {"ZITADEL_MASTERKEY": "m", "ZITADEL_ADMIN_PASSWORD": "z", "LAGO_RSA_PRIVATE_KEY": "r",
+           "STRIPE_SECRET_KEY": "s", "LAGO_API_KEY": "k", "LAGO_ORG_USER_PASSWORD": "p"}
+
+
+def _env_seen_by_host_tools(product_dir: pathlib.Path, tmp_path: pathlib.Path, target: str) -> set[str]:
+    """Runs the real Makefile target with fake `uv`, `npm` and `npx` that record the secrets they see."""
+    (tmp_path / "Makefile").write_text((product_dir / "Makefile").read_text())
+    (tmp_path / ".env").write_text("".join(f"{k}={v}\n" for k, v in SECRETS.items()))
+    for folder in ["scripts", "backend", "jobs", "frontend", "e2e", "bin"]:
+        (tmp_path / folder).mkdir(exist_ok=True)
+    seen = tmp_path / "seen"
+    seen.write_text("")
+    for tool in ["uv", "npm", "npx"]:
+        fake = tmp_path / "bin" / tool
+        fake.write_text(f'#!/bin/sh\nenv | grep -E "^({"|".join(SECRETS)})=" | cut -d= -f1 >> "{seen}"\n')
+        fake.chmod(0o755)
+    env = {"PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    subprocess.run(["make", "-s", target], cwd=tmp_path, env=env, capture_output=True, text=True, check=True)
+    return set(seen.read_text().split())
+
+
+@pytest.mark.parametrize(("target", "needed"), [
+    ("bootstrap", {"STRIPE_SECRET_KEY", "LAGO_API_KEY", "LAGO_ORG_USER_PASSWORD"}),
+    ("brand", {"LAGO_ORG_USER_PASSWORD"}),
+    ("check", set()),
+    ("e2e", set()),
+    ("doctor", set()),
+])
+def test_make_gives_host_tools_only_the_secrets_they_need(
+    product_dir: pathlib.Path, tmp_path: pathlib.Path, target: str, needed: set[str]
+) -> None:
+    # Container-only secrets never reach the host; the rest only the targets whose scripts use them.
+    assert _env_seen_by_host_tools(product_dir, tmp_path, target) == needed
+
+
+def test_published_ports_bind_only_to_loopback(product_dir: pathlib.Path) -> None:
+    # The stack runs with known local credentials (postgres/postgres, Lago's superuser): never on 0.0.0.0.
+    compose = yaml.safe_load((product_dir / "docker-compose.yml").read_text())
+    mappings = [(name, str(port)) for name, service in compose["services"].items()
+                for port in service.get("ports", [])]
+    assert mappings, "no published ports found"
+    assert [m for m in mappings if not m[1].startswith("127.0.0.1:")] == []
+
+
+def test_zitadel_admin_gets_a_generated_password(product_dir: pathlib.Path) -> None:
+    compose = yaml.safe_load((product_dir / "docker-compose.yml").read_text())
+    zitadel = compose["services"]["zitadel-api"]["environment"]
+    assert zitadel["ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD"] == "${ZITADEL_ADMIN_PASSWORD}"
+    assert zitadel["ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME"] == "admin@acme-reports.localhost"
+    example = (product_dir / ".env.example").read_text()
+    assert "# Generate: password 24\nZITADEL_ADMIN_PASSWORD=\n" in example
+
+
+@pytest.mark.parametrize("domain", ["acme.com", "acme.localhost.com", "localhost", ".localhost"])
+def test_domain_must_be_local_in_milestone_1(tmp_path: pathlib.Path, domain: str) -> None:
+    with pytest.raises(ValueError, match="must end in .localhost"):
+        run_copy(str(ROOT), str(tmp_path / "p"), data={**ANSWERS, "domain": domain}, defaults=True,
+                 unsafe=True, vcs_ref="HEAD", quiet=True)
+
+
+def test_a_subdomain_of_localhost_is_accepted(tmp_path: pathlib.Path) -> None:
+    run_copy(str(ROOT), str(tmp_path / "p"), data={**ANSWERS, "domain": "dev.acme.localhost"}, defaults=True,
+             unsafe=True, vcs_ref="HEAD", quiet=True)
+    assert "dev.acme.localhost" in (tmp_path / "p" / "docker-compose.yml").read_text()

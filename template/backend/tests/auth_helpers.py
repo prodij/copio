@@ -27,7 +27,8 @@ class TokenFactory:
         self.settings = settings
         self._private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
-    def make(self, user_id: str, orgs: dict[str, str], email: str = "u@example.com", **overrides: object) -> str:
+    def make(self, user_id: str, orgs: dict[str, str], email: str | None = None, **overrides: object) -> str:
+        """Like a Zitadel access token, which carries no `email` claim unless one is passed."""
         roles: dict[str, dict[str, str]] = {}
         for org_id, role in orgs.items():
             roles.setdefault(role, {})[org_id] = f"{org_id}.test"
@@ -36,9 +37,8 @@ class TokenFactory:
             "sub": user_id,
             "aud": [self.settings.zitadel_project_id],
             "exp": int(time.time()) + 300,
-            "email": email,
             f"urn:zitadel:iam:org:project:{self.settings.zitadel_project_id}:roles": roles,
-        } | overrides
+        } | ({"email": email} if email else {}) | overrides
         return jwt.encode(claims, self._private, algorithm="RS256")
 
     def verifier(self) -> TokenVerifier:

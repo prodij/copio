@@ -44,6 +44,8 @@ class MeWorkspace(BaseModel):
 
 class MeOut(BaseModel):
     user_id: str
+    # The token's `email` claim. Zitadel access tokens leave it out, so this is usually null; the
+    # backend looks the address up in Zitadel only when it creates the workspace's Lago customer.
     email: str | None
     workspace: MeWorkspace | None
 

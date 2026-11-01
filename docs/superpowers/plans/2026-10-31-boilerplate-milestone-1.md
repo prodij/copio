@@ -15,7 +15,8 @@
 - Personal project. No code is copied from NG or Skylit repositories; everything is written fresh (spec D12).
 - `prodij/copio` is public: no secret values in git, ever. `.env` is git-ignored; `.env.example` has names only. The template self-test fails on anything resembling a key.
 - Zitadel and Lago run as unmodified images, pinned: `ghcr.io/zitadel/zitadel:v4.20.0`, `ghcr.io/zitadel/zitadel-login:v4.20.0`, `getlago/api:v1.55.0`, `getlago/front:v1.55.0`, `getlago/lago-gotenberg:7.8.2`, Postgres image `getlago/postgres-partman:15.0-alpine` (Lago needs pg_partman), `redis:7-alpine`, `chrislusf/seaweedfs:3.97` (S3; replaced `minio/minio:RELEASE.2025-09-07T16-13-09Z`, no longer pullable — note 2026-11-01 under Task 12), `stripe/stripe-cli:v1.55.6`.
-- The backend is the only caller of Zitadel's and Lago's APIs. The frontend talks only to the backend (except the OIDC redirect to Zitadel's login and the Stripe-hosted checkout page).
+- The backend and the billing_reconcile job are the only callers of Zitadel/Lago, through typed clients (the job calls Lago only). The frontend talks only to the backend (except the OIDC redirect to Zitadel's login and the Stripe-hosted checkout page).
+  - *Note 2026-11-01 (final review fixes):* was "the backend is the only caller"; the Task 8 reconcile job has called Lago through its own typed client since it was written, so the constraint now says so.
 - Access is decided only by `require_feature`. Plans change only in `backend/app/billing/plans.yaml`.
 - Every product table carries `workspace_id`; jobs refuse queries without one.
 - Missing data is never shown as `0`: loading → skeleton, failure → HTTP status + API message, absent → "Unavailable".
@@ -4544,7 +4545,7 @@ Generated from prodij/copio. Layout: `frontend/` `backend/` `jobs/` `infra/` `br
 
 ## Rules
 - Access is checked only with `require_feature` (backend/app/access/deps.py). Plans change only in backend/app/billing/plans.yaml, then `make sync-plans`.
-- The backend is the only caller of Zitadel and Lago. The frontend calls only the backend, through `src/api/client.ts` (raw `fetch` is a lint error).
+- The backend and the billing_reconcile job are the only callers of Zitadel/Lago, through typed clients. The frontend calls only the backend, through `src/api/client.ts` (raw `fetch` is a lint error).
 - Every product table has `workspace_id`; jobs use `ScopedDb`.
 - Missing data shows "Unavailable", never 0.
 - Never read `.env` or `.bootstrap/`; never use live Stripe keys. The guard hook blocks these.
@@ -4579,3 +4580,19 @@ git commit -m "feat: agent guardrails, isolation test, path-filtered CI and the 
 - `uv run pytest -q -m slow` passes in the template repo (generated product: lint, typecheck, all unit tests).
 - In a freshly generated product, `make env && make up && make bootstrap && make e2e` passes with Stripe test keys.
 - The human has pushed tag `v1-diagnostic-archive` and reviewed the PR from `feat/boilerplate-m1` into `main`.
+
+## Final review fixes (2026-11-01)
+
+One fix wave after the whole-branch review, before the PR:
+
+- **Compose binds loopback only.** Every published port is `127.0.0.1:<port>:<port>` (the stack uses known local credentials: postgres/postgres, Lago's superuser). The Zitadel console admin is `admin@<domain>` with a password `make env` generates (`ZITADEL_ADMIN_PASSWORD`, new `# Generate: password <n>` generator that meets Zitadel's default policy) instead of Zitadel's default `Password1!`. Root tests assert both.
+- **Lago customer email.** Zitadel access tokens carry no `email` claim, so `create_workspace` asks Zitadel (`GET /v2/users/{userId}` → `user.human.email.email`, verified in the v4.20.0 protos) with the service token; any failure gives `None` and creation goes on. `/me`'s `email` stays the token claim (documented as usually null). Test tokens no longer carry an email by default.
+- **Removed** the unused `LagoClient.get_subscription` and its test.
+- **Global constraint wording:** the backend and the billing_reconcile job are the only callers of Zitadel/Lago, through typed clients (see the dated note under Global Constraints; template CLAUDE.md matches).
+- **Makefile:** `STRIPE_SECRET_KEY`, `LAGO_API_KEY`, `LAGO_ORG_USER_PASSWORD` are unexported and re-exported only to `bootstrap` (all three) and `brand` (the Lago password); `check`, `e2e`, `doctor` and npm steps see none. `sync-plans` runs inside the backend container and needs none on the host.
+- **copier.yml:** `domain` must end in `.localhost` in milestone 1.
+- **README:** paste the key between `make env` and `make bootstrap`, ports are configurable, `make e2e`, brand applies on `make brand`, console logins.
+- **Plans page:** a 503 on the plan click is retried 3 times (1 s, 2 s, 4 s) before the error shows.
+- **.gitignore:** `.env.*` ignored, `.env.example` kept.
+- **bootstrap:** the `stripe listen` webhook secret is written to Lago as the last Stripe step (after the stripe-cli recreate), after waiting up to 60 s for Lago's `RegisterWebhookJob` to leave the `providers` queue and scheduled set, and only when Lago's value differs.
+- **sample_fetch:** `{"reprocess": []}` reprocesses nothing instead of running a full fetch.

@@ -328,11 +328,25 @@ def bootstrap_lago() -> None:
 STRIPE_PROVIDERS = "query{paymentProviders(type: stripe){collection{... on StripeProvider{id code}}}}"
 ADD_STRIPE = "mutation($i: AddStripePaymentProviderInput!){addStripePaymentProvider(input:$i){id}}"
 # Lago cannot register a Stripe webhook endpoint for a local URL, so it checks the signing secret
-# of `stripe listen` instead (the CLI's secret is fixed per Stripe account).
-STRIPE_WEBHOOK_RUBY = (
-    'PaymentProviders::StripeProvider.find_by!(organization_id: ENV.fetch("LAGO_ORGANIZATION_ID"), '
-    'code: "stripe").update!(webhook_secret: ENV.fetch("STRIPE_CLI_WEBHOOK_SECRET"))'
-)
+# of `stripe listen` instead (the CLI's secret is fixed per Stripe account). Adding the provider
+# queues Lago's RegisterWebhookJob, which writes Stripe's own endpoint secret on success, so this
+# runs last: it waits until no such job is queued or scheduled, then sets the CLI's secret unless
+# Lago already has it (safe to repeat).
+STRIPE_WEBHOOK_RUBY = """
+require "sidekiq/api"
+job = "PaymentProviders::Stripe::RegisterWebhookJob"
+queued = -> { [Sidekiq::Queue.new("providers"), Sidekiq::ScheduledSet.new].any? { |s| s.any? { |j| j.display_class == job } } }
+deadline = Time.now + 60
+sleep 1 while queued.call && Time.now < deadline
+provider = PaymentProviders::StripeProvider.find_by!(organization_id: ENV.fetch("LAGO_ORGANIZATION_ID"), code: "stripe")
+secret = ENV.fetch("STRIPE_CLI_WEBHOOK_SECRET")
+if provider.webhook_secret == secret
+  puts "Lago already has the stripe listen webhook secret"
+else
+  provider.update!(webhook_secret: secret)
+  puts "Lago now checks the stripe listen webhook secret"
+end
+"""
 
 
 def stripe_secret_key() -> str:
@@ -357,11 +371,15 @@ def bootstrap_stripe() -> None:
     secret = printed[-1].strip() if printed else ""
     if not secret.startswith("whsec_"):
         raise SystemExit("bootstrap: `stripe listen --print-secret` printed no whsec_ secret")
+    compose("up", "-d", "--force-recreate", "stripe-cli")
+    apply_stripe_webhook_secret(secret)  # last: after any RegisterWebhookJob could have run
+    print("Stripe: Lago connected; `stripe listen` forwards test webhooks to Lago")
+
+
+def apply_stripe_webhook_secret(secret: str) -> None:
     _, org_id = lago_session()
     compose("exec", "-T", "-e", f"LAGO_ORGANIZATION_ID={org_id}", "-e", f"STRIPE_CLI_WEBHOOK_SECRET={secret}",
             "lago-api", "bin/rails", "runner", STRIPE_WEBHOOK_RUBY)
-    compose("up", "-d", "--force-recreate", "stripe-cli")
-    print("Stripe: Lago connected; `stripe listen` forwards test webhooks to Lago")
 
 
 # -- S3 storage, backend ---------------------------------------------------------------------

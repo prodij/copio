@@ -61,7 +61,8 @@ def handler(event: dict[str, Any], context: object | None) -> dict[str, Any]:
         db = ScopedDb(engine)
         s3 = s3_client()
         store = RawStore(os.environ["RAW_BUCKET"], s3)
-        if keys := event.get("reprocess"):
+        if "reprocess" in event:  # an empty list reprocesses nothing; it is not a fetch
+            keys = event["reprocess"]
             for key in keys:
                 process(db, store, workspace_of(key), key)
             return {"reprocessed": len(keys)}

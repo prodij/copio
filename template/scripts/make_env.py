@@ -1,13 +1,15 @@
 """`make env`: create or complete .env from .env.example.
 
 A blank key with a `# Default: <value>` line above it gets that value; one with a
-`# Generate: <openssl command>` line gets a fresh random value of that shape. Keys that already have
+`# Generate: <openssl command>` line gets a fresh random value of that shape (`password <n>`: n
+characters that meet Zitadel's password policy). Keys that already have
 a value in .env are kept, and keys with neither marker (the Stripe key) are left for the human.
 """
 
 import base64
 import re
 import secrets
+import string
 import subprocess
 import sys
 from collections.abc import Callable
@@ -26,6 +28,17 @@ def _rand_base64(n: int) -> str:
     return base64.b64encode(secrets.token_bytes(n)).decode()
 
 
+def _password(n: int) -> str:
+    """Random letters and digits plus one symbol: Zitadel's default policy wants lower, upper, digit
+    and symbol. `-` needs no quoting in .env or Compose."""
+    rng = secrets.SystemRandom()
+    chars = [secrets.choice(string.ascii_lowercase), secrets.choice(string.ascii_uppercase),
+             secrets.choice(string.digits), "-"]
+    chars += [secrets.choice(string.ascii_letters + string.digits) for _ in range(max(n - len(chars), 0))]
+    rng.shuffle(chars)
+    return "".join(chars)
+
+
 def _rsa_base64() -> str:
     try:
         pem = subprocess.run(["openssl", "genrsa", "2048"], check=True, capture_output=True).stdout  # noqa: S607
@@ -38,6 +51,7 @@ GENERATORS: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
     (re.compile(r"^openssl rand -hex (\d+)$"), lambda m: _rand_hex(int(m[1]))),
     (re.compile(r"^openssl rand -base64 (\d+)$"), lambda m: _rand_base64(int(m[1]))),
     (re.compile(r"^openssl genrsa 2048 \| openssl base64 -A$"), lambda m: _rsa_base64()),
+    (re.compile(r"^password (\d+)$"), lambda m: _password(int(m[1]))),
 ]
 
 

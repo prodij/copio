@@ -4,9 +4,14 @@
 export
 # Secrets only the containers need (Compose reads .env itself). Keep them out of every host
 # process make starts: Vite exposes any ZITADEL_* variable to the browser bundle.
-unexport ZITADEL_MASTERKEY LOGIN_SESSION_COOKIE_SECRET SECRET_KEY_BASE LAGO_RSA_PRIVATE_KEY \
-  LAGO_ENCRYPTION_PRIMARY_KEY LAGO_ENCRYPTION_DETERMINISTIC_KEY LAGO_ENCRYPTION_KEY_DERIVATION_SALT \
-  S3_ACCESS_KEY S3_SECRET_KEY
+unexport ZITADEL_MASTERKEY ZITADEL_ADMIN_PASSWORD LOGIN_SESSION_COOKIE_SECRET SECRET_KEY_BASE \
+  LAGO_RSA_PRIVATE_KEY LAGO_ENCRYPTION_PRIMARY_KEY LAGO_ENCRYPTION_DETERMINISTIC_KEY \
+  LAGO_ENCRYPTION_KEY_DERIVATION_SALT S3_ACCESS_KEY S3_SECRET_KEY
+# Secrets the host scripts need, exported only to the targets that run them (not check, e2e, npm).
+unexport STRIPE_SECRET_KEY LAGO_API_KEY LAGO_ORG_USER_PASSWORD
+bootstrap: export STRIPE_SECRET_KEY := $(STRIPE_SECRET_KEY)
+bootstrap: export LAGO_API_KEY := $(LAGO_API_KEY)
+bootstrap brand: export LAGO_ORG_USER_PASSWORD := $(LAGO_ORG_USER_PASSWORD)
 
 # Zitadel writes its PATs into .bootstrap/zitadel as this user, so the host can read them.
 export HOST_UID := $(shell id -u)

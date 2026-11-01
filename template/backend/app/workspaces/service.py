@@ -51,7 +51,8 @@ def create_workspace(session: Session, principal: Principal, name: str, zitadel:
     # Not recorded separately: repeating it is harmless (Zitadel answers 409, treated as done).
     zitadel.add_user_role(principal.user_id, ws.zitadel_org_id, ws.zitadel_grant_id, "owner")
     if ws.lago_customer_id is None:
-        ws.lago_customer_id = lago.create_customer(str(ws.id), ws.name, principal.email,
+        email = principal.email or zitadel.user_email(principal.user_id)  # tokens rarely carry it
+        ws.lago_customer_id = lago.create_customer(str(ws.id), ws.name, email,
                                                    settings.lago_stripe_provider_code)
         session.commit()
     ws.status = "ready"

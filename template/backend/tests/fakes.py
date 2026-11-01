@@ -18,6 +18,10 @@ def fake_zitadel(mock: respx.MockRouter) -> dict[str, respx.Route]:
         "grant": mock.post(f"{ZITADEL}/management/v1/projects/proj-1/grants").mock(
             return_value=httpx.Response(200, json={"grantId": "grant-1"})
         ),
+        "user": mock.get(url__regex=rf"{ZITADEL}/v2/users/[^/]+$").mock(
+            return_value=httpx.Response(200, json={"user": {"userId": "user-1", "human": {
+                "email": {"email": "owner@example.com", "isVerified": True}}}})
+        ),
         "user_grant": mock.post(url__regex=rf"{ZITADEL}/management/v1/users/.+/grants").mock(
             return_value=httpx.Response(200, json={"userGrantId": "ug-1"})
         ),

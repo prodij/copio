@@ -102,15 +102,6 @@ class LagoClient:
         self._check(response)
         return str(response.json()["customer"]["checkout_url"])
 
-    def get_subscription(self, external_id: str) -> dict[str, Any] | None:
-        """Lago's GET returns only an `active` subscription unless `?status=` says otherwise."""
-        response = self._call("GET", f"/api/v1/subscriptions/{external_id}")
-        if response.status_code == 404:
-            return None
-        self._check(response)
-        result: dict[str, Any] = response.json()["subscription"]
-        return result
-
     def record_event(self, transaction_id: str, external_subscription_id: str, code: str,
                      properties: dict[str, Any]) -> None:
         body = {"event": {"transaction_id": transaction_id, "external_subscription_id": external_subscription_id,

@@ -39,6 +39,48 @@ def test_create_workspace_happy_path(client: TestClient, auth: AuthHeaders, db_s
 
 
 @respx.mock
+def test_lago_customer_gets_the_email_zitadel_has(client: TestClient, auth: AuthHeaders) -> None:
+    z = fake_zitadel(respx.mock)
+    lago = fake_lago(respx.mock)
+    assert client.post("/workspaces", json={"name": "Acme"}, headers=auth("user-1")).status_code == 201
+    assert z["user"].calls.last.request.url.path == "/v2/users/user-1"
+    assert z["user"].calls.last.request.headers["authorization"].startswith("Bearer ")
+    assert json.loads(lago["customer"].calls.last.request.content)["customer"]["email"] == "owner@example.com"
+
+
+@respx.mock
+def test_an_email_in_the_token_is_used_without_asking_zitadel(client: TestClient, auth: AuthHeaders) -> None:
+    z = fake_zitadel(respx.mock)
+    lago = fake_lago(respx.mock)
+    assert client.post("/workspaces", json={"name": "Acme"}, headers=auth("user-1", email="a@b.c")).status_code == 201
+    assert not z["user"].called
+    assert json.loads(lago["customer"].calls.last.request.content)["customer"]["email"] == "a@b.c"
+
+
+@pytest.mark.parametrize("answer", [
+    httpx.Response(500),
+    httpx.Response(404, json={"code": 5, "message": "not found"}),
+    httpx.Response(200, json={"user": {"userId": "user-1", "machine": {"name": "bot"}}}),
+    httpx.Response(200, text="not json"),
+    httpx.ConnectTimeout("t"),
+])
+@respx.mock
+def test_workspace_is_created_without_an_email_when_zitadel_cannot_say(
+    client: TestClient, auth: AuthHeaders, db_session: Session, answer: httpx.Response | Exception
+) -> None:
+    z = fake_zitadel(respx.mock)
+    if isinstance(answer, Exception):
+        z["user"].mock(side_effect=answer)
+    else:
+        z["user"].mock(return_value=answer)
+    lago = fake_lago(respx.mock)
+    r = client.post("/workspaces", json={"name": "Acme"}, headers=auth("user-1"))
+    assert r.status_code == 201
+    assert db_session.scalars(select(Workspace)).one().status == "ready"
+    assert json.loads(lago["customer"].calls.last.request.content)["customer"]["email"] is None
+
+
+@respx.mock
 def test_second_create_returns_existing_workspace(client: TestClient, auth: AuthHeaders, db_session: Session) -> None:
     z = fake_zitadel(respx.mock)
     fake_lago(respx.mock)

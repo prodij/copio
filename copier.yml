@@ -29,7 +29,9 @@ product_slug:
   validator: "{% if not (product_slug | regex_search('^[a-z][a-z0-9-]{1,30}$')) %}lowercase letters, digits and dashes{% endif %}"
 domain:
   type: str
+  help: Local domain of the stack (milestone 1 runs only on your machine)
   default: "{{ product_slug }}.localhost"
+  validator: "{% if not (domain | regex_search('^[a-z0-9]([a-z0-9.-]*[a-z0-9])?[.]localhost$')) %}must end in .localhost: milestone 1 runs only on this machine, and browsers resolve *.localhost to 127.0.0.1 with no DNS or hosts-file setup{% endif %}"
 brand_primary:
   type: str
   default: "#2f6bff"

@@ -38,15 +38,6 @@ def test_plan_upsert_still_creates_on_404() -> None:
 
 
 @respx.mock
-def test_subscription_404_is_none_other_4xx_rejected() -> None:
-    respx.get(f"{LAGO}/api/v1/subscriptions/missing").respond(404, json={})
-    respx.get(f"{LAGO}/api/v1/subscriptions/bad").respond(401, json={"code": "unauthorized"})
-    assert client().get_subscription("missing") is None
-    with pytest.raises(DependencyRejected, match="unauthorized"):
-        client().get_subscription("bad")
-
-
-@respx.mock
 def test_event_and_public_key_rejections_are_dependency_rejected() -> None:
     respx.post(f"{LAGO}/api/v1/events").respond(422, json=REJECTED)
     respx.get(f"{LAGO}/api/v1/webhooks/json_public_key").respond(401, json={"code": "unauthorized"})

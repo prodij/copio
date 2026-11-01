@@ -1,5 +1,6 @@
 import base64
 import pathlib
+import re
 
 import pytest
 
@@ -58,3 +59,11 @@ def test_rsa_key_is_base64_pem() -> None:
 def test_unknown_generator_is_an_error() -> None:
     with pytest.raises(SystemExit, match="unknown generator"):
         make_env.generate("openssl rand -hex sixteen")
+
+
+def test_password_meets_zitadels_default_policy() -> None:
+    for _ in range(50):
+        value = make_env.generate("password 24")
+        assert len(value) == 24
+        assert re.search(r"[a-z]", value) and re.search(r"[A-Z]", value) and re.search(r"[0-9]", value)
+        assert re.fullmatch(r"[A-Za-z0-9-]+", value) and "-" in value

@@ -8,7 +8,7 @@ Generated from prodij/copio. Layout: `frontend/` `backend/` `jobs/` `infra/` `br
 
 ## Rules
 - Access is checked only with `require_feature` (backend/app/access/deps.py). Plans change only in backend/app/billing/plans.yaml, then `make sync-plans`.
-- Outside services are called only through typed clients: the backend is the only caller of Zitadel and Lago, through `backend/app/integrations/` (`ZitadelClient`, `LagoClient`). The frontend calls only the backend, through `src/api/client.ts` (raw `fetch` is a lint error).
+- Outside services are called only through typed clients: the backend and the `billing_reconcile` job are the only callers of Zitadel/Lago, through typed clients (`backend/app/integrations/` `ZitadelClient`, `LagoClient`; the job's `Lago` in `jobs/jobs/handlers/billing_reconcile.py`, Lago only). `scripts/` (bootstrap, brand) configure them, outside the app. The frontend calls only the backend, through `src/api/client.ts` (raw `fetch` is a lint error).
 - Every product table has `workspace_id`; jobs use `ScopedDb`. `backend/tests/test_isolation.py` fails if a route skips authentication or reaches another workspace.
 - Missing data shows "Unavailable", never 0.
 - Never read `.env` or `.bootstrap/`; never use live Stripe keys. The guard hook (`.claude/hooks/guard.py`, tested by `make check`) blocks these, pushes to `main`, force pushes and `rm -rf` outside the repo.

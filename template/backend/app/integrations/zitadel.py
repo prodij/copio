@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Mapping
 
 import httpx
@@ -7,6 +8,8 @@ from app.errors import DependencyUnavailable
 # Zitadel answers 409 (AlreadyExists) when a create already happened. Workspace creation
 # retries after a lost response, so each call below treats its own 409 as "already done".
 ALREADY_EXISTS = 409
+
+log = logging.getLogger(__name__)
 
 
 class ZitadelClient:
@@ -66,3 +69,18 @@ class ZitadelClient:
         response = self._post(f"/management/v1/users/{user_id}/grants", body, org_id=org_id)
         if response.status_code != ALREADY_EXISTS:
             response.raise_for_status()
+
+    def user_email(self, user_id: str) -> str | None:
+        """The user's email address (Zitadel access tokens carry no `email` claim).
+
+        Best effort: None when Zitadel cannot say, since a Lago customer works without an email.
+        """
+        try:
+            response = self.http.get(f"/v2/users/{user_id}")
+            email = response.json()["user"]["human"]["email"]["email"] if response.status_code == 200 else None
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            log.warning("Zitadel email lookup for %s failed: %s", user_id, type(exc).__name__)
+            return None
+        if response.status_code != 200:
+            log.warning("Zitadel email lookup for %s failed: HTTP %s", user_id, response.status_code)
+        return email if isinstance(email, str) and email else None
