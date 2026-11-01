@@ -6,9 +6,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Connection
 from sqlalchemy.orm import Session
 
+from app.auth.deps import get_verifier
 from app.config import Settings, get_settings
 from app.db import Base, engine_for, get_session
 from app.main import create_app
+from tests.auth_helpers import TokenFactory
 
 TEST_SETTINGS = Settings(
     database_url=os.environ.get("TEST_DATABASE_URL", "postgresql+psycopg://app:app@localhost:5432/app_test"),
@@ -51,10 +53,16 @@ def db_session(connection: Connection) -> Iterator[Session]:
         trans.rollback()
 
 
+@pytest.fixture(scope="session")
+def tokens(settings: Settings) -> TokenFactory:
+    return TokenFactory(settings)
+
+
 @pytest.fixture
-def client(db_session: Session, settings: Settings) -> Iterator[TestClient]:
+def client(db_session: Session, settings: Settings, tokens: TokenFactory) -> Iterator[TestClient]:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: db_session
     app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_verifier] = tokens.verifier
     with TestClient(app) as c:
         yield c

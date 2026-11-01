@@ -645,6 +645,8 @@ git commit -m "feat(backend): settings, database, health and dependency errors"
 
 ### Task 3: Authentication from Zitadel tokens
 
+
+> Note 2026-11-01: Zitadel v4.20.0 claim names verified (`urn:zitadel:iam:org:project:{id}:roles` shaped `{role: {orgId: domain}}`; audience scope `urn:zitadel:iam:org:project:id:{id}:aud`). Changes: `get_verifier` now depends on `get_settings` (cached per issuer/project) so importing needs no env (P8); conftest adds a session `tokens` fixture and `client` always overrides `get_verifier` (P7); `TokenFactory.verifier()` takes no argument (it owns the settings); added two `require_principal` 401/200 tests (9 tests in total for auth, not 7).
 **Files:**
 - Create: `template/backend/app/auth/__init__.py`, `principal.py`, `tokens.py`, `deps.py`; `template/backend/tests/auth_helpers.py`, `template/backend/tests/test_auth.py`
 
