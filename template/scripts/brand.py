@@ -23,7 +23,8 @@ import yaml
 
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 ROOT = Path(__file__).resolve().parents[1]
-FONT_SUFFIXES = {".ttf", ".otf", ".woff", ".woff2"}
+FONT_MIME = {".ttf": "font/ttf", ".otf": "font/otf", ".woff": "font/woff", ".woff2": "font/woff2"}
+FONT_SUFFIXES = set(FONT_MIME)
 LOGO_PNG_WIDTH = 512
 # Zitadel answers 400 "No changes" (INSTANCE-28fHe) when the policy already has these values.
 ZITADEL_NOT_CHANGED = "INSTANCE-28fHe"
@@ -87,6 +88,10 @@ def load_brand(path: Path) -> Brand:
                 f"font_file {font_file.name} must exist and be one of {sorted(FONT_SUFFIXES)}"
             )
     light_raw = _required(raw, "light")
+    if not isinstance(light_raw, dict) or not isinstance(raw.get("dark") or {}, dict):
+        raise BrandError(
+            "'light' and 'dark' must be mappings like {primary: '#3355ff', accent: '#ff7a33'}"
+        )
     light = Palette(
         _colour(_required(light_raw, "primary", "light"), "light.primary"),
         _colour(_required(light_raw, "accent", "light"), "light.accent"),
@@ -167,7 +172,12 @@ def apply_zitadel(brand: Brand, api_url: str, token: str) -> None:
     ]
     if brand.font_file:
         uploads.append(
-            ("font", brand.font_file.name, brand.font_file.read_bytes(), "application/octet-stream")
+            (
+                "font",
+                brand.font_file.name,
+                brand.font_file.read_bytes(),
+                FONT_MIME[brand.font_file.suffix.lower()],
+            )
         )
     with httpx.Client(base_url=api_url, headers=headers, timeout=15.0) as http:
         put = http.put("/admin/v1/policies/label", json=zitadel_label_policy(brand))
@@ -209,6 +219,9 @@ def main() -> None:
         print("applied brand to Zitadel and Lago")
     except BrandError as exc:
         sys.exit(f"brand: {exc}")
+    except httpx.HTTPError as exc:
+        # Every step is idempotent, so fix the cause and re-run `make brand`.
+        sys.exit(f"brand: request failed ({type(exc).__name__}): {exc}")
 
 
 if __name__ == "__main__":

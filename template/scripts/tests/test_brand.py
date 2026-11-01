@@ -2,6 +2,8 @@ import base64
 import json
 import pathlib
 import re
+import sys
+import types
 from typing import Any
 
 import httpx
@@ -146,6 +148,7 @@ def test_apply_zitadel_uploads_font_only_when_given(tmp_path: pathlib.Path) -> N
         font = [body for path, body in posted(mock) if path.endswith("/font")]
         assert len(font) == 1
         assert b"wOF2-font" in font[0]
+        assert b"Content-Type: font/woff2" in font[0]
 
 
 def test_apply_zitadel_treats_unchanged_policy_as_done(tmp_path: pathlib.Path) -> None:
@@ -202,3 +205,29 @@ def test_cli_css_only_writes_frontend_tokens(
     brand.main()
     css = (tmp_path / "frontend" / "src" / "brand.css").read_text()
     assert css == css_tokens(load_brand(tmp_path / "brand" / "brand.yaml"))
+
+
+@pytest.mark.parametrize(
+    "section", ["light: [1, 2]", "light: {primary: '#3355ff', accent: '#ff7a33'}\ndark: red"]
+)
+def test_non_mapping_palettes_rejected(tmp_path: pathlib.Path, section: str) -> None:
+    with pytest.raises(BrandError, match="mappings"):
+        load_brand(write(tmp_path, f"name: Acme\nfont: Inter\nlogo: logo.svg\n{section}\n"))
+
+
+def test_cli_reports_unreachable_service_without_traceback(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "brand").mkdir()
+    (tmp_path / "frontend" / "src").mkdir(parents=True)
+    write(tmp_path / "brand")
+    monkeypatch.setattr(brand, "ROOT", tmp_path)
+    monkeypatch.setattr("sys.argv", ["brand.py"])
+    fake = types.SimpleNamespace(
+        env=lambda name: BASE, zitadel_admin_token=lambda: "tok", lago_graphql=None
+    )
+    monkeypatch.setitem(sys.modules, "bootstrap", fake)
+    with respx.mock() as mock:
+        mock.put(LABEL).mock(side_effect=httpx.ConnectError("refused"))
+        with pytest.raises(SystemExit, match=r"request failed.*refused"):
+            brand.main()

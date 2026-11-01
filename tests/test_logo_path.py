@@ -28,7 +28,7 @@ def test_logo_path_replaces_the_template_logo(tmp_path: pathlib.Path) -> None:
     assert yaml.safe_load((dest / "brand" / "brand.yaml").read_text())["logo"] == "logo.svg"
 
 
-def test_logo_path_survives_copier_update(tmp_path: pathlib.Path) -> None:
+def tagged_template(tmp_path: pathlib.Path) -> pathlib.Path:
     # Copier only updates from a tagged template, so use a throwaway tagged copy of this one.
     template = tmp_path / "template-repo"
     shutil.copytree(ROOT / "template", template / "template")
@@ -37,18 +37,47 @@ def test_logo_path_survives_copier_update(tmp_path: pathlib.Path) -> None:
     git(template, "add", "-A")
     git(template, "commit", "-q", "-m", "v1")
     git(template, "tag", "v1.0.0")
-    logo = tmp_path / "mine.svg"
-    logo.write_text(CUSTOM)
-    dest = tmp_path / "product"
+    return template
+
+
+def release_v2(template: pathlib.Path) -> None:
+    (template / "template" / "brand" / "NOTE.txt").write_text("v2")
+    git(template, "add", "-A")
+    git(template, "commit", "-q", "-m", "v2")
+    git(template, "tag", "v1.1.0")
+
+
+def generate_and_commit(template: pathlib.Path, logo: pathlib.Path, dest: pathlib.Path) -> None:
     run_copy(str(template), str(dest), data={**ANSWERS, "logo_path": str(logo)}, defaults=True,
              unsafe=True, quiet=True)
     git(dest, "init", "-q")
     git(dest, "add", "-A")
     git(dest, "commit", "-q", "-m", "init")
-    (template / "template" / "brand" / "NOTE.txt").write_text("v2")
-    git(template, "add", "-A")
-    git(template, "commit", "-q", "-m", "v2")
-    git(template, "tag", "v1.1.0")
+
+
+def test_update_keeps_a_logo_edited_in_the_product(tmp_path: pathlib.Path) -> None:
+    template = tagged_template(tmp_path)
+    logo = tmp_path / "mine.svg"
+    logo.write_text(CUSTOM)
+    dest = tmp_path / "product"
+    generate_and_commit(template, logo, dest)
+    edited = CUSTOM.replace("r=\"2\"", "r=\"1\"")
+    (dest / "brand" / "logo.svg").write_text(edited)
+    git(dest, "commit", "-q", "-am", "edit logo")
+    release_v2(template)
+    run_update(str(dest), defaults=True, unsafe=True, overwrite=True, quiet=True)
+    assert (dest / "brand" / "NOTE.txt").read_text() == "v2"
+    assert (dest / "brand" / "logo.svg").read_text() == edited
+
+
+def test_update_works_when_the_logo_source_is_gone(tmp_path: pathlib.Path) -> None:
+    template = tagged_template(tmp_path)
+    logo = tmp_path / "mine.svg"
+    logo.write_text(CUSTOM)
+    dest = tmp_path / "product"
+    generate_and_commit(template, logo, dest)
+    logo.unlink()
+    release_v2(template)
     run_update(str(dest), defaults=True, unsafe=True, overwrite=True, quiet=True)
     assert (dest / "brand" / "NOTE.txt").read_text() == "v2"
     assert (dest / "brand" / "logo.svg").read_text() == CUSTOM

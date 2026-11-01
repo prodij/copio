@@ -2,8 +2,10 @@ _subdirectory: template
 _templates_suffix: .jinja
 _answers_file: .copier-answers.yml
 
-# Runs on copy and on update. logo_path is read where the user's file is, so a relative path
-# would resolve against the new product folder: pass an absolute path (or ~/...).
+# Runs on copy only (an update must not overwrite a logo the product has since edited, nor fail
+# because the source file moved). logo_path is read from where the user's file is, so a relative
+# path would resolve against the new product folder: pass an absolute path (or ~/...).
+# Tasks need `copier copy --trust`.
 _tasks:
   - command:
       - python3
@@ -15,7 +17,7 @@ _tasks:
             if not os.path.isfile(src) or b"<svg" not in open(src, "rb").read():
                 sys.exit(f"logo_path {src!r} is not an SVG file (use an absolute path)")
             shutil.copyfile(src, "brand/logo.svg")
-      - "{{ logo_path }}"
+      - "{% if _copier_operation == 'copy' %}{{ logo_path }}{% endif %}"
 
 product_name:
   type: str
