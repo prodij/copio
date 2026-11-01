@@ -112,6 +112,28 @@ def test_plan_switch_before_create_gets_new_attempt_id(client: TestClient, owner
 
 
 @respx.mock
+def test_plan_change_after_lago_subscription_is_409_and_keeps_the_plan(
+    client: TestClient, owner_headers: dict[str, str], db_session: Session,
+) -> None:
+    lago = fake_lago_billing(respx.mock, card=True)
+    plans = {code: Plan(code, code.title(), 1900, "USD", "month") for code in ("starter", "pro")}
+    cast(FastAPI, client.app).dependency_overrides[get_plans] = lambda: plans
+    client.post("/billing/checkout", json=STARTER, headers=owner_headers)
+    before = subscription(db_session).lago_subscription_id
+    assert before is not None
+
+    r = client.post("/billing/checkout", json={"plan_code": "pro"}, headers=owner_headers)
+
+    assert r.status_code == 409
+    assert r.json() == {"detail": "plan change not supported yet"}
+    sub = subscription(db_session)
+    assert (sub.plan_code, sub.lago_subscription_id) == ("starter", before)
+    assert lago["sub"].call_count == 1
+    # The same plan again stays the harmless repeat the return trip relies on.
+    assert client.post("/billing/checkout", json=STARTER, headers=owner_headers).json() == {"checkout_url": None}
+
+
+@respx.mock
 def test_canceled_workspace_can_check_out_again(client: TestClient, owner_headers: dict[str, str],
                                                 db_session: Session) -> None:
     lago = fake_lago_billing(respx.mock, card=True)
