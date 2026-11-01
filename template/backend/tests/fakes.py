@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import respx
 
@@ -5,11 +7,14 @@ ZITADEL = "http://zitadel.test"
 LAGO = "http://lago.test"
 
 
-def fake_zitadel(mock: respx.MockRouter, org_id: str = "org-new") -> dict[str, respx.Route]:
+def _echo_org_id(request: httpx.Request) -> httpx.Response:
+    """Real Zitadel answers with the organizationId it was asked to use (the workspace id)."""
+    return httpx.Response(200, json={"organizationId": json.loads(request.content)["organizationId"]})
+
+
+def fake_zitadel(mock: respx.MockRouter) -> dict[str, respx.Route]:
     return {
-        "org": mock.post(f"{ZITADEL}/v2/organizations").mock(
-            return_value=httpx.Response(200, json={"organizationId": org_id})
-        ),
+        "org": mock.post(f"{ZITADEL}/v2/organizations").mock(side_effect=_echo_org_id),
         "grant": mock.post(f"{ZITADEL}/management/v1/projects/proj-1/grants").mock(
             return_value=httpx.Response(200, json={"grantId": "grant-1"})
         ),

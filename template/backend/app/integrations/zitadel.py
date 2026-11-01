@@ -57,7 +57,8 @@ class ZitadelClient:
         response = self._post("/management/v1/projectgrants/_search", body, org_id=self.instance_org_id)
         result = self._json(response).get("result")
         if not isinstance(result, list) or not result:
-            raise RuntimeError(f"Zitadel reported a project grant for org {org_id} but lists none")
+            # The grant exists but Zitadel's search projection lags behind; a retry will find it.
+            raise DependencyUnavailable("Zitadel")
         return str(result[0]["grantId"])
 
     def add_user_role(self, user_id: str, org_id: str, grant_id: str, role: str) -> None:

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.workspaces import service
 from app.workspaces.models import Workspace
 from tests.auth_helpers import AuthHeaders
 from tests.fakes import LAGO, ZITADEL, fake_lago, fake_zitadel
@@ -21,16 +22,16 @@ def test_create_workspace_happy_path(client: TestClient, auth: AuthHeaders, db_s
     ws = db_session.scalars(select(Workspace)).one()
     assert r.json() == {"id": str(ws.id), "name": "Acme", "status": "ready"}
     assert (ws.status, ws.zitadel_org_id, ws.zitadel_grant_id, ws.lago_customer_id) == (
-        "ready", "org-new", "grant-1", "lago-cust-1"
+        "ready", str(ws.id), "grant-1", "lago-cust-1"
     )
     org_body = json.loads(z["org"].calls.last.request.content)
     assert org_body == {"name": f"Acme ({str(ws.id)[:8]})", "organizationId": str(ws.id)}
     grant = z["grant"].calls.last.request
     assert grant.headers["x-zitadel-orgid"] == "org-instance"
-    assert json.loads(grant.content) == {"grantedOrgId": "org-new", "roleKeys": ["owner", "member"]}
+    assert json.loads(grant.content) == {"grantedOrgId": str(ws.id), "roleKeys": ["owner", "member"]}
     user_grant = z["user_grant"].calls.last.request
     assert user_grant.url.path == "/management/v1/users/user-1/grants"
-    assert user_grant.headers["x-zitadel-orgid"] == "org-new"
+    assert user_grant.headers["x-zitadel-orgid"] == str(ws.id)
     assert json.loads(user_grant.content) == {"projectId": "proj-1", "projectGrantId": "grant-1", "roleKeys": ["owner"]}
     customer = json.loads(lago["customer"].calls.last.request.content)["customer"]
     assert customer["external_id"] == str(ws.id)
@@ -59,7 +60,7 @@ def test_lago_down_returns_503_and_resumable(client: TestClient, auth: AuthHeade
     assert r.status_code == 503
     assert r.json() == {"detail": "Lago is unavailable"}
     ws = db_session.scalars(select(Workspace)).one()
-    assert (ws.status, ws.zitadel_org_id, ws.lago_customer_id) == ("creating", "org-new", None)
+    assert (ws.status, ws.zitadel_org_id, ws.lago_customer_id) == ("creating", str(ws.id), None)
 
     respx.post(f"{LAGO}/api/v1/customers").mock(
         return_value=httpx.Response(200, json={"customer": {"lago_id": "lago-cust-1"}})
@@ -80,7 +81,7 @@ def test_role_grant_failure_is_resumable(client: TestClient, auth: AuthHeaders, 
     assert r.status_code == 503
     assert r.json() == {"detail": "Zitadel is unavailable"}
     ws = db_session.scalars(select(Workspace)).one()
-    assert (ws.status, ws.zitadel_org_id, ws.zitadel_grant_id) == ("creating", "org-new", "grant-1")
+    assert (ws.status, ws.zitadel_org_id, ws.zitadel_grant_id) == ("creating", str(ws.id), "grant-1")
 
     z["user_grant"].mock(return_value=httpx.Response(200, json={"userGrantId": "ug-1"}))
     assert client.post("/workspaces", json={"name": "Acme"}, headers=headers).status_code == 201
@@ -111,6 +112,35 @@ def test_retry_after_lost_zitadel_responses_reuses_what_exists(
 
 
 @respx.mock
+def test_concurrent_first_create_resumes_the_winners_row(
+    client: TestClient, auth: AuthHeaders, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second request that looked before the first one inserted must not 500 on the unique owner."""
+    fake_zitadel(respx.mock)
+    fake_lago(respx.mock)
+    winner = Workspace(name="Acme", owner_user_id="user-1", status="creating")
+    db_session.add(winner)
+    db_session.commit()
+    monkeypatch.setattr(service, "_owned_workspace", lambda _session, _user_id: None)
+    r = client.post("/workspaces", json={"name": "Acme too"}, headers=auth("user-1"))
+    assert r.status_code == 201
+    assert r.json() == {"id": str(winner.id), "name": "Acme", "status": "ready"}
+    assert len(db_session.scalars(select(Workspace)).all()) == 1
+
+
+@respx.mock
+def test_grant_search_lagging_behind_409_returns_503(client: TestClient, auth: AuthHeaders, db_session: Session) -> None:
+    z = fake_zitadel(respx.mock)
+    z["grant"].mock(return_value=httpx.Response(409, json={"code": 6, "message": "Errors.Project.Grant.AlreadyExists"}))
+    respx.post(f"{ZITADEL}/management/v1/projectgrants/_search").mock(return_value=httpx.Response(200, json={}))
+    r = client.post("/workspaces", json={"name": "Acme"}, headers=auth("user-1"))
+    assert r.status_code == 503
+    assert r.json() == {"detail": "Zitadel is unavailable"}
+    ws = db_session.scalars(select(Workspace)).one()
+    assert (ws.status, ws.zitadel_grant_id) == ("creating", None)
+
+
+@respx.mock
 def test_zitadel_timeout_returns_503(client: TestClient, auth: AuthHeaders, db_session: Session) -> None:
     respx.post(f"{ZITADEL}/v2/organizations").mock(side_effect=httpx.ConnectTimeout("t"))
     r = client.post("/workspaces", json={"name": "Acme"}, headers=auth("user-1"))
@@ -129,7 +159,7 @@ def test_me_with_workspace(client: TestClient, auth: AuthHeaders) -> None:
     fake_zitadel(respx.mock)
     fake_lago(respx.mock)
     ws = client.post("/workspaces", json={"name": "Acme"}, headers=auth("user-1")).json()
-    r = client.get("/me", headers=auth("user-1", {"org-new": "owner"}))
+    r = client.get("/me", headers=auth("user-1", {ws["id"]: "owner"}))
     assert r.json()["workspace"] == {"id": ws["id"], "name": "Acme", "role": "owner"}
 
 

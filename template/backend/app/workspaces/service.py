@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.auth.principal import Principal
@@ -13,6 +14,21 @@ def org_name(ws: Workspace) -> str:
     return f"{ws.name} ({str(ws.id)[:8]})"
 
 
+def _owned_workspace(session: Session, user_id: str) -> Workspace | None:
+    return session.scalars(select(Workspace).where(Workspace.owner_user_id == user_id)).one_or_none()
+
+
+def _claim_workspace(session: Session, user_id: str, name: str) -> Workspace:
+    """Insert the row unless a concurrent request already did, then return whichever row exists."""
+    session.execute(
+        insert(Workspace)
+        .values(name=name, owner_user_id=user_id)
+        .on_conflict_do_nothing(index_elements=[Workspace.owner_user_id])
+    )
+    session.commit()
+    return session.scalars(select(Workspace).where(Workspace.owner_user_id == user_id)).one()
+
+
 def create_workspace(session: Session, principal: Principal, name: str, zitadel: ZitadelClient,
                      lago: LagoClient, settings: Settings) -> tuple[Workspace, bool]:
     """Returns (workspace, created_now).
@@ -21,13 +37,11 @@ def create_workspace(session: Session, principal: Principal, name: str, zitadel:
     finished one. Each external call is also safe to repeat: the org ID is the workspace ID,
     Zitadel's 409s count as done, and Lago upserts customers on external_id.
     """
-    ws = session.scalars(select(Workspace).where(Workspace.owner_user_id == principal.user_id)).one_or_none()
-    if ws is not None and ws.status == "ready":
-        return ws, False
+    ws = _owned_workspace(session, principal.user_id)
     if ws is None:
-        ws = Workspace(name=name, owner_user_id=principal.user_id)
-        session.add(ws)
-        session.commit()
+        ws = _claim_workspace(session, principal.user_id, name)
+    if ws.status == "ready":
+        return ws, False
     if ws.zitadel_org_id is None:
         ws.zitadel_org_id = zitadel.create_org(org_name(ws), org_id=str(ws.id))
         session.commit()
