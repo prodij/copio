@@ -2518,6 +2518,22 @@ git commit -m "feat(access): require_feature, /me/access, usage and sample premi
   - `jobs.runner.run(name: str, event: dict) -> dict` (imports `jobs.handlers.<name>.handler`).
   - Lago state mapping for reconcile: Lago `active` → ours unchanged if `past_due`, else `active`; `incomplete`/`pending` → `pending`; `canceled`/`terminated` → `canceled`; 404 → unchanged.
 
+> **Note 2026-11-01 (Task 8):** Checked against lago-api v1.55.0. Changes from the text below:
+> - **Lago lookups:** `GET /api/v1/subscriptions/{external_id}` finds only the `?status=` asked for (`find_by(status: params[:status] || :active)`). Reconcile asks for `active`, `incomplete`, `pending`, `canceled`, `terminated` in turn; 404 for all → unchanged.
+> - **Reconcile reads the real columns:** the Lago external id is `lago_subscription_id`, or `lago_external_id` while that is still NULL. It does not use a raw engine (P29). It fans out over `ScopedDb.unscoped_workspaces()` and reads and updates through `ScopedDb`. Updates bump `updated_at` and are compare-and-set on the state read, so a webhook landing in between wins.
+> - **New reconcile cases:**
+>   - A `pending` row with NULL `lago_subscription_id` (a checkout that started) that Lago does not know yet: once the customer has a default payment method, reconcile creates the payment-gated subscription with the stored external id (checkout option A). A 422 `subscription_incomplete` on create counts as done. The id is then stored. The state stays `pending` until the invoice-paid webhook (or a later reconcile) sees it `active`.
+>   - Lago already has that id: reconcile adopts it (the create's response was lost) and maps its status.
+>   - Lago `active`: the latest subscription invoice decides between active and past_due (`GET /api/v1/invoices?external_customer_id=&invoice_type=subscription&status=finalized&per_page=1`, newest first, `payment_status`): `failed` → `past_due`, `succeeded` → `active`. With no invoice or a `pending` one, `past_due` is kept and anything else becomes `active`. This repairs a stranded `past_due` and a missed payment-failure webhook.
+> - **Other code changes:**
+>   - The reconcile result counts only workspaces that have a row.
+>   - The handler module carries its own small Lago client (`Lago`, with `LagoUnavailable` for transport errors and unexpected responses), because jobs never import the backend.
+>   - The scheduler logs each result and keeps running when a job raises.
+>   - `sample_fetch` calls `raise_for_status` on the feed and stores the stripped text, not `json.dumps` of it.
+>   - The Dockerfile pins uv 0.10.2 (P11). Ruff ignores E501 (P6). Mypy strict covers `jobs`.
+> - **Tests:** 12, not 9 (P5): storage 1, db 5, scheduler 2 (adds "shipped schedules name real handlers"), handlers 4 (state repairs, finishing started checkouts, a concurrent webhook wins, `sample_fetch` raw then row).
+> - **Migration:** `0003_sample_rows` was checked with upgrade, downgrade and upgrade against Postgres 15.
+
 - [ ] **Step 1: Write the failing tests**
 
 `template/jobs/tests/test_storage.py`:
