@@ -392,11 +392,23 @@ def ensure_bucket(name: str = "data") -> None:
     script = (f"echo s3.bucket.list | {shell} | grep -qE '^>? *{name}[[:space:]]' "
               f"|| echo 's3.bucket.create -name {name}' | {shell} | grep -q 'created bucket {name}'")
 
-    def done() -> bool:  # fails until SeaweedFS has a leader and a filer, some time after `make up`
-        command = ["docker", "compose", "exec", "-T", "s3", "sh", "-c", script]
-        return subprocess.run(command, cwd=ROOT, check=False, capture_output=True).returncode == 0  # noqa: S603
+    last_error = ""
 
-    wait_for(f"S3 bucket {name}", done, timeout=120.0)
+    def done() -> bool:  # fails until SeaweedFS has a leader and a filer, some time after `make up`
+        nonlocal last_error
+        command = ["docker", "compose", "exec", "-T", "s3", "sh", "-c", script]
+        try:
+            result = subprocess.run(command, cwd=ROOT, check=False, capture_output=True, timeout=30)  # noqa: S603
+        except subprocess.TimeoutExpired:
+            last_error = "`weed shell` did not answer within 30 s"
+            return False
+        last_error = (result.stderr or b"").decode(errors="replace").strip()[-400:]
+        return result.returncode == 0
+
+    try:
+        wait_for(f"S3 bucket {name}", done, timeout=120.0)
+    except SystemExit as exc:
+        raise SystemExit(f"{exc} Last error: {last_error}" if last_error else str(exc)) from None
 
 
 def backend(*args: str) -> None:

@@ -256,6 +256,25 @@ def test_bucket_step_gives_up_readably(monkeypatch: pytest.MonkeyPatch) -> None:
         bootstrap.ensure_bucket()
 
 
+def test_bucket_step_reports_the_last_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda c, **_: subprocess.CompletedProcess(c, 1, b"", b"service s3 is not running\n"))
+    monkeypatch.setattr(bootstrap.time, "sleep", lambda _: None)
+    monkeypatch.setattr(bootstrap.time, "monotonic", iter([0.0, 1.0, 500.0]).__next__)
+    with pytest.raises(SystemExit, match="Last error: service s3 is not running"):
+        bootstrap.ensure_bucket()
+
+
+def test_bucket_step_survives_a_hung_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    def hang(command: list[str], **kwargs: float) -> subprocess.CompletedProcess[bytes]:
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", hang)
+    monkeypatch.setattr(bootstrap.time, "sleep", lambda _: None)
+    monkeypatch.setattr(bootstrap.time, "monotonic", iter([0.0, 1.0, 500.0]).__next__)
+    with pytest.raises(SystemExit, match="did not answer within 30 s"):
+        bootstrap.ensure_bucket()
+
+
 @pytest.mark.parametrize("key", ["", "sk_live_x"])
 def test_stripe_step_needs_a_test_key(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
     monkeypatch.setenv("STRIPE_SECRET_KEY", key)
