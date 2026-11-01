@@ -4596,3 +4596,15 @@ One fix wave after the whole-branch review, before the PR:
 - **.gitignore:** `.env.*` ignored, `.env.example` kept.
 - **bootstrap:** the `stripe listen` webhook secret is written to Lago as the last Stripe step (after the stripe-cli recreate), after waiting up to 60 s for Lago's `RegisterWebhookJob` to leave the `providers` queue and scheduled set, and only when Lago's value differs.
 - **sample_fetch:** `{"reprocess": []}` reprocesses nothing instead of running a full fetch.
+
+## Post-merge follow-ups (2026-11-01)
+
+Live check of the loopback and Zitadel-email fixes against the real images, with the placeholder `sk_test_x` (no Stripe key, so the payment step did not run), then the small follow-ups:
+
+- **Live check found two bugs, both fixed.** `stripe listen` on stripe-cli v1.55.6 exits with "must specify events" without `--events`, so `stripe-listen.sh` now passes Lago v1.55.0's `WEBHOOKS_EVENTS` (check the list when bumping Lago). `make up && make bootstrap` could fail with no message at the bucket step because SeaweedFS was still starting, so `ensure_bucket` now retries for up to 120 s.
+- **Bucket renamed `data`** (keys keep `raw/<source>/...`, spec §7), so objects no longer land at `raw/raw/`. The env var stays `RAW_BUCKET`. An older local stack keeps its old `raw` bucket until `make reset`.
+- **`sk_test_` only:** `stripe-listen.sh` now refuses `rk_test_`, as bootstrap and the backend do.
+- **Checkout:** a different plan once a Lago subscription exists answers 409 "plan change not supported yet" and changes nothing. No schema change: `openapi.json` and `schema.d.ts` are the same.
+- **Zitadel:** non-2xx replies not handled elsewhere become `DependencyRejected` (502 "Zitadel rejected the request: HTTP <status>"); Zitadel's message goes only to the log.
+- **Repo:** `template/.gitignore` keeps `.env.example.jinja` visible; root pytest filters copier's `DirtyLocalWarning`.
+- **Not verified live:** the Stripe payment leg; `stripe listen --print-secret` and `--events` against Stripe with a real key.
