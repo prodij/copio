@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { accessQuery, startCheckout } from "@/api/queries";
@@ -23,13 +23,31 @@ export function CheckoutReturn() {
   const [startedAt] = useState(() => Date.now());
   const [plan] = useState(readPlan);
   const [timedOut, setTimedOut] = useState(false);
-  const second = useMutation({ mutationFn: startCheckout });
-  const { mutate } = second;
+  const queryClient = useQueryClient();
+  // A query (not an effect-fired mutation) so StrictMode's double mount shares one request.
+  const second = useQuery({
+    queryKey: ["checkout-second-leg", plan],
+    enabled: plan !== null,
+    retry: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    queryFn: async () => {
+      const out = await startCheckout(plan as string);
+      // Any cached /me/access predates this call; drop it so a stale "active" is never shown.
+      queryClient.removeQueries({ queryKey: accessQuery.queryKey });
+      return out;
+    },
+  });
   const redirectUrl = second.data?.checkout_url;
 
   useEffect(() => {
-    if (plan !== null) mutate(plan);
-  }, [plan, mutate]);
+    if (!second.isSuccess) return;
+    try {
+      window.sessionStorage.removeItem(PLAN_KEY);
+    } catch {
+      /* storage blocked */
+    }
+  }, [second.isSuccess]);
 
   useEffect(() => {
     if (redirectUrl) window.location.assign(redirectUrl);
@@ -40,16 +58,17 @@ export function CheckoutReturn() {
     return () => clearTimeout(t);
   }, []);
 
+  const secondDone = plan === null || second.isSuccess;
   const { data, error } = useQuery({
     ...accessQuery,
-    enabled: plan === null || second.isSuccess,
+    enabled: secondDone,
     refetchInterval: (q) =>
       q.state.data?.state === "active" || Date.now() - startedAt > GIVE_UP_MS ? false : POLL_MS,
   });
 
   if (second.error) return <ErrorState error={second.error as ApiError} />;
   if (error) return <ErrorState error={error as ApiError} />;
-  if (data?.state === "active") {
+  if (secondDone && data?.state === "active") {
     return (
       <div className="space-y-2">
         <p>Your plan is active.</p>

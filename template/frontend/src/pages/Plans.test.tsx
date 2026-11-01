@@ -1,4 +1,5 @@
 import { fireEvent, screen } from "@testing-library/react";
+import { Route, Routes } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { mockFetch, renderWithQuery } from "@/test/utils";
 import { Plans } from "./Plans";
@@ -25,9 +26,15 @@ it("goes to the return page when no redirect is needed", async () => {
     "GET /billing/plans": { status: 200, body: [plan] },
     "POST /billing/checkout": { status: 200, body: { checkout_url: null } },
   });
-  renderWithQuery(<Plans />);
+  renderWithQuery(
+    <Routes>
+      <Route path="/" element={<Plans />} />
+      <Route path="/billing/return" element={<p>return page</p>} />
+    </Routes>,
+  );
   fireEvent.click(await screen.findByRole("button", { name: "Choose Starter" }));
-  await vi.waitFor(() => expect(window.sessionStorage.getItem("checkout_plan")).toBe("starter"));
+  expect(await screen.findByText("return page")).toBeInTheDocument();
+  expect(window.sessionStorage.getItem("checkout_plan")).toBe("starter");
 });
 
 it("shows the API error when checkout fails", async () => {

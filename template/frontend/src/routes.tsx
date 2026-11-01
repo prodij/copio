@@ -1,4 +1,5 @@
 import { Link, Navigate, Outlet, createBrowserRouter } from "react-router";
+import { userManager } from "@/auth/userManager";
 import { Billing } from "@/pages/Billing";
 import { CheckoutReturn } from "@/pages/CheckoutReturn";
 import { CreateWorkspace } from "@/pages/CreateWorkspace";
@@ -13,6 +14,7 @@ function Layout() {
         <Link to="/premium">Report</Link>
         <Link to="/plans">Plans</Link>
         <Link to="/billing">Billing</Link>
+        <button type="button" className="ml-auto" onClick={() => void userManager.signoutRedirect()}>Sign out</button>
       </nav>
       <Outlet />
     </div>
