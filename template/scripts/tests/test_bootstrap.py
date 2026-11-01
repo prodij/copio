@@ -233,6 +233,29 @@ def test_compose_failure_exits_readably(monkeypatch: pytest.MonkeyPatch) -> None
         bootstrap.compose("exec", "-T", "lago-api", "bin/rails")
 
 
+def test_bucket_step_waits_for_seaweedfs(monkeypatch: pytest.MonkeyPatch) -> None:
+    answers = iter([1, 1, 0])
+    scripts: list[str] = []
+
+    def run(command: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
+        scripts.append(command[-1])
+        return subprocess.CompletedProcess(command, next(answers))
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(bootstrap.time, "sleep", lambda _: None)
+    bootstrap.ensure_bucket()
+    assert len(scripts) == 3
+    assert "s3.bucket.create -name data" in scripts[0]
+
+
+def test_bucket_step_gives_up_readably(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda c, **_: subprocess.CompletedProcess(c, 1))
+    monkeypatch.setattr(bootstrap.time, "sleep", lambda _: None)
+    monkeypatch.setattr(bootstrap.time, "monotonic", iter([0.0, 1.0, 500.0]).__next__)
+    with pytest.raises(SystemExit, match="S3 bucket data"):
+        bootstrap.ensure_bucket()
+
+
 @pytest.mark.parametrize("key", ["", "sk_live_x"])
 def test_stripe_step_needs_a_test_key(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
     monkeypatch.setenv("STRIPE_SECRET_KEY", key)

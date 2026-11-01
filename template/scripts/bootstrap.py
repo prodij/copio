@@ -391,7 +391,12 @@ def ensure_bucket(name: str = "data") -> None:
     shell = "weed shell -master=localhost:9333 2>&1"
     script = (f"echo s3.bucket.list | {shell} | grep -qE '^>? *{name}[[:space:]]' "
               f"|| echo 's3.bucket.create -name {name}' | {shell} | grep -q 'created bucket {name}'")
-    compose("exec", "-T", "s3", "sh", "-c", script)
+
+    def done() -> bool:  # fails until SeaweedFS has a leader and a filer, some time after `make up`
+        command = ["docker", "compose", "exec", "-T", "s3", "sh", "-c", script]
+        return subprocess.run(command, cwd=ROOT, check=False, capture_output=True).returncode == 0  # noqa: S603
+
+    wait_for(f"S3 bucket {name}", done, timeout=120.0)
 
 
 def backend(*args: str) -> None:
