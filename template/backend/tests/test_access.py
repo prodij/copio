@@ -1,5 +1,6 @@
 import itertools
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 
@@ -109,8 +110,8 @@ def test_me_access_canceled_has_no_features(client: TestClient, owner_headers: d
 
 def test_plans_endpoint_shape(client: TestClient, owner_headers: dict[str, str]) -> None:
     plans = client.get("/billing/plans", headers=owner_headers).json()
-    assert plans[0]["code"] == "starter"
-    assert set(plans[0]) == {"code", "name", "amount_cents", "currency", "interval", "features"}
+    assert {p["code"] for p in plans} == {"starter"}
+    assert all(set(p) == {"code", "name", "amount_cents", "currency", "interval", "features"} for p in plans)
 
 
 @respx.mock
@@ -123,3 +124,21 @@ def test_record_usage_skips_workspaces_without_a_lago_subscription(db_session: S
     _subscribe(db_session, "pending", lago_id=None)
     record_usage(lago, db_session, workspace_id, "reports_generated", 1)  # pending, not in Lago yet
     assert events.call_count == 0
+
+
+@pytest.mark.parametrize("outage", [
+    httpx.Response(503, json={}),
+    httpx.ConnectError("down"),
+    httpx.Response(422, json={"code": "validation_errors"}),
+], ids=["503", "connect-error", "4xx"])
+def test_premium_report_survives_lago_outage(client: TestClient, owner_headers: dict[str, str],
+                                             db_session: Session, caplog: pytest.LogCaptureFixture,
+                                             outage: httpx.Response | Exception) -> None:
+    _subscribe(db_session, "active")
+    with respx.mock:
+        route = respx.post(f"{LAGO}/api/v1/events")
+        route.mock(side_effect=outage) if isinstance(outage, Exception) else route.mock(return_value=outage)
+        with caplog.at_level(logging.WARNING, logger="app.billing.usage"):
+            r = client.get("/demo/premium-report", headers=owner_headers)
+    assert r.status_code == 200
+    assert any("Usage event lost" in m and "reports_generated" in m for m in caplog.messages)
