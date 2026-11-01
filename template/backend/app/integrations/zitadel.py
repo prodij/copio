@@ -3,7 +3,7 @@ from collections.abc import Mapping
 
 import httpx
 
-from app.errors import DependencyUnavailable
+from app.errors import DependencyRejected, DependencyUnavailable
 
 # Zitadel answers 409 (AlreadyExists) when a create already happened. Workspace creation
 # retries after a lost response, so each call below treats its own 409 as "already done".
@@ -32,8 +32,18 @@ class ZitadelClient:
         return response
 
     @staticmethod
-    def _json(response: httpx.Response) -> dict[str, object]:
-        response.raise_for_status()
+    def _check(response: httpx.Response) -> None:
+        """Any other non-2xx is a request Zitadel refused. The client hears only the status; Zitadel's
+        message goes to the log."""
+        if response.is_success:
+            return
+        log.warning("Zitadel rejected %s %s: HTTP %s %s", response.request.method, response.request.url.path,
+                    response.status_code, response.text[:200])
+        raise DependencyRejected("Zitadel", f"HTTP {response.status_code}")
+
+    @classmethod
+    def _json(cls, response: httpx.Response) -> dict[str, object]:
+        cls._check(response)
         result: dict[str, object] = response.json()
         return result
 
@@ -68,7 +78,7 @@ class ZitadelClient:
         body = {"projectId": self.project_id, "projectGrantId": grant_id, "roleKeys": [role]}
         response = self._post(f"/management/v1/users/{user_id}/grants", body, org_id=org_id)
         if response.status_code != ALREADY_EXISTS:
-            response.raise_for_status()
+            self._check(response)
 
     def user_email(self, user_id: str) -> str | None:
         """The user's email address (Zitadel access tokens carry no `email` claim).

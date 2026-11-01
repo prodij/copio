@@ -18,11 +18,11 @@ def run(tmp_path: pathlib.Path, **env: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.mark.parametrize("key", ["sk_live_x", "rk_live_x", "pk_test_x", "whatever"])
+@pytest.mark.parametrize("key", ["sk_live_x", "rk_live_x", "rk_test_x", "pk_test_x", "whatever"])
 def test_refuses_anything_but_a_test_key(tmp_path: pathlib.Path, key: str) -> None:
     result = run(tmp_path, STRIPE_API_KEY=key, LAGO_ORGANIZATION_ID="o1")
     assert result.returncode == 1
-    assert "only Stripe test keys" in result.stderr
+    assert "only Stripe test secret keys (sk_test_)" in result.stderr
     assert "stripe listen" not in result.stdout
 
 
@@ -33,8 +33,13 @@ def test_idles_until_key_and_bootstrap(tmp_path: pathlib.Path, env: dict[str, st
     assert "idle until" in result.stdout
 
 
-@pytest.mark.parametrize("key", ["sk_test_x", "rk_test_x"])
-def test_forwards_to_lagos_stripe_route(tmp_path: pathlib.Path, key: str) -> None:
-    result = run(tmp_path, STRIPE_API_KEY=key, LAGO_ORGANIZATION_ID="o1")
+def test_forwards_lagos_events_to_lagos_stripe_route(tmp_path: pathlib.Path) -> None:
+    result = run(tmp_path, STRIPE_API_KEY="sk_test_x", LAGO_ORGANIZATION_ID="o1")
+    # stripe-cli v1.55.6 exits with "must specify events" without --events. The list is Lago
+    # v1.55.0's PaymentProviders::StripeProvider::WEBHOOKS_EVENTS.
     assert result.stdout.strip() == (
-        "stripe listen --forward-to http://lago-api:3000/webhooks/stripe/o1?code=stripe")
+        "stripe listen --events setup_intent.succeeded,payment_intent.payment_failed,"
+        "payment_intent.succeeded,payment_intent.canceled,payment_method.detached,"
+        "charge.refund.updated,customer.updated,charge.dispute.closed,"
+        "customer_cash_balance_transaction.created "
+        "--forward-to http://lago-api:3000/webhooks/stripe/o1?code=stripe")

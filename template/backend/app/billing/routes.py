@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from app.billing.checkout import start_checkout
+from app.billing.checkout import PlanChangeNotSupported, start_checkout
 from app.billing.plans import Plan, get_plans
 from app.billing.webhooks import (
     BadSignature,
@@ -61,7 +61,10 @@ def checkout(
     plan = plans.get(body.plan_code)
     if plan is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown plan {body.plan_code!r}")
-    return CheckoutOut(checkout_url=start_checkout(session, current.workspace, plan, lago))
+    try:
+        return CheckoutOut(checkout_url=start_checkout(session, current.workspace, plan, lago))
+    except PlanChangeNotSupported as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, "plan change not supported yet") from exc
 
 
 def _reject(event_id: str | None, reason: str) -> HTTPException:

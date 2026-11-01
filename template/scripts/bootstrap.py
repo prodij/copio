@@ -385,13 +385,30 @@ def apply_stripe_webhook_secret(secret: str) -> None:
 # -- S3 storage, backend ---------------------------------------------------------------------
 
 
-def ensure_bucket(name: str = "raw") -> None:
+def ensure_bucket(name: str = "data") -> None:
     """Create the jobs' bucket in SeaweedFS unless `s3.bucket.list` shows it (`weed shell`, which
     talks to the master inside the container, prints its results on stderr)."""
     shell = "weed shell -master=localhost:9333 2>&1"
     script = (f"echo s3.bucket.list | {shell} | grep -qE '^>? *{name}[[:space:]]' "
               f"|| echo 's3.bucket.create -name {name}' | {shell} | grep -q 'created bucket {name}'")
-    compose("exec", "-T", "s3", "sh", "-c", script)
+
+    last_error = ""
+
+    def done() -> bool:  # fails until SeaweedFS has a leader and a filer, some time after `make up`
+        nonlocal last_error
+        command = ["docker", "compose", "exec", "-T", "s3", "sh", "-c", script]
+        try:
+            result = subprocess.run(command, cwd=ROOT, check=False, capture_output=True, timeout=30)  # noqa: S603
+        except subprocess.TimeoutExpired:
+            last_error = "`weed shell` did not answer within 30 s"
+            return False
+        last_error = (result.stderr or b"").decode(errors="replace").strip()[-400:]
+        return result.returncode == 0
+
+    try:
+        wait_for(f"S3 bucket {name}", done, timeout=120.0)
+    except SystemExit as exc:
+        raise SystemExit(f"{exc} Last error: {last_error}" if last_error else str(exc)) from None
 
 
 def backend(*args: str) -> None:
@@ -422,7 +439,7 @@ Ready.
   API          {public_url("api", "API_PORT")}
   Zitadel      {zitadel}/ui/console
   Lago         {public_url("lago", "LAGO_FRONT_PORT")}
-  S3           http://localhost:{env("S3_PORT")} (SeaweedFS, bucket raw)
+  S3           http://localhost:{env("S3_PORT")} (SeaweedFS, bucket data)
 Open {app_url()}""")
 
 

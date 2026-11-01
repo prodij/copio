@@ -10,6 +10,10 @@ from app.integrations.lago import LagoClient
 from app.workspaces.models import Workspace
 
 
+class PlanChangeNotSupported(Exception):
+    """The workspace already has a Lago subscription on another plan."""
+
+
 def new_external_id(ws: Workspace, plan: Plan) -> str:
     """A fresh Lago external id per checkout attempt: late webhooks for an earlier attempt match nothing."""
     return f"{ws.id}:{plan.code}:{secrets.token_hex(4)}"
@@ -38,6 +42,8 @@ def _record_checkout(session: Session, ws: Workspace, plan: Plan) -> Subscriptio
     elif sub.lago_subscription_id is None and (sub.plan_code != plan.code or sub.lago_external_id is None):
         sub.plan_code, sub.lago_external_id = plan.code, new_external_id(ws, plan)
         session.commit()
+    elif sub.lago_subscription_id is not None and sub.plan_code != plan.code:
+        raise PlanChangeNotSupported
     return sub
 
 
