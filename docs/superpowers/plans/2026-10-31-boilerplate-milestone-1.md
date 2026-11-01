@@ -1900,6 +1900,14 @@ git commit -m "feat(billing): plans as code, plan sync, payment-gated checkout"
 
 ### Task 6: Lago webhooks and subscription states
 
+> **Note 2026-11-01 (Task 6, checked against lago-api v1.55.0; rulings P28, P31c, P16, P32b):**
+> - **Signature (plan was right):** `X-Lago-Signature` is an RS256 JWT `{data: <body JSON>, iss: LAGO_API_URL}`; key from `GET /api/v1/webhooks/json_public_key` (base64 PEM). `X-Lago-Unique-Key` is Lago's webhook id, the same on every retry. Lago can also sign with HMAC (`X-Lago-Signature-Algorithm: hmac`); we accept only `jwt` (Lago's default), so the bootstrap must create the endpoint with `signature_algo: jwt`.
+> - **Invoice matching (plan was wrong):** invoice webhooks do not carry `invoice.subscriptions[]` (the serializer includes only `customer` and `fees`). Subscriptions come from `invoice.fees[].external_subscription_id`.
+> - **`invoice.payment_failure` (plan was wrong):** its `object_type` is `payment_provider_invoice_payment_error`, and it names only the customer (`external_customer_id`, which is our workspace id). We match the workspace's subscription by that id.
+> - **Gated activation:** Lago sends `subscription.incomplete` on create and `subscription.started` once the first invoice is paid. A failed or timed-out first payment sends `subscription.canceled`, which maps to `canceled` (Task 5 parked ruling), so the owner can restart checkout.
+> - **Unknown types (P28):** a type in Lago's list (`config/webhook_event_types.yml`, 75 types, held as `LAGO_WEBHOOK_TYPES`) that we don't act on → 200, stored, logged. A type not in the list → 400, not stored.
+> - **Also:** `current_period_end` comes from `subscription.current_billing_period_ending_at` on `subscription.*` webhooks and never moves backwards (P16). The route is `async` only to read the raw body; verify and the DB work run in a threadpool (P32b). `get_webhook_verifier` takes settings and the Lago client through `Depends`. Tests use fixture payloads in `backend/tests/fixtures/lago/` (P31c).
+
 **Files:**
 - Create: `template/backend/app/billing/states.py`, `template/backend/app/billing/webhooks.py`; `template/backend/tests/test_states.py`, `template/backend/tests/test_webhooks.py`
 - Modify: `template/backend/app/billing/routes.py` (add webhook route)
