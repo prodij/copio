@@ -65,19 +65,29 @@ test("sign up → workspace → pay → premium report", async ({ page, baseURL 
   }).toPass({ timeout: 120_000, intervals: [5_000] });
 
   // Second leg (checkout option A): Stripe's page only saves the card. Back on /billing/return,
-  // the app calls POST /billing/checkout again, and that call creates the payment-gated subscription.
+  // the app calls POST /billing/checkout again (retrying for up to 60 s while Lago has not yet
+  // processed Stripe's webhook) until it answers checkout_url null: the gated subscription exists.
   const secondLeg = page.waitForResponse(
-    (r) => r.url().endsWith("/billing/checkout") && r.request().method() === "POST",
+    async (r) =>
+      r.url().endsWith("/billing/checkout") &&
+      r.request().method() === "POST" &&
+      r.status() === 200 &&
+      (await r.json()).checkout_url === null,
     { timeout: 120_000 },
   );
   await saveTestCard(page);
-  const leg = await secondLeg;
-  expect(leg.status(), await leg.text()).toBe(200);
-  expect(await leg.json(), "the card was saved, so no second Stripe redirect").toEqual({ checkout_url: null });
+  await page.waitForURL((u) => u.origin === app, { timeout: 120_000 });
+  // From here on the card is saved: the app must never send the browser back to Stripe.
+  const backToStripe: string[] = [];
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame() && /checkout\.stripe\.com/.test(frame.url())) backToStripe.push(frame.url());
+  });
+  await secondLeg;
 
   // Access follows Lago's invoice-paid webhook, so wait on the feature itself, not on the return page.
   await expect(async () => {
     await page.goto("/premium");
     await expect(page.getByText(`Generated for ${WORKSPACE}`)).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 180_000, intervals: [3_000] });
+  expect(backToStripe, "the app sent the browser back to Stripe after the card was saved").toEqual([]);
 });

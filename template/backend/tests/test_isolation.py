@@ -17,6 +17,9 @@ from app.workspaces.routes import current_workspace
 from tests.auth_helpers import AuthHeaders
 
 PUBLIC = {"/health", "/billing/plans", "/billing/webhooks/lago"}
+# Signed in but not inside a workspace yet: creating the first one, and "who am I". Everything else
+# must go through current_workspace.
+PRINCIPAL_ONLY = {"/workspaces", "/me"}
 # A valid body per route that takes one, so a 403 is the workspace check and not body validation.
 BODIES: dict[str, dict[str, str]] = {"/billing/checkout": {"plan_code": "starter"}}
 
@@ -40,12 +43,15 @@ def _routes() -> list[RouteContext]:
 WORKSPACE_ROUTES = [(m, str(r.path)) for r in _routes() if current_workspace in _deps(r) for m in sorted(r.methods or ())]
 
 
-def test_every_route_is_authenticated_or_public() -> None:
-    assert {"/workspaces", "/me", "/billing/checkout"} <= {r.path for r in _routes()}  # the walk sees them
+def test_every_route_is_public_principal_only_or_workspace_scoped() -> None:
+    paths = {r.path for r in _routes()}
+    assert PUBLIC | PRINCIPAL_ONLY | {"/billing/checkout"} <= paths  # the walk sees them
     for route in _routes():
-        if route.path not in PUBLIC:
-            deps = _deps(route)
-            assert require_principal in deps or current_workspace in deps, route.path
+        deps = _deps(route)
+        if route.path in PRINCIPAL_ONLY:
+            assert require_principal in deps, route.path
+        elif route.path not in PUBLIC:
+            assert current_workspace in deps, f"{route.path} must depend on current_workspace"
 
 
 def test_the_workspace_routes_are_the_expected_ones() -> None:

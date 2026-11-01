@@ -7,6 +7,7 @@ import pytest
 
 GUARD = Path(__file__).with_name("guard.py")
 REPO = GUARD.resolve().parents[2]
+LIVE = "sk_live_" + "a1B2" * 6  # built at run time: no key-shaped string in the repo
 
 
 def run(tool: str, tool_input: dict[str, object], cwd: Path = REPO) -> subprocess.CompletedProcess[str]:
@@ -37,9 +38,33 @@ def run(tool: str, tool_input: dict[str, object], cwd: Path = REPO) -> subproces
         ("Bash", {"command": "git push -uf origin feat/x"}),
         ("Bash", {"command": "git push --force-with-lease origin feat/x"}),
         ("Bash", {"command": "git push origin +feat/x"}),
-        ("Bash", {"command": "echo sk_live_x"}),
-        ("Write", {"file_path": "x.py", "content": "KEY='sk_live_x'"}),
-        ("MultiEdit", {"file_path": "x.py", "edits": [{"old_string": "a", "new_string": "sk_live_x"}]}),
+        ("Bash", {"command": f"echo {LIVE}"}),
+        ("Write", {"file_path": "x.py", "content": f"KEY='{LIVE}'"}),
+        ("MultiEdit", {"file_path": "x.py", "edits": [{"old_string": "a", "new_string": LIVE}]}),
+        ("Bash", {"command": "echo rk_live_" + "x" * 24}),
+        # globs and quoting that reach .env or .bootstrap/
+        ("Bash", {"command": "cat .en*"}),
+        ("Bash", {"command": "cat ./.e?v"}),
+        ("Bash", {"command": "cat .[e]nv"}),
+        ("Bash", {"command": "cat .env.l*"}),
+        ("Bash", {"command": "ls .bootstr*/"}),
+        ("Bash", {"command": 'cat .e""nv'}),
+        ("Bash", {"command": "cat '.env'"}),
+        ("Bash", {"command": "cat {.env,README.md}"}),
+        ("Bash", {"command": "head -n1 <.env"}),
+        ("Bash", {"command": "find . -name '.env*' -exec cat {} +"}),
+        # recursive grep over the repo (or above it) reads git-ignored files too
+        ("Bash", {"command": "grep -r KEY ."}),
+        ("Bash", {"command": "grep -rn KEY"}),
+        ("Bash", {"command": "grep --recursive -e KEY"}),
+        ("Bash", {"command": f"grep -R KEY {REPO.parent}"}),
+        ("Bash", {"command": "grep -rn KEY . --exclude=.env*"}),  # .bootstrap/ still searched
+        ("Grep", {"pattern": "KEY", "glob": "*"}),
+        ("Grep", {"pattern": "KEY", "glob": ".env*"}),
+        ("Grep", {"pattern": "KEY", "glob": "**/.bootstrap/**"}),
+        ("Bash", {"command": "docker compose config"}),
+        ("Bash", {"command": "docker compose -f docker-compose.yml config --format json"}),
+        ("Bash", {"command": "docker-compose config"}),
     ],
 )
 def test_blocked(tool: str, tool_input: dict[str, object]) -> None:
@@ -60,6 +85,18 @@ def test_blocked(tool: str, tool_input: dict[str, object]) -> None:
         ("Bash", {"command": "make check"}),
         ("Bash", {"command": "make env && make up && make bootstrap"}),
         ("Bash", {"command": "echo sk_test_x"}),
+        # placeholders in tests stay editable; only realistic live keys are blocked
+        ("Bash", {"command": "echo sk_live_x"}),
+        ("Write", {"file_path": "x.py", "content": "KEY='sk_live_x'"}),
+        ("Bash", {"command": "grep -rn KEY backend/ frontend/src"}),
+        ("Bash", {"command": "grep -rn KEY . --exclude=.env* --exclude-dir=.bootstrap"}),
+        ("Bash", {"command": "git grep -n KEY"}),
+        ("Bash", {"command": "rg KEY"}),
+        ("Bash", {"command": "grep KEY backend/app/config.py"}),
+        ("Grep", {"pattern": "KEY", "glob": "*.py"}),
+        ("Grep", {"pattern": "KEY", "glob": "*.{ts,tsx}"}),
+        ("Bash", {"command": "docker compose ps"}),
+        ("Bash", {"command": "find . -name '*.pyc' -delete"}),
         # Writing files that merely mention .env or .bootstrap/ is fine; reading them is not.
         ("Edit", {"file_path": "docker-compose.yml", "old_string": "a", "new_string": "env_file: .bootstrap/ids.env"}),
         ("Write", {"file_path": "README.md", "content": "Run `make env` to write .env"}),
@@ -87,6 +124,18 @@ def test_allowed(tool: str, tool_input: dict[str, object]) -> None:
         "cd /tmp && rm -rf x",
         "rm -rf node_modules /etc",
         "rm -rf `pwd`/x",
+        "rm -rf $(pwd)",
+        # wrappers
+        "/bin/rm -rf /tmp/x",
+        "(rm -rf /tmp/x)",
+        "(cd /tmp; rm -rf x)",
+        "env FOO=1 rm -rf /tmp/x",
+        "env -u HOME rm -rf /tmp/x",
+        "timeout 5 rm -rf /tmp/x",
+        'bash -c "rm -rf /tmp/x"',
+        "sh -c 'cd / && rm -rf tmp'",
+        "find . -name x | xargs rm -rf",
+        "xargs -0 /bin/rm -r < list",
     ],
 )
 def test_rm_rf_outside_the_repo_is_blocked(command: str) -> None:
@@ -102,11 +151,31 @@ def test_rm_rf_outside_the_repo_is_blocked(command: str) -> None:
         f"rm -rf {REPO}/frontend/dist",
         "rm -f build.log",
         "rm -r frontend/dist",
+        "rm -rf frontend/dist 2>/dev/null",
+        "bash -c 'rm -rf frontend/dist'",
+        "find . -name '*.pyc' | xargs rm -f",
     ],
 )
 def test_rm_inside_the_repo_is_allowed(command: str) -> None:
     result = run("Bash", {"command": command})
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -c core.pager=cat --no-pager push origin main",
+        "git --git-dir=.git push origin main",
+        "git -C . push --force origin feat/x",
+        "env -i git push origin HEAD:main",
+        "sudo -u me git push --force origin x",
+        "sh -c 'git push origin main'",
+        "(git push origin main)",
+        "/usr/bin/git push origin main",
+    ],
+)
+def test_wrapped_pushes_are_blocked(command: str) -> None:
+    assert run("Bash", {"command": command}).returncode == 2
 
 
 def _git(cwd: Path, *args: str) -> None:

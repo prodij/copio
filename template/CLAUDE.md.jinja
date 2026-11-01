@@ -8,8 +8,9 @@ Generated from prodij/copio. Layout: `frontend/` `backend/` `jobs/` `infra/` `br
 
 ## Rules
 - Access is checked only with `require_feature` (backend/app/access/deps.py). Plans change only in backend/app/billing/plans.yaml, then `make sync-plans`.
-- The backend is the only caller of Zitadel and Lago. The frontend calls only the backend, through `src/api/client.ts` (raw `fetch` is a lint error).
+- Outside services are called only through typed clients: the backend is the only caller of Zitadel and Lago, through `backend/app/integrations/` (`ZitadelClient`, `LagoClient`). The frontend calls only the backend, through `src/api/client.ts` (raw `fetch` is a lint error).
 - Every product table has `workspace_id`; jobs use `ScopedDb`. `backend/tests/test_isolation.py` fails if a route skips authentication or reaches another workspace.
 - Missing data shows "Unavailable", never 0.
 - Never read `.env` or `.bootstrap/`; never use live Stripe keys. The guard hook (`.claude/hooks/guard.py`, tested by `make check`) blocks these, pushes to `main`, force pushes and `rm -rf` outside the repo.
+- The guard reads commands, not intent: a Bash command that merely *mentions* `.env` or `.bootstrap` (an `echo`, a `sed` on the compose file, a glob like `.en*`, `grep -r` over the repo, `docker compose config`) is blocked too. Search with `git grep`/`rg` or the Grep tool, and change files that mention them with the Edit/Write tools, which check only the path.
 - Business logic comes from intent notes in ~/brain; write it fresh, never port code.
