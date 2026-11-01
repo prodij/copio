@@ -1,6 +1,7 @@
 import pathlib
 import re
 import subprocess
+import sys
 
 import pytest
 import yaml
@@ -75,6 +76,36 @@ def test_every_env_file_but_the_example_is_ignored(product_dir: pathlib.Path, tm
     names = [".env", ".env.local", ".env.production", ".env.example"]
     result = subprocess.run(["git", "check-ignore", *names], cwd=repo, capture_output=True, text=True, check=False)
     assert result.stdout.split() == [".env", ".env.local", ".env.production"]
+
+
+def test_template_env_example_is_not_hidden_by_the_templates_own_gitignore() -> None:
+    root = pathlib.Path(__file__).resolve().parents[1]
+    result = subprocess.run(["git", "check-ignore", "--no-index", "template/.env.example.jinja"],
+                            cwd=root, capture_output=True, text=True, check=False)
+    assert result.returncode == 1, result.stdout  # 1: not ignored
+
+
+def test_jobs_bucket_is_not_named_like_the_key_prefix(product_dir: pathlib.Path) -> None:
+    """Keys start `raw/` (spec §7), so a bucket named `raw` would store raw/raw/<source>/..."""
+    compose = yaml.safe_load((product_dir / "docker-compose.yml").read_text())
+    assert compose["services"]["jobs"]["environment"]["RAW_BUCKET"] == "data"
+    bootstrap = (product_dir / "scripts" / "bootstrap.py").read_text()
+    assert 'def ensure_bucket(name: str = "data")' in bootstrap
+    assert "bucket data" in bootstrap and "bucket raw" not in bootstrap
+    assert 'key = f"raw/{source}/' in (product_dir / "jobs" / "jobs" / "storage.py").read_text()
+
+
+def test_pytest_config_silences_copiers_dirty_tree_warning(tmp_path: pathlib.Path) -> None:
+    root = pathlib.Path(__file__).resolve().parents[1]
+    probe = tmp_path / "test_probe.py"
+    probe.write_text("import warnings\nfrom copier.errors import DirtyLocalWarning\n\n\n"
+                     "def test_warns():\n    warnings.warn(DirtyLocalWarning('dirty'))\n")
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-c", str(root / "pyproject.toml"), "--rootdir", str(tmp_path),
+         "-p", "no:cacheprovider", str(probe)],
+        capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout
+    assert "DirtyLocalWarning" not in result.stdout and "warning" not in result.stdout.lower()
 
 
 SECRETS = {"ZITADEL_MASTERKEY": "m", "ZITADEL_ADMIN_PASSWORD": "z", "LAGO_RSA_PRIVATE_KEY": "r",
