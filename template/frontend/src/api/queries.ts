@@ -1,9 +1,15 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "./client";
-import { toApiError } from "./errors";
+import { ApiError, toApiError } from "./errors";
 
 async function unwrap<T>(p: Promise<{ data?: T; error?: unknown; response: Response }>): Promise<T> {
-  const { data, error, response } = await p;
+  let result;
+  try {
+    result = await p;
+  } catch {
+    throw new ApiError(0, "Network error");
+  }
+  const { data, error, response } = result;
   if (error !== undefined || data === undefined) throw toApiError(response, error ?? null);
   return data;
 }

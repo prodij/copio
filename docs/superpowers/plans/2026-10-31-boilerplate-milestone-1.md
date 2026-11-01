@@ -3212,6 +3212,12 @@ git commit -m "feat(frontend): Vite + shadcn foundation, typed client, error and
 
 ### Task 10: Frontend sign-in and pages
 
+> **Note 2026-11-01 (as built):**
+> - Env names are `import.meta.env.ZITADEL_ISSUER / ZITADEL_CLIENT_ID / ZITADEL_PROJECT_ID / VITE_API_BASE_URL` (P19), typed in `src/vite-env.d.ts`; the sign-in screen title uses `document.title` (no `VITE_PRODUCT_NAME`).
+> - `CheckoutReturn` (checkout option A): `Plans` stores the chosen plan in `sessionStorage` (`checkout_plan`) and goes to `/billing/return` when `checkout_url` is null (else to Stripe). `CheckoutReturn` calls `POST /billing/checkout` once more with that plan, then polls `/me/access` every 2 s (60 s cap; `startedAt` is lazy state so the cap trips) until `active`. Returning from Stripe is never treated as success.
+> - `AuthGate` exchanges the callback code through a module-level promise (StrictMode-safe); `/callback` route is `<Navigate to="/" replace />`.
+> - `CreateWorkspace` calls `userManager.signinSilent()` after `POST /workspaces` (new org role is absent from the old token), then invalidates queries. `Home` treats `pending` as no plan. `queries.ts` turns a rejected fetch into `ApiError(0, "Network error")`. `src/test/setup.ts` now runs RTL `cleanup()` after each test.
+
 **Files:**
 - Create: `template/frontend/src/auth/userManager.ts`, `src/auth/AuthGate.tsx`, `src/App.tsx`, `src/routes.tsx`, `src/pages/CreateWorkspace.tsx`, `Plans.tsx`, `Billing.tsx`, `PremiumReport.tsx`, `CheckoutReturn.tsx` and a `.test.tsx` beside each page
 - Modify: `src/main.tsx`
