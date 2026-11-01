@@ -1,0 +1,397 @@
+"""`make bootstrap`: configure the local Zitadel, Lago and MinIO once. Safe to re-run.
+
+Every step looks before it creates, so a failed run is fixed by fixing the cause and running again.
+IDs go to .bootstrap/ids.env and the backend's token to .bootstrap/backend/backend.pat (both
+git-ignored); Compose reads them. Checked against Zitadel v4.20.0 and Lago v1.55.0.
+
+scripts/brand.py imports `env`, `zitadel_admin_token`, `zitadel_endpoint` and `lago_graphql`.
+"""
+
+import functools
+import os
+import subprocess
+import time
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+
+import httpx
+
+import product
+
+ROOT = Path(__file__).resolve().parents[1]
+STATE = ROOT / ".bootstrap"
+IDS = STATE / "ids.env"
+FRONTEND_ENV = STATE / "frontend.env"
+ADMIN_PAT = STATE / "zitadel" / "admin.pat"
+BACKEND_PAT = STATE / "backend" / "backend.pat"
+LAGO_WEBHOOK_URL = "http://backend:8000/billing/webhooks/lago"
+USAGE_METRIC = "reports_generated"
+ROLES = {"owner": "Owner", "member": "Member"}
+# Zitadel answers 400 with one of these when an update would change nothing.
+ZITADEL_NO_CHANGES = ("No changes", "COMMAND-1m88i", "COMMAND-SsfG5")
+
+
+# -- configuration ---------------------------------------------------------------------------
+
+
+def env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise SystemExit(f"{name} is not set; run `make env` (it writes .env) and fill it in")
+    return value
+
+
+def public_url(sub: str, port_var: str) -> str:
+    host = f"{sub}.{product.DOMAIN}" if sub else product.DOMAIN
+    return f"http://{host}:{env(port_var)}"
+
+
+def app_url() -> str:
+    return public_url("", "APP_PORT")
+
+
+def zitadel_url() -> str:
+    return public_url("auth", "ZITADEL_PORT")
+
+
+def lago_api_url() -> str:
+    return public_url("lago-api", "LAGO_API_PORT")
+
+
+def local(url: str) -> tuple[str, dict[str, str]]:
+    """Where the host reaches a public URL: 127.0.0.1 plus the Host header the service routes on.
+
+    Zitadel picks its instance by Host, and not every resolver maps *.localhost to 127.0.0.1.
+    """
+    parts = urlsplit(url)
+    return f"http://127.0.0.1:{parts.port}", {"Host": parts.netloc}
+
+
+def client(url: str, headers: dict[str, str] | None = None) -> httpx.Client:
+    base, host = local(url)
+    return httpx.Client(base_url=base, headers={**host, **(headers or {})}, timeout=30.0)
+
+
+def zitadel_endpoint() -> tuple[str, dict[str, str]]:
+    return local(zitadel_url())
+
+
+# -- small helpers ---------------------------------------------------------------------------
+
+
+def check(response: httpx.Response, what: str) -> dict[str, Any]:
+    if response.is_error:
+        raise SystemExit(f"bootstrap: {what} failed: HTTP {response.status_code} {response.text[:400]}")
+    body: dict[str, Any] = response.json() if response.content else {}
+    return body
+
+
+def write_ids(path: Path, ids: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(f"{k}={v}\n" for k, v in ids.items()))
+
+
+def read_ids(path: Path = IDS) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    pairs = (line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
+    return {k: v for k, v in pairs}
+
+
+def save_ids(**ids: str) -> None:
+    write_ids(IDS, read_ids() | ids)
+
+
+def compose(*args: str, capture: bool = False) -> str:
+    try:
+        result = subprocess.run(  # noqa: S603 (fixed program, our own arguments)
+            ["docker", "compose", *args],  # noqa: S607
+            cwd=ROOT, check=True, text=True, capture_output=capture,
+        )
+    except FileNotFoundError as exc:
+        raise SystemExit("bootstrap: `docker` is not installed or not on PATH") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or "").strip()[-400:]
+        raise SystemExit(f"bootstrap: `docker compose {' '.join(args[:3])}` failed (exit {exc.returncode}) {detail}") from exc
+    return result.stdout.strip() if capture else ""
+
+
+def wait_for(what: str, ready: Any, timeout: float = 300.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if ready():
+                return
+        except (httpx.HTTPError, OSError):
+            pass
+        time.sleep(2)
+    raise SystemExit(f"bootstrap: timed out waiting for {what}; is `make up` running? (`make logs`)")
+
+
+def http_ok(url: str, path: str) -> bool:
+    with client(url) as http:
+        return http.get(path).status_code == 200
+
+
+# -- Zitadel ---------------------------------------------------------------------------------
+
+
+def zitadel_admin_token() -> str:
+    """The instance admin PAT that Zitadel's first start wrote into the bind-mounted .bootstrap/zitadel."""
+    if not ADMIN_PAT.is_file():
+        raise SystemExit(f"bootstrap: {ADMIN_PAT.relative_to(ROOT)} not found; run `make up` and wait for Zitadel")
+    return ADMIN_PAT.read_text().strip()
+
+
+def zitadel_http() -> httpx.Client:
+    return client(zitadel_url(), {"Authorization": f"Bearer {zitadel_admin_token()}"})
+
+
+def ensure_project(http: httpx.Client, name: str) -> str:
+    found = check(http.post("/management/v1/projects/_search", json={"queries": [
+        {"nameQuery": {"name": name, "method": "TEXT_QUERY_METHOD_EQUALS"}}]}), "Zitadel project search")
+    project_id = next((str(p["id"]) for p in found.get("result", []) if p["name"] == name), None)
+    if project_id is None:
+        created = check(http.post("/management/v1/projects", json={
+            "name": name, "projectRoleAssertion": True}), "Zitadel project create")
+        project_id = str(created["id"])
+    roles = check(http.post(f"/management/v1/projects/{project_id}/roles/_search", json={}),
+                  "Zitadel role search")
+    existing = {r["key"] for r in roles.get("result", [])}
+    missing = [{"key": k, "displayName": v} for k, v in ROLES.items() if k not in existing]
+    if missing:
+        check(http.post(f"/management/v1/projects/{project_id}/roles/_bulk", json={"roles": missing}),
+              "Zitadel role create")
+    return project_id
+
+
+def web_app_config(app: str) -> dict[str, Any]:
+    """OIDC settings for the browser app: PKCE code flow, JWT access tokens carrying roles."""
+    return {
+        "redirectUris": [f"{app}/callback"],
+        "postLogoutRedirectUris": [f"{app}/"],
+        "responseTypes": ["OIDC_RESPONSE_TYPE_CODE"],
+        "grantTypes": ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"],
+        "appType": "OIDC_APP_TYPE_USER_AGENT",
+        "authMethodType": "OIDC_AUTH_METHOD_TYPE_NONE",
+        "accessTokenType": "OIDC_TOKEN_TYPE_JWT",
+        "accessTokenRoleAssertion": True,
+        "idTokenRoleAssertion": True,
+        "devMode": True,  # allows http:// redirect URIs
+    }
+
+
+def ensure_web_app(http: httpx.Client, project_id: str, app: str) -> str:
+    found = check(http.post(f"/management/v1/projects/{project_id}/apps/_search", json={}),
+                  "Zitadel app search")
+    existing = next((a for a in found.get("result", []) if a["name"] == "web"), None)
+    if existing is None:
+        created = check(http.post(f"/management/v1/projects/{project_id}/apps/oidc",
+                                  json={"name": "web", **web_app_config(app)}), "Zitadel app create")
+        return str(created["clientId"])
+    # Keep the redirect URIs in step with APP_PORT if it changed since the first run.
+    update = http.put(f"/management/v1/projects/{project_id}/apps/{existing['id']}/oidc_config",
+                      json=web_app_config(app))
+    if not (update.status_code == 400 and any(m in update.text for m in ZITADEL_NO_CHANGES)):
+        check(update, "Zitadel app update")
+    return str(existing["oidcConfig"]["clientId"])
+
+
+def backend_pat_works(http: httpx.Client) -> bool:
+    """False when there is no PAT yet, or it belongs to an instance since wiped (`down -v`)."""
+    if not BACKEND_PAT.is_file():
+        return False
+    me = http.get("/auth/v1/users/me", headers={"Authorization": f"Bearer {BACKEND_PAT.read_text().strip()}"})
+    return me.status_code == 200
+
+
+def ensure_backend_machine_user(http: httpx.Client) -> None:
+    """Machine user `backend`: creates workspace orgs, grants the project to them, adds members."""
+    found = check(http.post("/management/v1/users/_search", json={"queries": [
+        {"userNameQuery": {"userName": "backend", "method": "TEXT_QUERY_METHOD_EQUALS"}}]}),
+        "Zitadel user search")
+    user_id = next((str(u["id"]) for u in found.get("result", [])), None)
+    if user_id is None:
+        user = check(http.post("/management/v1/users/machine", json={
+            "userName": "backend", "name": "Backend", "accessTokenType": "ACCESS_TOKEN_TYPE_BEARER"}),
+            "Zitadel machine user create")
+        user_id = str(user["userId"])
+    # IAM_ORG_MANAGER: create and manage every organization; ORG_OWNER on the instance org: grant
+    # the project that lives there. 409 = already a member.
+    for path, role in (("/admin/v1/members", "IAM_ORG_MANAGER"), ("/management/v1/orgs/me/members", "ORG_OWNER")):
+        member = http.post(path, json={"userId": user_id, "roles": [role]})
+        if member.status_code != 409:
+            check(member, f"Zitadel {role} membership")
+    if not backend_pat_works(http):
+        pat = check(http.post(f"/management/v1/users/{user_id}/pats", json={}), "Zitadel PAT create")
+        BACKEND_PAT.parent.mkdir(parents=True, exist_ok=True)
+        BACKEND_PAT.write_text(pat["token"])
+        BACKEND_PAT.chmod(0o600)
+
+
+LOGIN_POLICY_FIELDS = (
+    "allowUsernamePassword", "allowRegister", "allowExternalIdp", "forceMfa", "forceMfaLocalOnly",
+    "passwordlessType", "hidePasswordReset", "ignoreUnknownUsernames", "defaultRedirectUri",
+    "passwordCheckLifetime", "externalLoginCheckLifetime", "mfaInitSkipLifetime",
+    "secondFactorCheckLifetime", "multiFactorCheckLifetime", "allowDomainDiscovery",
+    "disableLoginWithEmail", "disableLoginWithPhone",
+)
+
+
+def ensure_self_registration(http: httpx.Client) -> None:
+    """Instance login policy: allow sign-up with username and password; every other field kept."""
+    policy = check(http.get("/admin/v1/policies/login"), "Zitadel login policy read")["policy"]
+    if policy.get("allowRegister") and policy.get("allowUsernamePassword"):
+        return
+    body = {k: policy[k] for k in LOGIN_POLICY_FIELDS if k in policy}
+    body |= {"allowRegister": True, "allowUsernamePassword": True}
+    check(http.put("/admin/v1/policies/login", json=body), "Zitadel login policy update")
+
+
+def bootstrap_zitadel() -> None:
+    with zitadel_http() as http:
+        org_id = str(check(http.get("/management/v1/orgs/me"), "Zitadel org read")["org"]["id"])
+        project_id = ensure_project(http, product.SLUG)
+        client_id = ensure_web_app(http, project_id, app_url())
+        ensure_backend_machine_user(http)
+        ensure_self_registration(http)
+    save_ids(ZITADEL_PROJECT_ID=project_id, ZITADEL_INSTANCE_ORG_ID=org_id, ZITADEL_CLIENT_ID=client_id)
+    # The browser sees every ZITADEL_* variable the dev server has, so it gets only these two.
+    write_ids(FRONTEND_ENV, {"ZITADEL_CLIENT_ID": client_id, "ZITADEL_PROJECT_ID": project_id})
+    print(f"Zitadel: project {project_id}, web client {client_id}")
+
+
+# -- Lago ------------------------------------------------------------------------------------
+
+LOGIN = "mutation($i: LoginUserInput!){loginUser(input:$i){token user{organizations{id name}}}}"
+
+
+@functools.cache
+def lago_session() -> tuple[str, str]:
+    """(JWT, organization id) for the seeded Lago user; GraphQL needs both on every call."""
+    with client(lago_api_url()) as http:
+        reply = http.post("/graphql", json={"query": LOGIN, "variables": {"i": {
+            "email": env("LAGO_ORG_USER_EMAIL"), "password": env("LAGO_ORG_USER_PASSWORD")}}})
+    body = check(reply, "Lago login")
+    try:
+        login = body["data"]["loginUser"]
+        return str(login["token"]), str(login["user"]["organizations"][0]["id"])
+    except (KeyError, IndexError, TypeError) as exc:
+        raise SystemExit(f"bootstrap: Lago login failed: {str(body.get('errors') or body)[:400]}") from exc
+
+
+def lago_graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
+    """Run a Lago GraphQL operation as the seeded admin; returns `data`, exits on any error."""
+    token, org_id = lago_session()
+    headers = {"Authorization": f"Bearer {token}", "X-Lago-Organization": org_id}
+    with client(lago_api_url(), headers) as http:
+        body = check(http.post("/graphql", json={"query": query, "variables": variables}), "Lago GraphQL")
+    if body.get("errors") or not isinstance(body.get("data"), dict):
+        raise SystemExit(f"bootstrap: Lago GraphQL error: {str(body.get('errors') or body)[:400]}")
+    data: dict[str, Any] = body["data"]
+    return data
+
+
+def lago_api() -> httpx.Client:
+    return client(lago_api_url(), {"Authorization": f"Bearer {env('LAGO_API_KEY')}"})
+
+
+def bootstrap_lago() -> None:
+    _, org_id = lago_session()
+    save_ids(LAGO_ORGANIZATION_ID=org_id)
+    with lago_api() as api:
+        hooks = check(api.get("/api/v1/webhook_endpoints"), "Lago webhook list")
+        if not any(h["webhook_url"] == LAGO_WEBHOOK_URL for h in hooks.get("webhook_endpoints", [])):
+            check(api.post("/api/v1/webhook_endpoints", json={"webhook_endpoint": {
+                "webhook_url": LAGO_WEBHOOK_URL, "signature_algo": "jwt"}}), "Lago webhook create")
+        metric = api.get(f"/api/v1/billable_metrics/{USAGE_METRIC}")
+        if metric.status_code == 404:
+            check(api.post("/api/v1/billable_metrics", json={"billable_metric": {
+                "name": "Reports generated", "code": USAGE_METRIC, "aggregation_type": "count_agg"}}),
+                "Lago billable metric create")
+        else:
+            check(metric, "Lago billable metric read")
+    print(f"Lago: organization {org_id}, webhook to the backend, metric {USAGE_METRIC}")
+
+
+STRIPE_PROVIDERS = "query{paymentProviders(type: stripe){collection{... on StripeProvider{id code}}}}"
+ADD_STRIPE = "mutation($i: AddStripePaymentProviderInput!){addStripePaymentProvider(input:$i){id}}"
+# Lago cannot register a Stripe webhook endpoint for a local URL, so it checks the signing secret
+# of `stripe listen` instead (the CLI's secret is fixed per Stripe account).
+STRIPE_WEBHOOK_RUBY = (
+    'PaymentProviders::StripeProvider.find_by!(organization_id: ENV.fetch("LAGO_ORGANIZATION_ID"), '
+    'code: "stripe").update!(webhook_secret: ENV.fetch("STRIPE_CLI_WEBHOOK_SECRET"))'
+)
+
+
+def stripe_secret_key() -> str:
+    key = os.environ.get("STRIPE_SECRET_KEY", "")
+    if not key.startswith("sk_test_"):
+        raise SystemExit(
+            "bootstrap: STRIPE_SECRET_KEY must be a Stripe TEST secret key (sk_test_...). Paste it into "
+            ".env from https://dashboard.stripe.com/test/apikeys and run `make bootstrap` again; "
+            "everything before this step is done and is skipped next time."
+        )
+    return key
+
+
+def bootstrap_stripe() -> None:
+    key = stripe_secret_key()
+    providers = lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"]
+    if not any(p.get("code") == "stripe" for p in providers):
+        lago_graphql(ADD_STRIPE, {"i": {"name": "Stripe", "code": "stripe", "secretKey": key,
+                                        "successRedirectUrl": f"{app_url()}/billing/return"}})
+    secret = compose("run", "--rm", "--no-deps", "--entrypoint", "stripe", "stripe-cli",
+                     "listen", "--print-secret", capture=True).splitlines()[-1]
+    if not secret.startswith("whsec_"):
+        raise SystemExit("bootstrap: `stripe listen --print-secret` printed no whsec_ secret")
+    _, org_id = lago_session()
+    compose("exec", "-T", "-e", f"LAGO_ORGANIZATION_ID={org_id}", "-e", f"STRIPE_CLI_WEBHOOK_SECRET={secret}",
+            "lago-api", "bin/rails", "runner", STRIPE_WEBHOOK_RUBY)
+    compose("up", "-d", "--force-recreate", "stripe-cli")
+    print("Stripe: Lago connected; `stripe listen` forwards test webhooks to Lago")
+
+
+# -- MinIO, backend --------------------------------------------------------------------------
+
+
+def ensure_bucket(name: str = "raw") -> None:
+    compose("exec", "-T", "minio", "sh", "-c",
+            f"mc alias set local http://localhost:9000 minio minio-local >/dev/null && mc mb --ignore-existing local/{name}")
+
+
+def backend(*args: str) -> None:
+    compose("exec", "-T", "backend", "uv", "run", "--no-dev", *args)
+
+
+def main() -> None:
+    zitadel, lago = zitadel_url(), lago_api_url()
+    wait_for(f"Zitadel at {zitadel}", lambda: http_ok(zitadel, "/debug/ready"))
+    wait_for("Zitadel's admin token", ADMIN_PAT.is_file)  # written before Zitadel serves
+    wait_for(f"Lago at {lago}", lambda: http_ok(lago, "/health"))
+    bootstrap_zitadel()
+    bootstrap_lago()
+    ensure_bucket()
+    if subprocess.run(["uv", "run", "python", "brand.py"], cwd=ROOT / "scripts", check=False).returncode:  # noqa: S607
+        raise SystemExit("bootstrap: `make brand` failed (see above); fix it and run `make bootstrap` again")
+    compose("up", "-d", "--force-recreate", "frontend")  # picks up .bootstrap/frontend.env
+    bootstrap_stripe()
+    # The backend's settings need the Stripe key and the ids above; migrations run inside it.
+    compose("up", "-d", "--force-recreate", "backend")
+    wait_for("the backend", lambda: http_ok(public_url("api", "API_PORT"), "/health"))
+    backend("alembic", "upgrade", "head")
+    backend("python", "-m", "app.billing.sync")
+    compose("up", "-d", "--force-recreate", "jobs")  # its first run needs the migrated tables
+    print(f"""
+Ready.
+  App          {app_url()}
+  API          {public_url("api", "API_PORT")}
+  Zitadel      {zitadel}/ui/console
+  Lago         {public_url("lago", "LAGO_FRONT_PORT")}
+  MinIO        http://localhost:{env("MINIO_CONSOLE_PORT")}
+Open {app_url()}""")
+
+
+if __name__ == "__main__":
+    main()

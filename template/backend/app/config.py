@@ -1,6 +1,7 @@
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +15,8 @@ class Settings(BaseSettings):
     zitadel_project_id: str
     zitadel_instance_org_id: str
     zitadel_service_token: str = ""
+    # Compose mounts the PAT that `make bootstrap` wrote; read it when no token is given directly.
+    zitadel_service_token_file: str | None = None
     lago_api_url: str
     lago_api_key: str
     lago_webhook_issuer: str
@@ -26,6 +29,15 @@ class Settings(BaseSettings):
         if not value.startswith("sk_test_"):
             raise ValueError("Stripe must run in test-mode (sk_test_...) in milestone 1")
         return value
+
+    @model_validator(mode="after")
+    def token_from_file(self) -> "Settings":
+        if not self.zitadel_service_token and self.zitadel_service_token_file:
+            path = Path(self.zitadel_service_token_file)
+            if not path.is_file():
+                raise ValueError(f"zitadel_service_token_file {path} not found; run `make bootstrap`")
+            self.zitadel_service_token = path.read_text().strip()
+        return self
 
 
 @lru_cache

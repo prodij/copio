@@ -48,3 +48,14 @@ def test_no_secret_values_anywhere() -> None:
 def test_default_logo_is_the_template_logo(product_dir: pathlib.Path) -> None:
     assert "<svg" in (product_dir / "brand" / "logo.svg").read_text()
     assert (product_dir / "brand" / "brand.yaml").read_text().count("Acme Reports") == 1
+
+
+def test_env_example_lists_names_only(product_dir: pathlib.Path) -> None:
+    keys = [line for line in (product_dir / ".env.example").read_text().splitlines()
+            if line and not line.startswith("#")]
+    assert keys and all(re.fullmatch(r"[A-Z][A-Z0-9_]*=", line) for line in keys), keys
+
+
+def test_local_state_is_ignored(product_dir: pathlib.Path) -> None:
+    ignored = (product_dir / ".gitignore").read_text().splitlines()
+    assert ".env" in ignored and ".bootstrap/" in ignored

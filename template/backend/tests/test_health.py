@@ -40,3 +40,19 @@ def test_injected_settings_reach_get_session(
 
     with TestClient(app) as c:
         assert c.get("/db-ping").json() == {"one": 1}
+
+
+def test_cors_preflight_allows_the_frontend(client: TestClient, settings: Settings) -> None:
+    response = client.options("/me/access", headers={
+        "Origin": settings.frontend_url,
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "Authorization, X-Workspace-Id",
+    })
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == settings.frontend_url
+
+
+def test_cors_preflight_ignores_other_origins(client: TestClient) -> None:
+    response = client.options("/me/access", headers={
+        "Origin": "http://evil.test", "Access-Control-Request-Method": "GET"})
+    assert "access-control-allow-origin" not in response.headers

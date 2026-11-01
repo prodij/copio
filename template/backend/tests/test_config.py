@@ -1,4 +1,5 @@
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -21,3 +22,21 @@ def test_importing_app_main_needs_no_env() -> None:
         [sys.executable, "-c", "import app.main"], env=env, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_service_token_is_read_from_file(tmp_path: pathlib.Path) -> None:
+    token_file = tmp_path / "backend.pat"
+    token_file.write_text("pat-from-file\n")
+    data = TEST_SETTINGS.model_dump() | {"zitadel_service_token": "", "zitadel_service_token_file": str(token_file)}
+    assert Settings(**data).zitadel_service_token == "pat-from-file"
+
+
+def test_explicit_service_token_wins_over_file(tmp_path: pathlib.Path) -> None:
+    data = TEST_SETTINGS.model_dump() | {"zitadel_service_token_file": str(tmp_path / "missing.pat")}
+    assert Settings(**data).zitadel_service_token == TEST_SETTINGS.zitadel_service_token
+
+
+def test_missing_service_token_file_is_clear(tmp_path: pathlib.Path) -> None:
+    data = TEST_SETTINGS.model_dump() | {"zitadel_service_token": "", "zitadel_service_token_file": str(tmp_path / "missing.pat")}
+    with pytest.raises(ValidationError, match="make bootstrap"):
+        Settings(**data)

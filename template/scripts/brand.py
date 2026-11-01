@@ -159,8 +159,10 @@ def _check(response: httpx.Response, what: str) -> None:
         raise BrandError(f"{what} failed: HTTP {response.status_code} {response.text[:300]}")
 
 
-def apply_zitadel(brand: Brand, api_url: str, token: str) -> None:
-    headers = {"Authorization": f"Bearer {token}"}
+def apply_zitadel(
+    brand: Brand, api_url: str, token: str, extra_headers: dict[str, str] | None = None
+) -> None:
+    headers = {"Authorization": f"Bearer {token}", **(extra_headers or {})}
     uploads = [
         ("logo", "logo.svg", logo_svg(brand, brand.light.primary).encode(), "image/svg+xml"),
         (
@@ -214,7 +216,8 @@ def main() -> None:
         if args.css_only:
             return
         bootstrap = importlib.import_module("bootstrap")
-        apply_zitadel(brand, bootstrap.env("ZITADEL_PUBLIC_URL"), bootstrap.zitadel_admin_token())
+        api_url, host = bootstrap.zitadel_endpoint()  # 127.0.0.1 plus the instance's Host header
+        apply_zitadel(brand, api_url, bootstrap.zitadel_admin_token(), host)
         apply_lago(brand, bootstrap.lago_graphql)
         print("applied brand to Zitadel and Lago")
     except BrandError as exc:

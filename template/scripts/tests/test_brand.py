@@ -224,7 +224,9 @@ def test_cli_reports_unreachable_service_without_traceback(
     monkeypatch.setattr(brand, "ROOT", tmp_path)
     monkeypatch.setattr("sys.argv", ["brand.py"])
     fake = types.SimpleNamespace(
-        env=lambda name: BASE, zitadel_admin_token=lambda: "tok", lago_graphql=None
+        zitadel_endpoint=lambda: (BASE, {"Host": "auth.acme.localhost:8085"}),
+        zitadel_admin_token=lambda: "tok",
+        lago_graphql=None,
     )
     monkeypatch.setitem(sys.modules, "bootstrap", fake)
     with respx.mock() as mock:
