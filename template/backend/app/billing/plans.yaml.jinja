@@ -1,0 +1,10 @@
+# Plans are code: edit here, then `make sync-plans`.
+plans:
+  - code: starter
+    name: Starter
+    amount_cents: {{ starter_plan_price_usd * 100 }}
+    currency: USD
+    interval: {{ starter_plan_interval }}
+    features:
+      premium_report: true
+      seats: 5

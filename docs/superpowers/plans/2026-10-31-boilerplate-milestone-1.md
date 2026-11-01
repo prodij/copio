@@ -1463,6 +1463,29 @@ git commit -m "feat(backend): Zitadel and Lago clients, resumable workspace crea
 
 ### Task 5: Plans, plan sync and checkout
 
+> **Note 2026-11-01 (Task 5, upstream finding, coordinator ruling: option A):** Checked against lago-api v1.55.0. The plan's checkout order fails for every new workspace, so checkout now works as described below.
+> - **What breaks:** a subscription created with `activation_rules: [{type: payment}]` needs a default payment method already (`ActivationRules::Payment::ValidateService` → 422 `customer: ["no_default_payment_method"]`). Lago's `checkout_url` is a Stripe Checkout session in **setup mode**: it saves a card and charges nothing. Lago sends **no webhook** when the card is saved (`setup_intent.succeeded` goes to Lago only).
+> - **How `POST /billing/checkout` works now:**
+>   - It always records the choice first: one `subscriptions` row per workspace, `state=pending`, `lago_subscription_id` null until a Lago subscription exists. The column is now nullable.
+>   - No default card (`GET /api/v1/customers/{id}/payment_methods`, `is_default`) → `{"checkout_url": <setup URL>}`.
+>   - Card present → create the payment-gated subscription once (external id `{workspace_id}:{plan_code}`) → `{"checkout_url": null}`. Lago's 422 `subscription_incomplete` on a repeat create means it already exists, so it counts as done.
+>   - An existing Lago subscription → `null` with no Lago call. A `canceled` row starts over.
+>   - Access still comes only from the webhooks (Task 6).
+> - **Errors:**
+>   - Lago 4xx on checkout → `app.errors.DependencyRejected` → 502 `"Lago rejected the request: <code> <details>"`, not a bare 500.
+>   - A Lago customer whose Stripe customer is not synced yet (`billing_configuration.provider_customer_id` empty; Lago creates it in a job) → 503 `"Stripe customer is unavailable"`. Otherwise the session would have no Stripe customer and the card would never reach Lago.
+> - **Code changes:**
+>   - `LagoClient` gains `has_default_payment_method(external_customer_id)`. `checkout_url` first GETs the customer. `create_subscription` returns `None`.
+>   - `start_checkout(...) -> str | None`. `CheckoutOut.checkout_url: str | None`.
+>   - `sync.py` calls `get_lago(get_settings())`.
+>   - `load_plans` also rejects missing fields and non-integer amounts.
+> - **Fixtures (P12):** conftest has `owner_workspace` (creates user-1's workspace, returns its id) and `owner_headers` (owner token for that id). `tests.fakes.fake_lago_billing(mock, card=, synced=)` fakes the checkout endpoints. Tasks 6, 7 and 13 use these and do not import from `test_checkout`.
+> - **Tests:** 21 in test_checkout + test_plans, not 8.
+> - **Follow-ons:**
+>   - **Task 10:** `CheckoutReturn` calls `POST /billing/checkout` once more, with the plan chosen before the redirect, before it polls `/me/access`. `Plans.tsx` goes straight to `/billing/return` when `checkout_url` is null. A `pending` row can now exist before any payment, so "no plan" in the `/` redirect should mean no row, or `pending` with no Lago subscription.
+>   - **Task 8:** `billing_reconcile` also finishes a workspace whose row is `pending` with `lago_subscription_id IS NULL` (checkout started, owner never came back) once the Lago customer has a default payment method: create the gated subscription with the same external id and store it.
+>   - **Tasks 6 and 8:** look subscriptions up by `lago_subscription_id`. Rows where it is null have no Lago subscription.
+
 **Files:**
 - Create: `template/backend/app/billing/__init__.py`, `plans.yaml.jinja`, `plans.py`, `models.py`, `checkout.py`, `routes.py`, `sync.py`; `template/backend/migrations/versions/0002_billing.py`; `template/backend/tests/test_plans.py`, `template/backend/tests/test_checkout.py`
 - Modify: `app/main.py` (include billing router), `app/models_registry.py` (import `app.billing.models`)
