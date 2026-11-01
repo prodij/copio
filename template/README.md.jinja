@@ -3,7 +3,7 @@
 Generated from [prodij/copio](https://github.com/prodij/copio). Update with `copier update --trust`.
 
     make env          # writes .env (git-ignored) with generated local secrets
-    # paste a Stripe TEST secret key (sk_test_..., https://dashboard.stripe.com/test/apikeys)
+    # paste a Stripe TEST secret key (sk_test_ only, not rk_test_: https://dashboard.stripe.com/test/apikeys)
     # into STRIPE_SECRET_KEY= in .env, then:
     make up           # starts the stack
     make bootstrap    # configures Zitadel, Lago and Stripe once; safe to run again
