@@ -1,0 +1,10 @@
+.env
+.env.local
+node_modules/
+dist/
+__pycache__/
+.venv/
+.pytest_cache/
+playwright-report/
+test-results/
+.bootstrap/

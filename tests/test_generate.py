@@ -1,0 +1,45 @@
+import pathlib
+import re
+import subprocess
+
+SECRET_PATTERNS = [
+    re.compile(r"sk_(live|test)_[0-9A-Za-z]{10,}"),
+    re.compile(r"whsec_[0-9A-Za-z]{10,}"),
+    re.compile(r"-----BEGIN (RSA )?PRIVATE KEY-----"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+]
+
+
+def test_product_has_top_level_layout(product_dir: pathlib.Path) -> None:
+    for name in ["backend", "frontend", "jobs", "infra", "brand", "README.md", ".gitignore"]:
+        assert (product_dir / name).exists(), name
+
+
+def test_answers_are_rendered(product_dir: pathlib.Path) -> None:
+    readme = (product_dir / "README.md").read_text()
+    assert "# Acme Reports" in readme
+    assert "{{" not in readme
+
+
+def test_env_is_ignored(product_dir: pathlib.Path) -> None:
+    assert ".env" in (product_dir / ".gitignore").read_text().splitlines()
+
+
+def test_no_secret_values_anywhere() -> None:
+    root = pathlib.Path(__file__).resolve().parents[1]
+    listing = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+        cwd=root, capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    offenders = []
+    for rel in listing:
+        path = root / rel
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+        if any(p.search(text) for p in SECRET_PATTERNS):
+            offenders.append(rel)
+    assert offenders == []

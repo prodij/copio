@@ -1,0 +1,37 @@
+_subdirectory: template
+_templates_suffix: .jinja
+_answers_file: .copier-answers.yml
+
+product_name:
+  type: str
+  help: Human name of the product
+product_slug:
+  type: str
+  help: Lowercase slug, used for databases, buckets and Zitadel project
+  default: "{{ product_name | lower | replace(' ', '-') }}"
+  validator: "{% if not (product_slug | regex_search('^[a-z][a-z0-9-]{1,30}$')) %}lowercase letters, digits and dashes{% endif %}"
+domain:
+  type: str
+  default: "{{ product_slug }}.localhost"
+brand_primary:
+  type: str
+  default: "#2f6bff"
+  validator: "{% if not (brand_primary | regex_search('^#[0-9a-fA-F]{6}$')) %}hex colour like #2f6bff{% endif %}"
+brand_accent:
+  type: str
+  default: "#ff7a33"
+  validator: "{% if not (brand_accent | regex_search('^#[0-9a-fA-F]{6}$')) %}hex colour like #ff7a33{% endif %}"
+brand_font:
+  type: str
+  default: Inter
+starter_plan_price_usd:
+  type: int
+  default: 29
+starter_plan_interval:
+  type: str
+  choices: [month, year]
+  default: month
+logo_path:
+  type: str
+  help: Optional path to an SVG logo; leave empty to use the template's brand/logo.svg
+  default: ""

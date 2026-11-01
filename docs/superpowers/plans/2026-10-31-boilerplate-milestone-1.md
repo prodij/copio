@@ -311,6 +311,9 @@ git commit -m "chore: archive Phase 1.0 and start the Copier template"
 
 ---
 
+> Note 2026-11-01 (Task 1 execution): the secret scan now iterates `git ls-files --cached --others --exclude-standard` instead of rglob, so ignored files (.venv, .dev) are skipped. Key-shaped fixture strings in this plan were shortened (`sk_test_x`, `sk_live_x`) so the plan itself passes the scan. Also: `data` was not tracked and was dropped from `git rm`; the Phase-1.0 root `.env.example` was removed; pytest config gained a `slow` marker with `-m 'not slow'` default; copier.yml gained the optional `logo_path` question (used by Task 11).
+
+
 ### Task 2: Backend foundation (settings, database, health, errors)
 
 **Files:**
@@ -353,7 +356,7 @@ TEST_SETTINGS = Settings(
     lago_api_url="http://lago.test",
     lago_api_key="lago-key",
     lago_webhook_issuer="http://lago.test",
-    stripe_secret_key="sk_test_placeholder",
+    stripe_secret_key="sk_test_x",
 )
 
 
@@ -4248,8 +4251,8 @@ def run(tool: str, tool_input: dict[str, str]) -> int:
         ("Bash", {"command": "cat .bootstrap/backend.pat"}),
         ("Bash", {"command": "git push origin main"}),
         ("Bash", {"command": "git push --force origin feat/x"}),
-        ("Bash", {"command": "echo sk_live_abcdefghijk"}),
-        ("Write", {"file_path": "x.py", "content": "KEY='sk_live_abcdefghijk'"}),
+        ("Bash", {"command": "echo sk_live_x"}),
+        ("Write", {"file_path": "x.py", "content": "KEY='sk_live_x'"}),
     ],
 )
 def test_blocked(tool: str, tool_input: dict[str, str]) -> None:
