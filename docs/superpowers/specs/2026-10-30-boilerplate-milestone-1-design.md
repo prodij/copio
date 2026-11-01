@@ -22,9 +22,9 @@ Milestone 1 is done when, in a freshly generated product running on Docker Compo
 
 Products are built in three steps, repeated per product:
 
-1. **Boilerplate**: generate the product from this template (`copier copy`).
+1. **Boilerplate**: generate the product from this template (`copier copy --trust`).
 2. **Extract intent**: read an existing system (code, plans, tests) and write what it must do and why into `~/brain` as notes that don't depend on any language or framework: rules, formulas, edge cases, worked examples.
-3. **Apply**: implement the business logic fresh in the generated product from those notes, using the stack's own idioms. Generic fixes found while building a product flow back into the template; `copier update` brings them to existing products.
+3. **Apply**: implement the business logic fresh in the generated product from those notes, using the stack's own idioms. Generic fixes found while building a product flow back into the template; `copier update --trust` brings them to existing products.
 
 The first product through the pattern is the **Copio diagnostic agent**, rebuilt (see §12).
 
@@ -128,7 +128,7 @@ Products add their own tables. Every product table carries `workspace_id`.
   - the Zitadel label policy (colors, logo, font), applied through Zitadel's API,
   - Lago's organization name and logo, used on invoices.
 - `make up` starts Docker Compose:
-  - Postgres (databases `app`, `zitadel`, `lago`), Redis and MinIO,
+  - Postgres (databases `app`, `zitadel`, `lago`), Redis and SeaweedFS (S3; replaced MinIO, whose pinned image can no longer be pulled — note 2026-11-01),
   - Zitadel and its login UI,
   - Lago (api, worker, clock, front, pdf),
   - the backend, the frontend dev server and the job scheduler,
@@ -160,7 +160,7 @@ Products add their own tables. Every product table carries `workspace_id`.
 - **Isolation:** an architecture test reads another workspace's data through every endpoint and job helper and must fail.
 - **Frontend:** Vitest and Testing Library with a mocked API.
 - **End to end:** `make e2e`, Playwright against real containers and Stripe test mode. Runs in the template self-test and nightly.
-- **Template self-test (CI):** `copier copy` into a temp dir, then lint, typecheck, unit tests, and e2e on the generated product.
+- **Template self-test (CI):** `copier copy --trust` into a temp dir, then lint, typecheck, unit tests, and e2e on the generated product.
 
 ### Agent rules (in each product's `CLAUDE.md` and `.claude/`)
 

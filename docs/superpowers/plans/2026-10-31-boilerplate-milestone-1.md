@@ -14,7 +14,7 @@
 
 - Personal project. No code is copied from NG or Skylit repositories; everything is written fresh (spec D12).
 - `prodij/copio` is public: no secret values in git, ever. `.env` is git-ignored; `.env.example` has names only. The template self-test fails on anything resembling a key.
-- Zitadel and Lago run as unmodified images, pinned: `ghcr.io/zitadel/zitadel:v4.20.0`, `ghcr.io/zitadel/zitadel-login:v4.20.0`, `getlago/api:v1.55.0`, `getlago/front:v1.55.0`, `getlago/lago-gotenberg:7.8.2`, Postgres image `getlago/postgres-partman:15.0-alpine` (Lago needs pg_partman), `redis:7-alpine`, `minio/minio:RELEASE.2025-09-07T16-13-09Z`, `stripe/stripe-cli:v1.55.6`.
+- Zitadel and Lago run as unmodified images, pinned: `ghcr.io/zitadel/zitadel:v4.20.0`, `ghcr.io/zitadel/zitadel-login:v4.20.0`, `getlago/api:v1.55.0`, `getlago/front:v1.55.0`, `getlago/lago-gotenberg:7.8.2`, Postgres image `getlago/postgres-partman:15.0-alpine` (Lago needs pg_partman), `redis:7-alpine`, `chrislusf/seaweedfs:3.97` (S3; replaced `minio/minio:RELEASE.2025-09-07T16-13-09Z`, no longer pullable — note 2026-11-01 under Task 12), `stripe/stripe-cli:v1.55.6`.
 - The backend is the only caller of Zitadel's and Lago's APIs. The frontend talks only to the backend (except the OIDC redirect to Zitadel's login and the Stripe-hosted checkout page).
 - Access is decided only by `require_feature`. Plans change only in `backend/app/billing/plans.yaml`.
 - Every product table carries `workspace_id`; jobs refuse queries without one.
@@ -255,7 +255,7 @@ test-results/
 ```markdown
 # {{ product_name }}
 
-Generated from [prodij/copio](https://github.com/prodij/copio). Update with `copier update`.
+Generated from [prodij/copio](https://github.com/prodij/copio). Update with `copier update --trust`.
 
     cp .env.example .env      # then fill in Stripe test keys
     make up && make bootstrap
@@ -295,7 +295,7 @@ This repo is a Copier template. `template/` becomes a product; `tests/` generate
 - Spec: docs/superpowers/specs/2026-10-30-boilerplate-milestone-1-design.md
 ```
 
-Replace `README.md` with a short description: what Copio is (a SaaS boilerplate), `copier copy gh:prodij/copio my-product`, and a link to the spec and the archive tag.
+Replace `README.md` with a short description: what Copio is (a SaaS boilerplate), `copier copy --trust gh:prodij/copio my-product`, and a link to the spec and the archive tag.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -4327,6 +4327,13 @@ git commit -m "feat: Docker Compose stack, idempotent bootstrap, env generator a
 ---
 
 ### Task 13: Agent rules, guard hook, isolation test, CI and the end-to-end test
+
+> **Note 2026-11-01 (Task 13; rulings P12, P31, checkout option A follow-through, SMTP, docs):** Changes from the text below.
+> - **Isolation test** uses the conftest fixtures `auth`/`owner_headers`/`owner_workspace` (P12; no import from `tests.test_checkout`). FastAPI 0.162 keeps included routers as nested `_IncludedRouter` entries in `app.routes`, so the plan's `isinstance(route, APIRoute)` loop saw only `/health` and passed vacuously; the test walks `fastapi.routing.iter_route_contexts(app.routes)` and asserts the walk finds `/workspaces`, `/me`, `/billing/checkout`. Every route that depends on `current_workspace` (any method, so **POST `/billing/checkout`** too, P31) is parametrized: an owner naming another ready workspace (which has an active plan) or a random id in `X-Workspace-Id` gets 403. Also: the owner's own `/me`, `/me/access`, `/demo/premium-report` never show the other workspace's plan, and a role for a `creating` workspace grants nothing. **Jobs** (P31): `jobs/tests/test_isolation.py` asserts `ScopedDb` refuses SQL without a bound `:workspace_id` (a forgotten-scope guard, not a boundary) and that handlers import nothing from SQLAlchemy but `create_engine` and never call `connect`/`begin`/`exec_driver_sql`/`.engine`.
+> - **Guard hook**: `guard.py` parses commands instead of the plan's regexes (which blocked `git push origin feat/main-page` and every Write mentioning `.env`). Blocks reading `.env`/`.env.*` (not `.env.example`) and anything under `.bootstrap/` via Read/Edit/Write/Grep paths or Bash; any `sk_live_` string in any tool input; `git push` whose destination is main/master (incl. `HEAD:main`, `--all`/`--mirror`, a bare push while on main); `--force*`, `-f`, `+refspec`; and **`rm -r`/`rm -rf` of anything outside the repo or of the repo itself** (follows `cd`, refuses `$VAR`/backtick paths) (P31). Unreadable input is blocked (fails closed). `settings.json` runs it as `python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/guard.py"` for Bash, Read, Write, Edit, MultiEdit, NotebookEdit, Grep, Glob.
+> - **Workflows** pin `actions/checkout` v7.0.1, `actions/setup-node` v7.1.0, `astral-sh/setup-uv` v10.3.3 (uv 0.10.2), `actions/upload-artifact` v7.0.2 by commit SHA. `backend.yml` also fails when `openapi.json` is stale; added `scripts.yml` (scripts ruff/mypy/pytest + guard-hook tests, the rest of `make check`). `e2e.yml` needs only `STRIPE_SECRET_KEY` (no `STRIPE_API_KEY` since Task 12), writes it to `.env` before `make env` (which keeps it), refuses non-`sk_test_` values, uploads the Playwright report and Compose logs on failure, and always runs `docker compose down -v`. `template.yml` adds `schedule` for the nightly e2e and checks out with `fetch-depth: 0` (copier clones the repo at HEAD).
+> - **e2e**: `playwright.config.ts.jinja` (it needs `domain`) builds the base URL from `APP_URL` or `http://<domain>:$APP_PORT` (`make e2e` exports .env). Playwright 1.64.1, lockfile committed. Selectors checked against the real zitadel-login v4.20.0 UI in a rendered product (copio-t13 stack): "Register new user" is a button, the register form defaults to **Passkey** so the test picks the **Password** radio, labels are "Password \*"/"Confirm Password \*"; no email code (SMTP ruling). Sign-up → callback → workspace → plans passed for real; the Stripe leg could not run without test keys. Choosing the plan is retried while checkout answers 503 "Stripe customer is unavailable" (Lago creates the Stripe customer in a background job). Stripe's page is filled by input id (`#cardNumber`, `#cardExpiry`, `#cardCvc`, optional `#email`/`#billingName`/`#billingPostalCode`, submit `hosted-payment-submit-button`), unverified here.
+> - **Second leg (checkout option A follow-through):** after Stripe's hosted setup page returns to `/billing/return`, the test waits for CheckoutReturn's `POST /billing/checkout` and asserts it answered `{"checkout_url": null}` (the gated subscription was created). It then waits on **`/premium` showing "Generated for E2E Co"** (reloading until Lago's invoice-paid webhook turned `premium_report` on), never on the return page's "Open premium report" link.
 
 **Files:**
 - Create: `template/CLAUDE.md.jinja`, `template/.claude/settings.json`, `template/.claude/hooks/guard.py`, `template/.claude/hooks/test_guard.py`, `template/backend/tests/test_isolation.py`, `template/.github/workflows/backend.yml`, `frontend.yml`, `jobs.yml`, `e2e.yml`, `template/e2e/package.json`, `template/e2e/playwright.config.ts`, `template/e2e/signup-to-premium.spec.ts`, `.github/workflows/template.yml`, `tests/test_generated_checks.py`

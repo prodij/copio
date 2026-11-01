@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob",
+        "hooks": [{ "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.py\"" }]
+      }
+    ]
+  },
+  "permissions": {
+    "deny": ["Read(./.env)", "Read(./.env.local)", "Read(./.bootstrap/**)"]
+  }
+}
