@@ -43,3 +43,8 @@ def test_no_secret_values_anywhere() -> None:
         if any(p.search(text) for p in SECRET_PATTERNS):
             offenders.append(rel)
     assert offenders == []
+
+
+def test_default_logo_is_the_template_logo(product_dir: pathlib.Path) -> None:
+    assert "<svg" in (product_dir / "brand" / "logo.svg").read_text()
+    assert (product_dir / "brand" / "brand.yaml").read_text().count("Acme Reports") == 1
