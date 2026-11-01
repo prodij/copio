@@ -8,7 +8,11 @@ class MissingWorkspaceScope(Exception):
 
 
 class ScopedDb:
-    """The jobs' only way to the database: every query names one workspace."""
+    """The jobs' way to the database: every query must name one workspace.
+
+    This guards against forgetting the scope. It is not an isolation boundary: it checks that
+    `:workspace_id` appears in the SQL and is bound, not that every table in the query is filtered by it.
+    """
 
     def __init__(self, engine: Engine) -> None:
         self.engine = engine

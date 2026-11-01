@@ -26,6 +26,7 @@ class FakeLago:
     latest_payment: dict[str, str] = field(default_factory=dict)  # customer -> latest invoice payment_status
     cards: set[str] = field(default_factory=set)  # customers with a default payment method
     down: set[str] = field(default_factory=set)  # external ids whose lookup answers 500
+    garbled: set[str] = field(default_factory=set)  # external ids whose lookup answers 200 non-JSON
     already_incomplete: set[str] = field(default_factory=set)  # create answers 422 subscription_incomplete
     rejected: set[str] = field(default_factory=set)  # create answers 422 no_default_payment_method
     created: list[dict[str, Any]] = field(default_factory=list)  # every create attempt
@@ -33,6 +34,8 @@ class FakeLago:
     def get_subscription(self, request: httpx.Request, external_id: str) -> httpx.Response:
         if external_id in self.down:
             return httpx.Response(500)
+        if external_id in self.garbled:
+            return httpx.Response(200, text="<html>proxy</html>")
         status = request.url.params.get("status", "active")
         if self.subscriptions.get(external_id) != status:
             return httpx.Response(404, json={"status": 404, "error": "Not Found", "code": "subscription_not_found"})
@@ -166,26 +169,99 @@ def test_reconcile_loses_to_a_concurrent_webhook(router: respx.Router, monkeypat
     assert _rows(engine)["a"][0] == "canceled"
 
 
-def test_sample_fetch_stores_raw_then_one_row_per_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("state", "lago_status", "latest", "expected"),
+    [
+        ("active", "incomplete", None, "pending"),
+        ("active", "pending", None, "pending"),
+        ("active", "canceled", None, "canceled"),
+        ("past_due", "active", "pending", "past_due"),  # payment retry in flight: keep
+        ("past_due", "active", None, "past_due"),
+    ],
+)
+def test_reconcile_maps_lago_status(router: respx.Router, state: str, lago_status: str,
+                                    latest: str | None, expected: str) -> None:
+    engine = _db([("a", state, "a:starter:00000000", "a:starter:00000000")], {"a": "ready"})
+    lago = FakeLago(subscriptions={"a:starter:00000000": lago_status},
+                    latest_payment={"a": latest} if latest else {})
+    billing_reconcile.reconcile(ScopedDb(engine), lago.client(router))
+    assert _rows(engine)["a"][0] == expected
+
+
+def test_reconcile_skips_rows_without_any_lago_id(router: respx.Router) -> None:
+    engine = _db([("a", "pending", None, None)], {"a": "ready"})
+    lago = FakeLago(cards={"a"})
+    assert billing_reconcile.reconcile(ScopedDb(engine), lago.client(router)) == {"checked": 1, "changed": 0, "errors": 0}
+    assert lago.created == []
+    assert not router.calls
+
+
+def test_reconcile_adopts_a_lost_create_that_was_canceled(router: respx.Router) -> None:
+    engine = _db([("a", "pending", "a:starter:00000000", None)], {"a": "ready"})
+    lago = FakeLago(subscriptions={"a:starter:00000000": "canceled"}, cards={"a"})
+    assert billing_reconcile.reconcile(ScopedDb(engine), lago.client(router)) == {"checked": 1, "changed": 1, "errors": 0}
+    assert _rows(engine)["a"] == ("canceled", "a:starter:00000000", True)
+    assert lago.created == []
+
+
+def test_reconcile_counts_an_unreadable_answer_as_an_error(router: respx.Router) -> None:
+    engine = _db([("a", "active", "a:starter:00000000", "a:starter:00000000"),
+                  ("b", "pending", "b:starter:00000000", "b:starter:00000000")], {"a": "ready", "b": "ready"})
+    lago = FakeLago(subscriptions={"b:starter:00000000": "active"}, latest_payment={"b": "succeeded"})
+    lago.garbled.add("a:starter:00000000")
+    assert billing_reconcile.reconcile(ScopedDb(engine), lago.client(router)) == {"checked": 2, "changed": 1, "errors": 1}
+    assert _rows(engine)["b"][0] == "active"
+
+
+FEED_BODY = b'{"amount":1.0,"base":"USD","date":"2026-10-30","rates":{"EUR":0.89509}}'
+
+
+@pytest.fixture
+def sample_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
+    """sqlite with the 0003 shape (unique raw_key), moto S3 with bucket `raw`, and the feed faked."""
     url = f"sqlite:///{tmp_path / 'jobs.db'}"
     engine = create_engine(url)
     with engine.begin() as c:
         c.exec_driver_sql("create table workspaces (id text, status text)")
         c.exec_driver_sql("insert into workspaces values ('a', 'ready'), ('b', 'ready'), ('c', 'creating')")
         c.exec_driver_sql("create table sample_rows (id integer primary key, workspace_id text not null,"
-                          " raw_key text not null, value text not null)")
+                          " raw_key text not null unique, value text not null)")
     for name, value in {"DATABASE_URL": url, "RAW_BUCKET": "raw", "AWS_ACCESS_KEY_ID": "testing",
                         "AWS_SECRET_ACCESS_KEY": "testing", "AWS_DEFAULT_REGION": "us-east-1"}.items():
         monkeypatch.setenv(name, value)
     monkeypatch.delenv("S3_ENDPOINT_URL", raising=False)
     with mock_aws(), respx.mock:
-        respx.get(sample_fetch.FEED).respond(200, text="Keep it logically awesome.\n")
-        s3 = boto3.client("s3", region_name="us-east-1")
-        s3.create_bucket(Bucket="raw")
-        result = sample_fetch.handler({}, None)
-        with engine.connect() as c:
-            rows = c.execute(text("select workspace_id, raw_key, value from sample_rows order by workspace_id")).all()
-        day = datetime.now(UTC).strftime("%Y/%m/%d")
-        assert result == {"run_id": result["run_id"], "workspaces": 2}
-        assert rows == [(ws, f"raw/zen/{ws}/{day}/{result['run_id']}.txt", "Keep it logically awesome.") for ws in "ab"]
-        assert s3.get_object(Bucket="raw", Key=rows[0][1])["Body"].read() == b"Keep it logically awesome.\n"
+        respx.get(sample_fetch.FEED).respond(200, content=FEED_BODY)
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="raw")
+        yield engine
+    engine.dispose()
+
+
+def _sample_rows(engine: Engine) -> list[tuple[str, str, str]]:
+    with engine.connect() as c:
+        return [tuple(r) for r in c.execute(text("select workspace_id, raw_key, value from sample_rows order by workspace_id"))]
+
+
+def test_sample_fetch_stores_raw_then_one_row_per_workspace(sample_env: Engine) -> None:
+    result = sample_fetch.handler({}, None)
+    day = datetime.now(UTC).strftime("%Y/%m/%d")
+    assert result == {"run_id": result["run_id"], "workspaces": 2}
+    rows = _sample_rows(sample_env)
+    assert rows == [(ws, f"raw/fx/{ws}/{day}/{result['run_id']}.json", "0.89509") for ws in "ab"]
+    s3 = boto3.client("s3", region_name="us-east-1")
+    assert s3.get_object(Bucket="raw", Key=rows[0][1])["Body"].read() == FEED_BODY
+
+
+def test_sample_fetch_reprocesses_from_storage(sample_env: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    sample_fetch.handler({}, None)
+    key = _sample_rows(sample_env)[0][1]
+    monkeypatch.setattr(sample_fetch, "parse", lambda raw: f"EUR {json.loads(raw)['rates']['EUR']}")  # the parsing fix
+    assert sample_fetch.handler({"reprocess": [key]}, None) == {"reprocessed": 1}
+    assert [r for r in _sample_rows(sample_env) if r[0] == "a"] == [("a", key, "EUR 0.89509")]
+    assert len(_sample_rows(sample_env)) == 2
+
+
+@pytest.mark.parametrize("key", ["raw/zen/a/2026/10/31/r.json", "raw/fx//2026/10/31/r.json", "other/fx/a/x"])
+def test_sample_fetch_refuses_foreign_keys(sample_env: Engine, key: str) -> None:
+    with pytest.raises(ValueError, match="not a raw fx key"):
+        sample_fetch.handler({"reprocess": [key]}, None)

@@ -2533,6 +2533,16 @@ git commit -m "feat(access): require_feature, /me/access, usage and sample premi
 >   - The Dockerfile pins uv 0.10.2 (P11). Ruff ignores E501 (P6). Mypy strict covers `jobs`.
 > - **Tests:** 12, not 9 (P5): storage 1, db 5, scheduler 2 (adds "shipped schedules name real handlers"), handlers 4 (state repairs, finishing started checkouts, a concurrent webhook wins, `sample_fetch` raw then row).
 > - **Migration:** `0003_sample_rows` was checked with upgrade, downgrade and upgrade against Postgres 15.
+> - **Review fixes 2026-11-01 (spec §7 wins over the text below):**
+>   - `sample_fetch` reads a public JSON feed: Frankfurter `https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR`, no auth. `parse` takes `rates.EUR`. Raw objects go to `raw/fx/<ws>/<yyyy>/<mm>/<dd>/<run_id>.json`.
+>   - `process(db, store, workspace_id, key)` turns a stored raw object into the row. It upserts on `raw_key` (`ON CONFLICT (raw_key) DO UPDATE SET value = excluded.value`) and refuses a key from another source or another workspace.
+>   - To re-run after a parsing fix, send the event `{"reprocess": [keys]}`.
+>   - `0003` adds a unique constraint on `sample_rows.raw_key` and the index `ix_sample_rows_workspace_id`.
+>   - Reconcile counts `KeyError`/`ValueError` (an unreadable Lago answer) per workspace in `errors`.
+>   - Both handlers dispose their engine (and HTTP client) in `finally`.
+>   - The `ScopedDb` docstring says it guards against a forgotten scope; it is not an isolation boundary.
+>   - Kept: the active→past_due repair when the latest finalized invoice failed.
+>   - Tests: 24 (adds reprocess, foreign-key refusal ×3, Lago status mapping ×5, both ids NULL skipped, lost create now canceled adopted, unreadable answer counted as an error).
 
 - [ ] **Step 1: Write the failing tests**
 

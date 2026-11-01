@@ -165,15 +165,18 @@ def reconcile(db: ScopedDb, lago: Lago) -> dict[str, int]:
         checked += 1
         try:
             changed += _reconcile_one(db, lago, ws["id"], rows[0])
-        except LagoUnavailable as exc:
-            log.warning("reconcile %s: %s", ws["id"], exc)
+        except (LagoUnavailable, KeyError, ValueError) as exc:  # Lago down, or an answer we cannot read
+            log.warning("reconcile %s: %s", ws["id"], repr(exc))
             errors += 1
     return {"checked": checked, "changed": changed, "errors": errors}
 
 
 def handler(event: dict[str, Any], context: object | None) -> dict[str, int]:
-    db = ScopedDb(create_engine(os.environ["DATABASE_URL"]))
+    engine = create_engine(os.environ["DATABASE_URL"])
     http = httpx.Client(base_url=os.environ["LAGO_API_URL"],
                         headers={"Authorization": f"Bearer {os.environ['LAGO_API_KEY']}"}, timeout=15.0)
-    with http:
-        return reconcile(db, Lago(http))
+    try:
+        return reconcile(ScopedDb(engine), Lago(http))
+    finally:
+        http.close()
+        engine.dispose()
