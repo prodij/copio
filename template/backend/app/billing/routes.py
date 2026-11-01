@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -19,6 +20,7 @@ from app.integrations import get_lago
 from app.integrations.lago import LagoClient
 from app.workspaces.routes import CurrentWorkspace, current_workspace
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/billing")
 
 
@@ -53,16 +55,22 @@ def checkout(
     return CheckoutOut(checkout_url=start_checkout(session, current.workspace, plan, lago))
 
 
+def _reject(event_id: str | None, reason: str) -> HTTPException:
+    """Spec §9: a rejected delivery is a 400 and is logged, with the reason only (never the token or body)."""
+    log.warning("Rejected Lago webhook %s: %s", (event_id or "-")[:128], reason)
+    return HTTPException(status.HTTP_400_BAD_REQUEST, reason)
+
+
 def _process_webhook(session: Session, verifier: WebhookVerifier, raw_body: bytes, signature: str,
                      event_id: str) -> bool:
     try:
         payload = verifier.verify(raw_body, signature)
     except BadSignature as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bad signature") from exc
+        raise _reject(event_id, f"bad signature: {exc}") from exc
     try:
-        return handle_event(session, event_id, payload)
+        return handle_event(session, event_id, payload, signature)
     except UnknownWebhookType as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown Lago webhook type") from exc
+        raise _reject(event_id, str(exc)) from exc
 
 
 @router.post("/webhooks/lago")
@@ -75,10 +83,12 @@ async def lago_webhook(
     x_lago_signature_algorithm: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
     """Async only to read the raw body (the signature covers it); verifying and the DB work run in a thread."""
-    if not x_lago_signature or not x_lago_unique_key or len(x_lago_unique_key) > 128:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Missing Lago signature or unique key")
+    if not x_lago_signature:
+        raise _reject(x_lago_unique_key, "missing X-Lago-Signature")
+    if not x_lago_unique_key or len(x_lago_unique_key) > 128:
+        raise _reject(None, "missing or oversized X-Lago-Unique-Key")
     if x_lago_signature_algorithm not in (None, "jwt"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Lago webhook endpoint must use signature_algo jwt")
+        raise _reject(x_lago_unique_key, "signature algorithm is not jwt (endpoint must use signature_algo jwt)")
     raw_body = await request.body()
     processed = await run_in_threadpool(
         _process_webhook, session, verifier, raw_body, x_lago_signature, x_lago_unique_key

@@ -1908,6 +1908,16 @@ git commit -m "feat(billing): plans as code, plan sync, payment-gated checkout"
 > - **Unknown types (P28):** a type in Lago's list (`config/webhook_event_types.yml`, 75 types, held as `LAGO_WEBHOOK_TYPES`) that we don't act on → 200, stored, logged. A type not in the list → 400, not stored.
 > - **Also:** `current_period_end` comes from `subscription.current_billing_period_ending_at` on `subscription.*` webhooks and never moves backwards (P16). The route is `async` only to read the raw body; verify and the DB work run in a threadpool (P32b). `get_webhook_verifier` takes settings and the Lago client through `Depends`. Tests use fixture payloads in `backend/tests/fixtures/lago/` (P31c).
 
+> **Note 2026-11-01 (Task 6 review, controller ruling; changes Task 5 code):**
+> - **Per-attempt Lago external id:** this replaces the fixed `{workspace_id}:{plan_code}` from Task 5.
+>   - The id is `{workspace_id}:{plan_code}:{8 hex}`. Checkout generates a new one when the row is first recorded, when it restarts from `canceled`, and when the plan changes before a Lago subscription exists.
+>   - It is stored in the new column `subscriptions.lago_external_id` *before* `create_subscription` is called. A retried create reuses the same id, so Lago's "already exists" answer still counts as done.
+>   - `lago_subscription_id` keeps its Task 5 meaning: it is null until the Lago subscription exists, then holds the same value. Tasks 7 and 8 keep using it.
+>   - Webhooks match on `lago_external_id`. A late event from a canceled attempt therefore matches nothing, and an event that arrives before `lago_subscription_id` is saved still matches.
+>   - Both columns are now `String(128)`, edited in migration 0002 (nothing has shipped).
+> - **Rejections are logged:** every rejected delivery (missing or bad signature, HMAC algorithm, unknown type, body that is not a JSON object) is a 400 plus one warning that names the reason, never the token or the body (spec §9).
+> - **Replay dedupe:** `webhook_events.signature_sha256` is unique. A delivery is a duplicate if either its `X-Lago-Unique-Key` or its signature was seen before; Lago retries resend the identical JWT. The remaining risk is documented in `handle_event`: a replay works again if its row is ever deleted.
+
 **Files:**
 - Create: `template/backend/app/billing/states.py`, `template/backend/app/billing/webhooks.py`; `template/backend/tests/test_states.py`, `template/backend/tests/test_webhooks.py`
 - Modify: `template/backend/app/billing/routes.py` (add webhook route)

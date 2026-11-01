@@ -5,6 +5,7 @@ body and whose `iss` is Lago's LAGO_API_URL (endpoint signature_algo `jwt`, Lago
 `X-Lago-Unique-Key` is Lago's webhook id, the same on every retry of one delivery.
 """
 
+import hashlib
 import json
 import logging
 import uuid
@@ -80,14 +81,19 @@ class WebhookVerifier:
         self.issuer = issuer
 
     def verify(self, raw_body: bytes, signature: str) -> dict[str, Any]:
+        """Raises BadSignature with a fixed reason, safe to log (never the token or the body)."""
         try:
             claims = jwt.decode(signature, self.key, algorithms=["RS256"], issuer=self.issuer,
                                 options={"require": ["iss"], "verify_aud": False})
+        except jwt.PyJWTError as exc:
+            raise BadSignature(f"invalid JWT ({type(exc).__name__})") from exc
+        try:
             body = json.loads(raw_body)
-            if json.loads(claims["data"]) != body:
-                raise BadSignature("body does not match signed data")
-        except (jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
-            raise BadSignature(str(exc)) from exc
+            signed = json.loads(claims["data"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise BadSignature("body or signed data is not JSON") from exc
+        if signed != body:
+            raise BadSignature("body does not match signed data")
         if not isinstance(body, dict):
             raise BadSignature("body is not a JSON object")
         return body
@@ -111,18 +117,19 @@ def _dict(value: object) -> dict[str, Any]:
 
 
 def _subscriptions(session: Session, payload: dict[str, Any]) -> list[Subscription]:
-    """The subscriptions a delivery is about, locked. Rows still without a Lago id never match by external id."""
+    """The subscriptions a delivery is about, locked. Matched on the current attempt's external id,
+    which is saved before the Lago create, so events for an earlier (canceled) attempt match nothing."""
     object_type = payload.get("object_type")
     obj = _dict(payload.get(str(object_type)))
     if object_type == "subscription":
-        condition = Subscription.lago_subscription_id == str(obj.get("external_id"))
+        condition = Subscription.lago_external_id == str(obj.get("external_id"))
     elif object_type == "invoice":
         # Lago's invoice webhooks carry fees, not subscriptions; each fee names its subscription.
         fees = obj.get("fees")
         fees = fees if isinstance(fees, list) else []
         ids = {str(f["external_subscription_id"]) for f in fees
                if isinstance(f, dict) and f.get("external_subscription_id")}
-        condition = Subscription.lago_subscription_id.in_(sorted(ids))
+        condition = Subscription.lago_external_id.in_(sorted(ids))
     elif object_type == "payment_provider_invoice_payment_error":
         # invoice.payment_failure names only the customer, whose external id is our workspace id.
         try:
@@ -148,16 +155,28 @@ def _period_end(payload: dict[str, Any]) -> datetime | None:
     return parsed.replace(tzinfo=UTC) if parsed is not None and parsed.tzinfo is None else parsed
 
 
-def handle_event(session: Session, event_id: str, payload: dict[str, Any]) -> bool:
-    """Applies one verified delivery at most once. False if `event_id` was already processed."""
+def signature_digest(signature: str) -> str:
+    return hashlib.sha256(signature.encode()).hexdigest()
+
+
+def handle_event(session: Session, event_id: str, payload: dict[str, Any], signature: str | None = None) -> bool:
+    """Applies one verified delivery at most once. False if it was already processed.
+
+    A delivery is a duplicate if its `X-Lago-Unique-Key` or its signature was seen before. Lago's
+    retries resend the identical JWT (RS256 is deterministic over the same payload), so a captured
+    delivery re-posted under a fresh unique key is caught too. Residual risk: the JWT has no expiry
+    or timestamp, so a captured delivery replays again if its webhook_events row is ever deleted.
+    Two separate deliveries with identical payloads (same type, same object state) count as one;
+    applying the second could not change state anyway.
+    """
     webhook_type = payload.get("webhook_type")
     if webhook_type not in LAGO_WEBHOOK_TYPES:
-        log.warning("Rejected Lago webhook %s: unknown type %r", event_id, webhook_type)
-        raise UnknownWebhookType(str(webhook_type))
+        raise UnknownWebhookType(f"unknown type {str(webhook_type)[:64]!r}")
     webhook_type = str(webhook_type)
+    digest = signature_digest(signature) if signature else None
     inserted = session.execute(
-        insert(WebhookEvent).values(id=event_id, type=webhook_type, payload=payload)
-        .on_conflict_do_nothing(index_elements=["id"]).returning(WebhookEvent.id)
+        insert(WebhookEvent).values(id=event_id, signature_sha256=digest, type=webhook_type, payload=payload)
+        .on_conflict_do_nothing().returning(WebhookEvent.id)  # either unique column: id or signature
     ).scalar_one_or_none()
     if inserted is None:
         log.info("Ignored duplicate Lago webhook %s (%s)", event_id, webhook_type)
