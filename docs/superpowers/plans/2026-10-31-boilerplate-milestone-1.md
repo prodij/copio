@@ -316,6 +316,8 @@ git commit -m "chore: archive Phase 1.0 and start the Copier template"
 
 ### Task 2: Backend foundation (settings, database, health, errors)
 
+> **Note 2026-11-01 (Task 2):** `create_app(settings=None)` with lazy settings so importing `app.main` needs no env; `zitadel_service_token` defaults to `""`; ruff ignores E501 and imports are sorted (env.py); `alembic.ini` has `prepend_sys_path = .`; Dockerfile pins uv 0.10.2; added `tests/__init__.py` and an import-needs-no-env test (4 tests, not 3); dropped the unneeded `type: ignore[call-arg]` in `get_settings` (mypy strict flags it); test Postgres on host port 55432 via `TEST_DATABASE_URL`.
+
 **Files:**
 - Create: `template/backend/pyproject.toml`, `template/backend/Dockerfile`, `template/backend/alembic.ini`, `template/backend/migrations/env.py`, `template/backend/migrations/script.py.mako`, `template/backend/app/__init__.py`, `template/backend/app/main.py`, `template/backend/app/config.py`, `template/backend/app/db.py`, `template/backend/app/errors.py`, `template/backend/tests/conftest.py`, `template/backend/tests/test_health.py`, `template/backend/tests/test_config.py`
 - Delete: `template/backend/.gitkeep`
