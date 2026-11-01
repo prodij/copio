@@ -1,0 +1,23 @@
+# {{ product_name }}
+
+Generated from [prodij/copio](https://github.com/prodij/copio). Update with `copier update --trust`.
+
+    make env          # writes .env (git-ignored) with generated local secrets
+    # paste a Stripe TEST secret key (sk_test_..., https://dashboard.stripe.com/test/apikeys)
+    # into STRIPE_SECRET_KEY= in .env, then:
+    make up           # starts the stack
+    make bootstrap    # configures Zitadel, Lago and Stripe once; safe to run again
+    open http://{{ domain }}:5173    # 5173 is the default APP_PORT; use yours if you changed it
+
+Host ports are set in `.env` (defaults: app 5173, API 8000, Zitadel 8085, its login page 3100,
+Lago API 3000 and UI 8088, Postgres 5432, S3 (SeaweedFS) 8333). Change any that clash with another
+project, then `make up`. Every port is published on 127.0.0.1 only.
+
+- `make e2e` runs the Playwright sign-up-to-premium test against the running stack (after
+  `make bootstrap`). `make check` runs lint, types and unit tests (needs Postgres: `make up`).
+- Brand colours, font and logo live in `brand/brand.yaml`; they reach the app, the Zitadel login
+  page and Lago when `make brand` runs (`make bootstrap` runs it too).
+- The Zitadel console (`http://auth.{{ domain }}:8085/ui/console`, with your ZITADEL_PORT) signs in
+  as `admin@{{ domain }}` with `ZITADEL_ADMIN_PASSWORD` from `.env`; the Lago UI as
+  `LAGO_ORG_USER_EMAIL` with `LAGO_ORG_USER_PASSWORD`.
+- `make doctor` lists stuck workspaces, checkouts and webhooks; `make reset` deletes all local data.

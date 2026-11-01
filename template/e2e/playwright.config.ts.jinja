@@ -1,0 +1,22 @@
+import { defineConfig, devices } from "@playwright/test";
+
+// The app's public URL, built like scripts/bootstrap.py builds it (`make e2e` exports .env, so a
+// moved APP_PORT is picked up). *.localhost resolves to 127.0.0.1 inside Chromium.
+const APP_URL = process.env.APP_URL ?? `http://{{ domain }}:${process.env.APP_PORT || "5173"}`;
+
+export default defineConfig({
+  testDir: ".",
+  // One journey through real Zitadel, Lago, Stripe and webhooks: slow, and not parallel.
+  timeout: 5 * 60_000,
+  expect: { timeout: 15_000 },
+  workers: 1,
+  retries: 0,
+  forbidOnly: !!process.env.CI,
+  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
+  use: {
+    baseURL: APP_URL,
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+  },
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+});

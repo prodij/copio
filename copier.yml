@@ -1,0 +1,56 @@
+_subdirectory: template
+_templates_suffix: .jinja
+_answers_file: .copier-answers.yml
+
+# Runs on copy only (an update must not overwrite a logo the product has since edited, nor fail
+# because the source file moved). logo_path is read from where the user's file is, so a relative
+# path would resolve against the new product folder: pass an absolute path (or ~/...).
+# Tasks need `copier copy --trust`.
+_tasks:
+  - command:
+      - python3
+      - -c
+      - |
+        import os, shutil, sys
+        src = os.path.expanduser(sys.argv[1])
+        if src:
+            if not os.path.isfile(src) or b"<svg" not in open(src, "rb").read():
+                sys.exit(f"logo_path {src!r} is not an SVG file (use an absolute path)")
+            shutil.copyfile(src, "brand/logo.svg")
+      - "{% if _copier_operation == 'copy' %}{{ logo_path }}{% endif %}"
+
+product_name:
+  type: str
+  help: Human name of the product
+product_slug:
+  type: str
+  help: Lowercase slug, used for databases, buckets and Zitadel project
+  default: "{{ product_name | lower | replace(' ', '-') }}"
+  validator: "{% if not (product_slug | regex_search('^[a-z][a-z0-9-]{1,30}$')) %}lowercase letters, digits and dashes{% endif %}"
+domain:
+  type: str
+  help: Local domain of the stack (milestone 1 runs only on your machine)
+  default: "{{ product_slug }}.localhost"
+  validator: "{% if not (domain | regex_search('^[a-z0-9]([a-z0-9.-]*[a-z0-9])?[.]localhost$')) %}must end in .localhost: milestone 1 runs only on this machine, and browsers resolve *.localhost to 127.0.0.1 with no DNS or hosts-file setup{% endif %}"
+brand_primary:
+  type: str
+  default: "#2f6bff"
+  validator: "{% if not (brand_primary | regex_search('^#[0-9a-fA-F]{6}$')) %}hex colour like #2f6bff{% endif %}"
+brand_accent:
+  type: str
+  default: "#ff7a33"
+  validator: "{% if not (brand_accent | regex_search('^#[0-9a-fA-F]{6}$')) %}hex colour like #ff7a33{% endif %}"
+brand_font:
+  type: str
+  default: Inter
+starter_plan_price_usd:
+  type: int
+  default: 29
+starter_plan_interval:
+  type: str
+  choices: [month, year]
+  default: month
+logo_path:
+  type: str
+  help: Optional absolute path to an SVG logo (copied to brand/logo.svg); leave empty to use the template's brand/logo.svg
+  default: ""

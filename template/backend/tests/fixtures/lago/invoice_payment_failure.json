@@ -1,0 +1,18 @@
+{
+  "webhook_type": "invoice.payment_failure",
+  "object_type": "payment_provider_invoice_payment_error",
+  "organization_id": "1a901a90-1a90-1a90-1a90-1a901a901a90",
+  "payment_provider_invoice_payment_error": {
+    "lago_invoice_id": "6f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f",
+    "lago_customer_id": "99a6094e-199b-4101-896a-54e927ce7bd7",
+    "external_customer_id": "00000000-0000-0000-0000-000000000000",
+    "provider_customer_id": "cus_x",
+    "payment_provider": "stripe",
+    "payment_provider_code": "stripe",
+    "provider_error": {
+      "message": "Your card was declined.",
+      "error_code": "card_declined"
+    },
+    "error_details": null
+  }
+}

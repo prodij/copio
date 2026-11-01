@@ -1,0 +1,12 @@
+# One file drives the app, Zitadel and Lago: run `make brand` after editing.
+name: {{ product_name | tojson }}
+font: {{ brand_font | tojson }}
+logo: logo.svg
+# font_file: Inter.woff2   # optional; uploaded to Zitadel's login page (ttf, otf, woff, woff2)
+light:
+  primary: {{ brand_primary | tojson }}
+  accent: {{ brand_accent | tojson }}
+  # background: "#ffffff"
+  # foreground: "#111114"
+# dark: optional; computed from light when omitted
+#   primary / accent: 25% lighter than light, background: "#0b0b0c", foreground: "#ececee"

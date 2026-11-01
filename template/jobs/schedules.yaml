@@ -1,0 +1,6 @@
+# job: module name under jobs/handlers; cron in UTC. Milestone 2 turns these into EventBridge schedules.
+schedules:
+  - job: billing_reconcile
+    cron: "*/15 * * * *"
+  - job: sample_fetch
+    cron: "0 * * * *"
