@@ -618,9 +618,18 @@ def test_bootstrap_stripe_sets_the_webhook_secret_last(monkeypatch: pytest.Monke
 
 
 def test_bootstrap_stripe_keeps_an_existing_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], "whsec_abc")
+    current = f"http://{product.DOMAIN}:5173/billing/return"
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe", "successRedirectUrl": current}], "whsec_abc")
     bootstrap.bootstrap_stripe("whsec_abc")
-    assert all(q != bootstrap.ADD_STRIPE for q, _ in fake.graphql)
+    assert [q for q, _ in fake.graphql] == [bootstrap.STRIPE_PROVIDERS]
+
+
+def test_bootstrap_stripe_follows_a_moved_app_port_without_sending_the_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    stale = f"http://{product.DOMAIN}:5163/billing/return"
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe", "successRedirectUrl": stale}], "whsec_abc")
+    bootstrap.bootstrap_stripe("whsec_abc")
+    assert [v for q, v in fake.graphql if q == bootstrap.UPDATE_STRIPE] == [
+        {"i": {"id": "p1", "successRedirectUrl": f"http://{product.DOMAIN}:5173/billing/return"}}]
 
 
 @pytest.mark.parametrize("printed", ["", "\n", "Getting ready...\nnot a secret"])

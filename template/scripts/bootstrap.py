@@ -335,8 +335,9 @@ def bootstrap_lago() -> None:
     print(f"Lago: organization {org_id}, webhook to the backend, metric {USAGE_METRIC}")
 
 
-STRIPE_PROVIDERS = "query{paymentProviders(type: stripe){collection{... on StripeProvider{id code}}}}"
+STRIPE_PROVIDERS = "query{paymentProviders(type: stripe){collection{... on StripeProvider{id code successRedirectUrl}}}}"
 ADD_STRIPE = "mutation($i: AddStripePaymentProviderInput!){addStripePaymentProvider(input:$i){id}}"
+UPDATE_STRIPE = "mutation($i: UpdateStripePaymentProviderInput!){updateStripePaymentProvider(input:$i){id}}"
 # Lago cannot register a Stripe webhook endpoint for a local URL, so it checks the signing secret
 # of `stripe listen` instead (the CLI's secret is fixed per Stripe account). Adding the provider
 # queues Lago's RegisterWebhookJob, which writes Stripe's own endpoint secret on success, so this
@@ -447,9 +448,13 @@ def bootstrap_stripe(webhook_secret: str) -> None:
               "https://dashboard.stripe.com/test/apikeys) into .env and run `make bootstrap` again.")
         return
     providers = lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"]
-    if not any(p.get("code") == "stripe" for p in providers):
+    provider = next((p for p in providers if p.get("code") == "stripe"), None)
+    return_url = f"{app_url()}/billing/return"
+    if provider is None:
         lago_graphql(ADD_STRIPE, {"i": {"name": "Stripe", "code": "stripe", "secretKey": key,
-                                        "successRedirectUrl": f"{app_url()}/billing/return"}})
+                                        "successRedirectUrl": return_url}})
+    elif provider.get("successRedirectUrl") != return_url:  # APP_PORT moved. Stays in Lago: Stripe isn't called.
+        lago_graphql(UPDATE_STRIPE, {"i": {"id": provider["id"], "successRedirectUrl": return_url}})
     compose("up", "-d", "--force-recreate", "stripe-cli")
     apply_stripe_webhook_secret(webhook_secret)  # last: after any RegisterWebhookJob could have run
     print("Stripe: Lago connected; `stripe listen` forwards test webhooks to Lago")
