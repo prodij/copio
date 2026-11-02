@@ -44,7 +44,7 @@ Then, in that session:
 sudo -i
 set -a; . /etc/app.env; set +a
 export PATH="$PATH:/usr/local/bin" HOME="${HOME:-/root}"
-app-start
+app-start || { echo 'app-start failed: stop here'; exit 1; }
 cd /opt/app
 val() { grep "^$1=" .env | cut -d= -f2-; }
 export PGPASSWORD="$(aws secretsmanager get-secret-value --secret-id "$(val DB_ADMIN_SECRET_ARN)" --query SecretString --output text | jq -er .password)"
@@ -53,7 +53,7 @@ docker run --rm -e PGPASSWORD -e PGSSLMODE=require postgres:15-alpine \
 unset PGPASSWORD
 ```
 
-The password is read from Secrets Manager on the server and passed to the container through the environment, so it never appears in a command line or a file. If the version is below 5, stop: Lago's migration is expected to fail.
+The password is read from Secrets Manager on the server and passed to the container through the environment, so it never appears in a command line or a file. If `app-start` printed an error, stop and fix that first. If the version is below 5, stop: Lago's migration is expected to fail.
 
 After `make infra-bootstrap`, `lago-api` is running and the same question can be asked through it: `cd /opt/app && COMPOSE_FILE=docker-compose.aws.yml docker compose exec -T lago-api bin/rails runner '...'` with a query against the database `lago` connects to. `make infra-doctor` already does this for the partman row (below).
 
@@ -81,13 +81,26 @@ The monthly budget counts by the `Product` tag, which only works once you activa
 
 Merging to `main` deploys only the folder that changed: `frontend/`, `backend/` or `jobs/`. A failed backend release leaves the old version running. Migrations must stay compatible with the previous version, because a rollback doesn't undo them.
 
-To go back, run the deploy SSM document with the earlier image tag (a git commit SHA of 7 to 40 hex characters; `service` is `backend` or `jobs`):
+To go back, run the deploy SSM document with the earlier image tag. `service` is `backend` or `jobs`. The tag is the 12-character short commit SHA the deploy workflow used (`git rev-parse --short=12 <commit>`); the document accepts 7 to 40 hex characters. ECR keeps only the last 20 images per repository, so a tag from long ago may be gone, and then the pull fails and the current version keeps running.
 
 ```bash
 aws ssm send-command --document-name <slug>-deploy \
   --instance-ids $(cd infra && terraform output -raw server_instance_id) \
-  --parameters service=backend,tag=<tag>
+  --parameters service=backend,tag=<tag> \
+  --query Command.CommandId --output text
 ```
+
+That prints a command id and returns at once; the deploy runs on the server. Read the result with:
+
+```bash
+aws ssm get-command-invocation --command-id <id> \
+  --instance-id $(cd infra && terraform output -raw server_instance_id) \
+  --query '[Status,StandardOutputContent,StandardErrorContent]'
+```
+
+Repeat until `Status` is no longer `InProgress`. It can wait up to 10 minutes for another deploy to release the deploy lock before it starts.
+
+Going back across a release that added a database migration fails, and fails safely. `deploy.sh` runs `alembic upgrade head` from the older image, which doesn't know the newer revision, so the migration step errors, the script exits 1 and the current version keeps running. The fix is to roll forward: deploy a new commit that fixes the problem. A rollback only works when no migration was added since the tag you go back to.
 
 `gh workflow run` can't do this: the deploy role only trusts the `main` branch, so a run from an earlier commit is refused.
 
@@ -121,7 +134,7 @@ There's no SSH. Lago's admin screen is closed by default: add your IP to `admin_
 
 ## When something's wrong
 
-- **The server failed:** AWS tries to recover it, and emails you. If it's gone for good: `cd infra && terraform plan -replace=aws_instance.server -out=tfplan`, read the plan, then `make infra-apply`. The Elastic IP moves with the apply, so DNS stays right. Secrets and tokens come back automatically. Queued background work in Redis can be lost.
+- **The server failed:** AWS tries to recover it, and emails you. If it's gone for good: `cd infra && terraform plan -replace=aws_instance.server -out=tfplan`, read the plan, then `make infra-apply`. The Elastic IP moves with the apply, so DNS stays right. Secrets and tokens come back automatically. Queued background work in Redis can be lost. Then run `make infra-doctor`.
 - **Database:** to restore, use the RDS console's "restore to point in time" to create a new instance, then read from it to confirm. Switching production to the restored instance isn't automated in this milestone. Backups are kept for 7 days.
 - **Certificates or DNS:** `make infra-doctor` says which host is wrong.
 

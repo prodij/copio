@@ -132,7 +132,7 @@ Each folder deploys on its own, on merge to `main`, when its path changes.
 | `jobs/` | Same as backend, without a public health check |
 
 - **Failures:** if a migration or health check fails, the previous version keeps running or is restarted, and CI goes red.
-- **Rollback:** redeploy an earlier tag. A migration isn't undone, so migrations must stay compatible with the previous version. This goes in the product's agent instructions.
+- **Rollback:** redeploy an earlier tag. A migration isn't undone, so migrations must stay compatible with the previous version. Going back across a release that added a migration fails safely (the older image can't run `alembic upgrade head` on the newer revision, so the current version keeps running); the fix is to roll forward. This goes in the product's agent instructions.
 - **Downtime:** a few seconds during a backend restart.
 - **Zitadel and Lago:** pinned in `docker-compose.aws.yml`, and changed only by deliberately editing the version.
 - **CI's permissions:** ECR push, this product's frontend bucket, CloudFront invalidation, and running the one deploy document on this server. No Terraform and no secrets.

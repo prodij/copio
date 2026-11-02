@@ -239,3 +239,10 @@ def test_runbook_commands_exist(product_dir: pathlib.Path) -> None:
         assert (product_dir / ".github" / "workflows" / f"{workflow}.yml").exists(), workflow
     for output in set(re.findall(r"terraform output -raw ([a-z_]+)", text)):
         assert any(f'output "{output}"' in f.read_text() for f in tf_files(product_dir)), output
+    for needed in ["--document-name ", "-deploy", "service=backend,tag=", "get-command-invocation", "roll forward"]:
+        assert needed in text, needed
+    document = re.search(r'resource "aws_ssm_document" "deploy" \{\s*name\s*=\s*"\$\{local\.name\}-deploy"', "".join(f.read_text() for f in tf_files(product_dir)))
+    assert document, "the runbook's <slug>-deploy document is not in infra/"
+    ci = (product_dir / "infra" / "ci.tf").read_text()
+    for param in ["service", "tag"]:
+        assert re.search(rf"^\s*{param}\s*=\s*\{{ type", ci, re.M), param
