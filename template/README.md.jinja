@@ -15,13 +15,31 @@ not rk_test_: https://dashboard.stripe.com/test/apikeys) into `STRIPE_SECRET_KEY
 Stripe provider until `make bootstrap` adds it, and new workspaces fail until then. Workspaces created
 before the key get their Stripe customer at their first checkout.
 
+## Mock payment (local tests with no Stripe account)
+
+Mock payment fakes only the payment step, so `make e2e` can prove sign-up to premium with no Stripe key.
+It is off by default. To turn it on, keep `STRIPE_SECRET_KEY` empty, set `BILLING_MODE=mock` and
+`APP_ENV=local` in `.env`, then `make up && make bootstrap && make e2e`.
+
+- The backend won't start, and `make bootstrap` stops, with `BILLING_MODE=mock` and any other `APP_ENV`, with a
+  Stripe key set, or (bootstrap) while Lago still has a Stripe provider. No request can turn it on.
+- Real Zitadel, real Lago and Lago's real signed webhook stay in the path. Lago gets a subscription with no
+  payment rule and no provider, makes it active and sends `subscription.started`. Coming back to the app grants
+  nothing: `require_feature` answers 402 until that webhook lands. Stripe is never called and `stripe-cli` stays idle.
+- The app shows a "Mock payment" banner on every page. Lago's invoice stays unpaid, because nothing pays it.
+- **A mock payment pass is not a Stripe pass.** The Stripe payment test is reported as skipped. The mock run does
+  not prove Stripe's page, saved cards, Lago's payment-gated subscription, or what happens when a payment fails.
+- `billing_reconcile` still asks Lago every 15 minutes, and Lago says active, so a lost webhook is repaired
+  there as usual. That is why the test stops the job while it checks that only the webhook grants access.
+- Leaving mock payment: `make reset`. A subscription it made stays active otherwise, and Lago still has it.
+
 Host ports are set in `.env` (defaults: app 5173, API 8000, Zitadel 8085, its login page 3100,
 Lago API 3000 and UI 8088, Postgres 5432, S3 (SeaweedFS) 8333). Change any that clash with another
 project, then `make up`. Every port is published on 127.0.0.1 only.
 
 - `make e2e` runs the Playwright tests against the running stack (after `make bootstrap`): sign-up to
-  `/plans` always, and sign-up to premium when `.env` has a Stripe key (reported as skipped without
-  one). `make check` runs lint, types and unit tests (needs Postgres: `make up`).
+  `/plans` always, sign-up to premium when `.env` has a Stripe key (reported as skipped without one), and
+  sign-up to premium by mock payment when `.env` has `BILLING_MODE=mock`. `make check` runs lint, types and unit tests (needs Postgres: `make up`).
 - Brand colours, font and logo live in `brand/brand.yaml`; they reach the app, the Zitadel login
   page and Lago when `make brand` runs (`make bootstrap` runs it too).
 - The Zitadel console (`http://auth.{{ domain }}:8085/ui/console`, with your ZITADEL_PORT) signs in

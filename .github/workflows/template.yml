@@ -1,7 +1,8 @@
 # Template self-test (spec §10): fast tests, then a generated product's `make check`, then (nightly
 # or on demand) the generated product's e2e against the real stack and, when the STRIPE_SECRET_KEY
-# secret is set, Stripe test mode (without it the payment test is reported as skipped, unless the repo
-# variable STRIPE_E2E_REQUIRED is "true", which fails the run).
+# secret is set, Stripe test mode (without it the payment test is reported as skipped and the mock payment
+# test runs, which is not a Stripe pass, unless the repo variable STRIPE_E2E_REQUIRED is "true", which
+# fails the run).
 name: template
 on:
   pull_request:
@@ -67,10 +68,12 @@ jobs:
             if [ "$STRIPE_E2E_REQUIRED" = "true" ]; then
               echo "::error::No STRIPE_SECRET_KEY secret, and the repo variable STRIPE_E2E_REQUIRED is true"; exit 1
             fi
-            echo "::notice::No STRIPE_SECRET_KEY secret: the e2e payment test will be skipped"
-            echo "No STRIPE_SECRET_KEY secret: the e2e payment test was skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::No STRIPE_SECRET_KEY secret: the Stripe e2e payment test will be skipped; the mock payment test runs instead"
+            echo "No STRIPE_SECRET_KEY secret: the Stripe e2e payment test was skipped and the mock payment test ran. A mock payment pass is not a Stripe pass." >> "$GITHUB_STEP_SUMMARY"
           fi
           umask 077 && printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY" > .env
+          # Explicit, and only with no key (the backend refuses both): prove the webhook path with mock payment.
+          if [ -z "$STRIPE_SECRET_KEY" ]; then printf 'BILLING_MODE=mock\nAPP_ENV=local\n' >> .env; fi
           make env
       - run: make up
       - run: make bootstrap

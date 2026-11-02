@@ -162,6 +162,51 @@ def test_e2e_is_told_whether_there_is_a_stripe_key_not_the_key(
     assert out.read_text().strip() == f"{seen}/"
 
 
+def test_mock_payment_is_off_in_the_default_config(product_dir: pathlib.Path) -> None:
+    lines = (product_dir / ".env.example").read_text().splitlines()
+    assert "BILLING_MODE=" in lines and "APP_ENV=" in lines
+    assert not any(line.startswith(("BILLING_MODE=mock", "APP_ENV=local")) for line in lines)
+    environment = yaml.safe_load((product_dir / "docker-compose.yml").read_text())["services"]["backend"]["environment"]
+    assert environment["BILLING_MODE"] == "${BILLING_MODE:-}" and environment["APP_ENV"] == "${APP_ENV:-}"
+    source = (product_dir / "backend" / "app" / "config.py").read_text()
+    assert 'billing_mode: str = ""' in source and 'app_env: str = ""' in source
+
+
+@pytest.mark.parametrize(("mode", "seen"), [("mock", "1"), ('"mock"', "1"), ("", ""), ("fake", "")])
+def test_e2e_is_told_about_mock_payment(product_dir: pathlib.Path, tmp_path: pathlib.Path, mode: str, seen: str) -> None:
+    (tmp_path / "Makefile").write_text((product_dir / "Makefile").read_text())
+    (tmp_path / ".env").write_text(f"BILLING_MODE={mode}\nAPP_ENV=local\n")
+    (tmp_path / "e2e").mkdir()
+    (tmp_path / "bin").mkdir()
+    out = tmp_path / "seen"
+    for tool in ["npm", "npx"]:
+        fake = tmp_path / "bin" / tool
+        fake.write_text(f'#!/bin/sh\necho "$MOCK_PAYMENT/$BILLING_MODE" > "{out}"\n')
+        fake.chmod(0o755)
+    env = {"PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    run = subprocess.run(["make", "-s", "e2e"], cwd=tmp_path, env=env, capture_output=True, text=True, check=True)
+    assert out.read_text().strip() == f"{seen}/"
+    assert ("A mock payment pass is not a Stripe pass." in run.stdout) == bool(seen)
+
+
+@pytest.mark.parametrize("target", ["check", "doctor", "brand"])
+def test_make_keeps_mock_payment_settings_from_other_host_tools(product_dir: pathlib.Path, tmp_path: pathlib.Path,
+                                                                target: str) -> None:
+    (tmp_path / "Makefile").write_text((product_dir / "Makefile").read_text())
+    (tmp_path / ".env").write_text("BILLING_MODE=mock\nAPP_ENV=local\n")
+    for folder in ["scripts", "backend", "jobs", "frontend", "e2e", "bin"]:
+        (tmp_path / folder).mkdir(exist_ok=True)
+    seen = tmp_path / "seen"
+    seen.write_text("")
+    for tool in ["uv", "npm", "npx"]:
+        fake = tmp_path / "bin" / tool
+        fake.write_text(f'#!/bin/sh\nenv | grep -E "^(BILLING_MODE|APP_ENV)=" >> "{seen}"; exit 0\n')
+        fake.chmod(0o755)
+    env = {"PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    subprocess.run(["make", "-s", target], cwd=tmp_path, env=env, capture_output=True, text=True, check=True)
+    assert seen.read_text() == ""
+
+
 def test_stripe_key_is_optional_in_compose(product_dir: pathlib.Path) -> None:
     compose = yaml.safe_load((product_dir / "docker-compose.yml").read_text())
     assert compose["services"]["backend"]["environment"]["STRIPE_SECRET_KEY"] == "${STRIPE_SECRET_KEY:-}"

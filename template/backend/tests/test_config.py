@@ -6,7 +6,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from app.config import DatabaseSettings, Settings
+from app.config import BillingModeSettings, DatabaseSettings, Settings
 from tests.conftest import TEST_SETTINGS
 
 
@@ -68,3 +68,59 @@ def test_migrations_need_only_the_database_url(monkeypatch: pytest.MonkeyPatch) 
         monkeypatch.delenv(name.upper(), raising=False)
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@db/x")
     assert DatabaseSettings().database_url == "postgresql+psycopg://u:p@db/x"
+
+
+MOCK = TEST_SETTINGS.model_dump() | {"stripe_secret_key": "", "billing_mode": "mock", "app_env": "local"}
+
+
+def test_mock_payment_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("BILLING_MODE", "APP_ENV", "STRIPE_SECRET_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    assert not BillingModeSettings().mock_payment
+    data = {k: v for k, v in MOCK.items() if k not in ("billing_mode", "app_env")}
+    settings = Settings(**data)
+    assert not settings.mock_payment and not settings.billing_configured
+
+
+def test_mock_payment_turns_on_only_when_local_with_no_key() -> None:
+    settings = Settings(**MOCK)
+    assert settings.mock_payment and settings.billing_configured and not settings.stripe_configured
+
+
+@pytest.mark.parametrize("app_env", ["", "production", "staging", "LOCAL", "local-ish"])
+def test_mock_payment_is_refused_unless_explicitly_local(app_env: str) -> None:
+    with pytest.raises(ValidationError, match="needs APP_ENV=local"):
+        Settings(**(MOCK | {"app_env": app_env}))
+
+
+def test_mock_payment_is_refused_with_a_stripe_key() -> None:
+    with pytest.raises(ValidationError, match="STRIPE_SECRET_KEY is set"):
+        Settings(**(MOCK | {"stripe_secret_key": "sk_test_x"}))
+
+
+@pytest.mark.parametrize("mode", ["MOCK", "fake", "test", "stripe"])
+def test_any_other_billing_mode_is_refused(mode: str) -> None:
+    with pytest.raises(ValidationError, match="must be empty or mock"):
+        Settings(**(MOCK | {"billing_mode": mode}))
+
+
+@pytest.mark.parametrize(("env", "message"), [
+    ({"BILLING_MODE": "mock"}, "needs APP_ENV=local"),
+    ({"BILLING_MODE": "mock", "APP_ENV": "production"}, "needs APP_ENV=local"),
+    ({"BILLING_MODE": "mock", "APP_ENV": "local", "STRIPE_SECRET_KEY": "sk_test_x"}, "STRIPE_SECRET_KEY is set"),
+])
+def test_the_backend_refuses_to_start_on_unsafe_mock_payment(env: dict[str, str], message: str) -> None:
+    clean = {k: v for k, v in os.environ.items() if k.lower() not in Settings.model_fields}
+    result = subprocess.run(
+        [sys.executable, "-c", "import app.main"], env=clean | env, capture_output=True, text=True
+    )
+    assert result.returncode != 0 and message in result.stderr
+
+
+def test_the_backend_starts_with_mock_payment_when_it_is_safe() -> None:
+    clean = {k: v for k, v in os.environ.items() if k.lower() not in Settings.model_fields}
+    result = subprocess.run(
+        [sys.executable, "-c", "import app.main"], env=clean | {"BILLING_MODE": "mock", "APP_ENV": "local"},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr

@@ -349,12 +349,18 @@ end
 """
 
 
-def stripe_secret_key() -> str:
-    """The test key, or "" when none is set yet: Stripe is optional, a wrong kind of key is not.
+STRIPE_REJECTED = ("Stripe rejected STRIPE_SECRET_KEY or could not be reached. Nothing was changed. "
+                   "Fix or empty it in .env and run `make bootstrap` again.")
 
-    Make passes .env values as written, so `STRIPE_SECRET_KEY=""` arrives here with its quotes.
-    """
-    key = os.environ.get("STRIPE_SECRET_KEY", "").strip().strip("\"'").strip()
+
+def optional_env(name: str) -> str:
+    """Make passes .env values as written, so `STRIPE_SECRET_KEY=""` arrives here with its quotes."""
+    return os.environ.get(name, "").strip().strip("\"'").strip()
+
+
+def stripe_secret_key() -> str:
+    """The test key, or "" when none is set yet: Stripe is optional, a wrong kind of key is not."""
+    key = optional_env("STRIPE_SECRET_KEY")
     if key and not key.startswith("sk_test_"):
         raise SystemExit(
             "bootstrap: STRIPE_SECRET_KEY must be a Stripe TEST secret key (sk_test_...), or empty to run "
@@ -366,12 +372,39 @@ def stripe_secret_key() -> str:
 
 def stripe_webhook_secret() -> str:
     """The signing secret of `stripe listen`. Asking for it is what tests the key against Stripe."""
-    printed = compose("run", "--rm", "--no-deps", "--entrypoint", "stripe", "stripe-cli",
-                      "listen", "--print-secret", capture=True).splitlines()
+    try:
+        printed = compose("run", "--rm", "--no-deps", "--entrypoint", "stripe", "stripe-cli",
+                          "listen", "--print-secret", capture=True).splitlines()
+    except SystemExit as exc:
+        raise SystemExit(f"bootstrap: {STRIPE_REJECTED}\n  {exc}") from None
     secret = printed[-1].strip() if printed else ""
     if not secret.startswith("whsec_"):
-        raise SystemExit("bootstrap: `stripe listen --print-secret` printed no whsec_ secret")
+        raise SystemExit(f"bootstrap: {STRIPE_REJECTED}\n  `stripe listen --print-secret` printed no whsec_ secret")
     return secret
+
+
+def mock_payment() -> bool:
+    """BILLING_MODE=mock: the same refusals as the backend's, before anything changes."""
+    mode = optional_env("BILLING_MODE")
+    if not mode:
+        return False
+    if mode != "mock":
+        raise SystemExit(f"bootstrap: BILLING_MODE must be empty or mock, not {mode!r}. Nothing was changed.")
+    if optional_env("APP_ENV") != "local":
+        raise SystemExit("bootstrap: mock payment is refused: BILLING_MODE=mock needs APP_ENV=local. Nothing was changed.")
+    if stripe_secret_key():
+        raise SystemExit("bootstrap: mock payment is refused: STRIPE_SECRET_KEY is set. Empty it or empty BILLING_MODE "
+                         "in .env. Nothing was changed.")
+    return True
+
+
+def bootstrap_mock_payment() -> None:
+    """No provider is added and stripe-cli stays idle, so nothing here can reach Stripe."""
+    if lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"]:
+        raise SystemExit("bootstrap: mock payment is refused: Lago still has the Stripe provider from an earlier key "
+                         "and could call Stripe. `make reset` deletes all local data; then `make up && make bootstrap`.")
+    print("Mock payment: ON (BILLING_MODE=mock, APP_ENV=local). Nothing is charged and Stripe is not called. Real Lago "
+          "and its signed webhook still decide access.\n  A mock payment pass is not a Stripe pass.")
 
 
 def bootstrap_stripe(webhook_secret: str) -> None:
@@ -434,6 +467,8 @@ def main() -> None:
     # get a key Lago has no provider for, or new workspaces fail. Saved back so Compose, which prefers
     # this process's environment over .env, gets the cleaned value.
     key = os.environ["STRIPE_SECRET_KEY"] = stripe_secret_key()
+    os.environ["BILLING_MODE"], os.environ["APP_ENV"] = optional_env("BILLING_MODE"), optional_env("APP_ENV")
+    mock = mock_payment()
     webhook_secret = stripe_webhook_secret() if key else ""
     zitadel, lago = zitadel_url(), lago_api_url()
     wait_for(f"Zitadel at {zitadel}", lambda: http_ok(zitadel, "/debug/ready"))
@@ -449,7 +484,10 @@ def main() -> None:
     backend("alembic", "upgrade", "head")  # needs only DATABASE_URL
     backend("python", "-m", "app.billing.sync")  # needs only the Lago settings
     compose("up", "-d", "--force-recreate", "jobs")  # its first run needs the migrated tables
-    bootstrap_stripe(webhook_secret)  # the backend already has the key: it was recreated from the same .env
+    if mock:
+        bootstrap_mock_payment()
+    else:
+        bootstrap_stripe(webhook_secret)  # the backend already has the key: it was recreated from the same .env
     # Last: the app gets its client id only once everything behind it is configured.
     compose("up", "-d", "--force-recreate", "frontend")
     print(f"""

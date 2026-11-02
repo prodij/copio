@@ -65,3 +65,15 @@ def start_checkout(session: Session, ws: Workspace, plan: Plan, lago: LagoClient
     sub.lago_subscription_id = external_id
     session.commit()
     return None
+
+
+def start_mock_payment_checkout(session: Session, ws: Workspace, plan: Plan, lago: LagoClient) -> None:
+    """Mock payment: the same row and Lago subscription as a real checkout, with no card and no payment
+    rule. This grants nothing: the state stays `pending` until Lago's signed webhook arrives."""
+    sub = _record_checkout(session, ws, plan)
+    if sub.lago_subscription_id is not None:
+        return
+    external_id = str(sub.lago_external_id)
+    lago.create_mock_payment_subscription(str(ws.id), plan.code, external_id)
+    sub.lago_subscription_id = external_id
+    session.commit()

@@ -18,10 +18,12 @@ router = APIRouter()
 class AccessOut(BaseModel):
     """`state` is the subscription's own state (including `pending`); `features` holds only what it grants now.
 
-    `billing_configured` false: no Stripe key, so plans can't be bought. It grants nothing by itself.
+    `billing_configured` false: no Stripe key and no mock payment, so plans can't be bought. `mock_payment`
+    true: payments are faked, so the UI labels them. Neither grants anything by itself.
     """
 
     billing_configured: bool
+    mock_payment: bool
     plan_code: str | None
     state: str | None
     current_period_end: datetime | None
@@ -37,10 +39,12 @@ def my_access(
 ) -> AccessOut:
     sub = session.get(Subscription, current.workspace.id)
     if sub is None:
-        return AccessOut(billing_configured=settings.stripe_configured, plan_code=None, state=None,
+        return AccessOut(billing_configured=settings.billing_configured, mock_payment=settings.mock_payment,
+                         plan_code=None, state=None,
                          current_period_end=None, features={})
     plan = plans.get(sub.plan_code)
     names = plan.features if plan else {}
     features = {name: names[name] for name in names if decide(sub.state, sub.plan_code, plans, name).allowed}
-    return AccessOut(billing_configured=settings.stripe_configured, plan_code=sub.plan_code, state=sub.state,
+    return AccessOut(billing_configured=settings.billing_configured, mock_payment=settings.mock_payment,
+                     plan_code=sub.plan_code, state=sub.state,
                      current_period_end=sub.current_period_end, features=features)

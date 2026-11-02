@@ -1,5 +1,5 @@
 # Local development. `make env` once, then `make up` and `make bootstrap`. The Stripe test key in .env
-# is optional; add it any time and re-run `make bootstrap`. `make check` needs only Postgres (`make up`,
+# is optional; add it any time and re-run `make bootstrap`. BILLING_MODE=mock is mock payment (see README). `make check` needs only Postgres (`make up`,
 # or TEST_DATABASE_URL).
 -include .env
 export
@@ -9,13 +9,16 @@ unexport ZITADEL_MASTERKEY ZITADEL_ADMIN_PASSWORD LOGIN_SESSION_COOKIE_SECRET SE
   LAGO_RSA_PRIVATE_KEY LAGO_ENCRYPTION_PRIMARY_KEY LAGO_ENCRYPTION_DETERMINISTIC_KEY \
   LAGO_ENCRYPTION_KEY_DERIVATION_SALT S3_ACCESS_KEY S3_SECRET_KEY
 # Secrets the host scripts need, exported only to the targets that run them (not check, e2e, npm).
-unexport STRIPE_SECRET_KEY LAGO_API_KEY LAGO_ORG_USER_PASSWORD
+unexport STRIPE_SECRET_KEY LAGO_API_KEY LAGO_ORG_USER_PASSWORD BILLING_MODE APP_ENV
 bootstrap: export STRIPE_SECRET_KEY := $(STRIPE_SECRET_KEY)
+bootstrap: export BILLING_MODE := $(BILLING_MODE)
+bootstrap: export APP_ENV := $(APP_ENV)
 bootstrap: export LAGO_API_KEY := $(LAGO_API_KEY)
 bootstrap brand: export LAGO_ORG_USER_PASSWORD := $(LAGO_ORG_USER_PASSWORD)
 # The e2e tests need to know whether there is a key, never the key itself.
 # Blank or `""` in .env counts as no key, as in scripts/bootstrap.py. Make keeps quotes; Compose doesn't.
 e2e: export STRIPE_CONFIGURED := $(if $(strip $(subst ",,$(subst ',,$(STRIPE_SECRET_KEY)))),1,)
+e2e: export MOCK_PAYMENT := $(if $(filter mock,$(subst ",,$(subst ',,$(BILLING_MODE)))),1,)
 
 # Zitadel writes its PATs into .bootstrap/zitadel as this user, so the host can read them.
 export HOST_UID := $(shell id -u)
@@ -68,3 +71,4 @@ check:
 
 e2e:
 	cd e2e && npm ci --no-audit --no-fund && npx playwright install --with-deps chromium && npx playwright test
+	@if [ -n "$$MOCK_PAYMENT" ]; then echo "MOCK PAYMENT run: the Stripe payment test did not run. A mock payment pass is not a Stripe pass."; fi

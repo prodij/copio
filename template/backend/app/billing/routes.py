@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from app.billing.checkout import PlanChangeNotSupported, start_checkout
+from app.billing.checkout import PlanChangeNotSupported, start_checkout, start_mock_payment_checkout
 from app.billing.plans import Plan, get_plans
 from app.billing.webhooks import (
     BadSignature,
@@ -68,9 +68,12 @@ def checkout(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown plan {body.plan_code!r}")
     # 501, not 503: nothing is down and retrying can't help until someone adds the key. Checked before
     # start_checkout, so no subscription row is written and a later checkout starts clean.
-    if not settings.stripe_configured:
+    if not settings.billing_configured:
         raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, BILLING_NOT_SET_UP)
     try:
+        if settings.mock_payment:
+            start_mock_payment_checkout(session, current.workspace, plan, lago)
+            return CheckoutOut(checkout_url=None)
         code = settings.lago_stripe_provider_code
         return CheckoutOut(checkout_url=start_checkout(session, current.workspace, plan, lago, code))
     except PlanChangeNotSupported as exc:

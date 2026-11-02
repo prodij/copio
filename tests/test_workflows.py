@@ -70,6 +70,25 @@ def test_ci_without_a_key_fails_when_stripe_e2e_is_required(path: pathlib.Path, 
     assert code == 1 and "::error::" in out and summary == ""
 
 
+def _env_written_by_ci(path: pathlib.Path, tmp_path: pathlib.Path, key: str) -> str:
+    """Runs the part of the step that writes .env, in a temp dir with a do-nothing `make`."""
+    written = "umask" + _stripe_step(path)["run"].split("umask", 1)[1]
+    (tmp_path / "make").write_text("#!/bin/sh\nexit 0\n")
+    (tmp_path / "make").chmod(0o755)
+    env = {"STRIPE_SECRET_KEY": key, "PATH": f"{tmp_path}:/usr/bin:/bin"}
+    subprocess.run(["/bin/sh", "-e", "-c", written], cwd=tmp_path, env=env, check=True)
+    return (tmp_path / ".env").read_text()
+
+
+@pytest.mark.parametrize("path", E2E_WORKFLOWS)
+def test_ci_turns_on_mock_payment_only_with_no_key_and_says_it_is_not_stripe(path: pathlib.Path,
+                                                                             tmp_path: pathlib.Path) -> None:
+    assert _env_written_by_ci(path, tmp_path, "") == "STRIPE_SECRET_KEY=\nBILLING_MODE=mock\nAPP_ENV=local\n"
+    assert _env_written_by_ci(path, tmp_path, "sk_test_x") == "STRIPE_SECRET_KEY=sk_test_x\n"
+    _, out, summary = _run_stripe_guard(path, tmp_path, "", "")
+    assert "mock payment" in out and "not a Stripe pass" in summary
+
+
 @pytest.mark.parametrize("path", E2E_WORKFLOWS)
 def test_ci_reads_the_switch_from_a_repo_variable(path: pathlib.Path) -> None:
     assert _stripe_step(path)["env"] == {"STRIPE_SECRET_KEY": "${{ secrets.STRIPE_SECRET_KEY }}",

@@ -1,6 +1,7 @@
 # The e2e tests against the real stack. The sign-up-to-premium test also needs Stripe test mode: the
 # repo secret STRIPE_SECRET_KEY (a TEST key, sk_test_...), set by a human; without it that test is
-# reported as skipped, unless the repo variable STRIPE_E2E_REQUIRED is "true", which fails the run.
+# reported as skipped and the mock payment test runs (not a Stripe pass), unless the repo variable
+# STRIPE_E2E_REQUIRED is "true", which fails the run.
 # Any other kind of key fails the run. Nothing else is secret here.
 name: e2e
 on:
@@ -25,10 +26,12 @@ jobs:
             if [ "$STRIPE_E2E_REQUIRED" = "true" ]; then
               echo "::error::No STRIPE_SECRET_KEY secret, and the repo variable STRIPE_E2E_REQUIRED is true"; exit 1
             fi
-            echo "::notice::No STRIPE_SECRET_KEY secret: the e2e payment test will be skipped"
-            echo "No STRIPE_SECRET_KEY secret: the e2e payment test was skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::No STRIPE_SECRET_KEY secret: the Stripe e2e payment test will be skipped; the mock payment test runs instead"
+            echo "No STRIPE_SECRET_KEY secret: the Stripe e2e payment test was skipped and the mock payment test ran. A mock payment pass is not a Stripe pass." >> "$GITHUB_STEP_SUMMARY"
           fi
           umask 077 && printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY" > .env
+          # Explicit, and only with no key (the backend refuses both): prove the webhook path with mock payment.
+          if [ -z "$STRIPE_SECRET_KEY" ]; then printf 'BILLING_MODE=mock\nAPP_ENV=local\n' >> .env; fi
           make env
       - run: make up
       - run: make bootstrap

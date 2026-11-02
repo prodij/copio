@@ -2,7 +2,7 @@
   "components": {
     "schemas": {
       "AccessOut": {
-        "description": "`state` is the subscription's own state (including `pending`); `features` holds only what it grants now.\n\n`billing_configured` false: no Stripe key, so plans can't be bought. It grants nothing by itself.",
+        "description": "`state` is the subscription's own state (including `pending`); `features` holds only what it grants now.\n\n`billing_configured` false: no Stripe key and no mock payment, so plans can't be bought. `mock_payment`\ntrue: payments are faked, so the UI labels them. Neither grants anything by itself.",
         "properties": {
           "billing_configured": {
             "title": "Billing Configured",
@@ -34,6 +34,10 @@
             "title": "Features",
             "type": "object"
           },
+          "mock_payment": {
+            "title": "Mock Payment",
+            "type": "boolean"
+          },
           "plan_code": {
             "anyOf": [
               {
@@ -59,6 +63,7 @@
         },
         "required": [
           "billing_configured",
+          "mock_payment",
           "plan_code",
           "state",
           "current_period_end",

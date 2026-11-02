@@ -5,9 +5,35 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
+class BillingModeSettings(BaseSettings):
+    """What decides mock payment: server config only, no request can change it. create_app checks this
+    when the process starts, so an unsafe mix stops the backend instead of faking payments."""
+
     model_config = SettingsConfigDict(extra="ignore")
 
+    # Empty is real billing. `mock` is mock payment: only with APP_ENV=local and no Stripe key.
+    billing_mode: str = ""
+    app_env: str = ""
+    # Empty means billing isn't set up: the product works, checkout says so, paid features stay off.
+    stripe_secret_key: str = ""
+
+    @model_validator(mode="after")
+    def mock_payment_only_when_safe(self) -> "BillingModeSettings":
+        mode = self.billing_mode.strip()
+        if mode not in ("", "mock"):
+            raise ValueError(f"BILLING_MODE must be empty or mock, not {mode!r}")
+        if mode == "mock" and self.app_env.strip() != "local":
+            raise ValueError("BILLING_MODE=mock (mock payment) is refused: it needs APP_ENV=local")
+        if mode == "mock" and self.stripe_secret_key.strip():
+            raise ValueError("BILLING_MODE=mock (mock payment) is refused: STRIPE_SECRET_KEY is set; use one or the other")
+        return self
+
+    @property
+    def mock_payment(self) -> bool:
+        return self.billing_mode.strip() == "mock"
+
+
+class Settings(BillingModeSettings):
     database_url: str
     frontend_url: str
     zitadel_issuer: str
@@ -21,8 +47,6 @@ class Settings(BaseSettings):
     lago_api_key: str
     lago_webhook_issuer: str
     lago_stripe_provider_code: str = "stripe"
-    # Empty means billing isn't set up: the product works, checkout says so, paid features stay off.
-    stripe_secret_key: str = ""
 
     @field_validator("stripe_secret_key")
     @classmethod
@@ -35,6 +59,10 @@ class Settings(BaseSettings):
     @property
     def stripe_configured(self) -> bool:
         return bool(self.stripe_secret_key)
+
+    @property
+    def billing_configured(self) -> bool:
+        return self.stripe_configured or self.mock_payment
 
     @model_validator(mode="after")
     def token_from_file(self) -> "Settings":

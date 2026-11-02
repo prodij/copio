@@ -67,3 +67,14 @@ def test_password_meets_zitadels_default_policy() -> None:
         assert len(value) == 24
         assert re.search(r"[a-z]", value) and re.search(r"[A-Z]", value) and re.search(r"[0-9]", value)
         assert re.fullmatch(r"[A-Za-z0-9-]+", value) and "-" in value
+
+
+def test_mock_payment_stays_off_and_is_not_reported_as_missing() -> None:
+    text, missing = make_env.render("BILLING_MODE=\nAPP_ENV=\nSTRIPE_SECRET_KEY=\n", {})
+    assert text == "BILLING_MODE=\nAPP_ENV=\nSTRIPE_SECRET_KEY=\n"
+    assert missing == ["STRIPE_SECRET_KEY"]
+
+
+def test_mock_payment_set_in_env_is_kept() -> None:
+    text, _ = make_env.render("BILLING_MODE=\nAPP_ENV=\n", {"BILLING_MODE": "mock", "APP_ENV": "local"})
+    assert text == "BILLING_MODE=mock\nAPP_ENV=local\n"

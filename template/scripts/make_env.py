@@ -18,6 +18,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 KEY = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
 MARKER = re.compile(r"^# (Default|Generate): (.+)$")
+# Empty on purpose: mock payment is off unless someone turns it on, so these are not "still to fill".
+OFF_BY_DEFAULT = {"BILLING_MODE", "APP_ENV"}
 
 
 def _rand_hex(n: int) -> str:
@@ -94,7 +96,7 @@ def render(example: str, current: dict[str, str]) -> tuple[str, list[str]]:
         if not value and marker:
             kind, arg = marker
             value = arg if kind == "Default" else generate(arg)
-        if not value:
+        if not value and name not in OFF_BY_DEFAULT:
             missing.append(name)
         lines[-1] = f"{name}={value}"
         seen.add(name)

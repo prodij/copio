@@ -1,10 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 
 // Milestone 1's definition of done (spec §1): sign up through Zitadel, create a workspace, save
 // Stripe's test card on Stripe's hosted page, and see premium_report switch on because Lago's
 // invoice-paid webhook said so, never because the browser came back from Stripe.
 // Everything up to the plans page works without Stripe, so it has its own test; the payment test
 // needs a key and is skipped without one. `make e2e` sets STRIPE_CONFIGURED (never the key itself).
+//
+// With BILLING_MODE=mock in .env, `make e2e` sets MOCK_PAYMENT and the mock payment test runs instead:
+// real Zitadel, real Lago, its real signed webhook, and a faked payment step. It is not a Stripe pass.
 //
 // Two blocks of selectors belong to pages we do not own. If one fails, fix it here only:
 // - signUp(): Zitadel login UI ghcr.io/zitadel/zitadel-login:v4.20.0 (labels checked 2026-11-01).
@@ -15,6 +19,16 @@ const WORKSPACE = "E2E Co";
 const STRIPE_CONFIGURED = !!process.env.STRIPE_CONFIGURED;
 const NOT_SET_UP = /billing isn't set up/i;
 const NO_KEY = "STRIPE_SECRET_KEY is empty: add a Stripe test key to .env and run make bootstrap";
+const MOCK_PAYMENT = !!process.env.MOCK_PAYMENT;
+const NOT_A_STRIPE_PASS = "A mock payment pass is not a Stripe pass.";
+
+// `make e2e` runs from e2e/, so Compose finds the product's docker-compose.yml and .env one level up.
+function compose(...args: string[]): string {
+  return execFileSync("docker", ["compose", ...args], { cwd: "..", encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+const sql = (database: string, query: string) =>
+  compose("exec", "-T", "postgres", "psql", "-U", "postgres", "-d", database, "-Atc", query);
 
 async function signUp(page: Page, email: string) {
   // No email code: the login UI asks for one only when EMAIL_VERIFICATION=true (unset in Compose).
@@ -49,13 +63,13 @@ async function saveTestCard(page: Page) {
   await page.getByTestId("hosted-payment-submit-button").click();
 }
 
-async function signUpToPlans(page: Page, app: string) {
+async function signUpToPlans(page: Page, app: string, workspace = WORKSPACE) {
   await page.goto("/");
   await page.getByRole("button", { name: "Sign in" }).click();
   await signUp(page, `e2e+${Date.now()}@example.com`);
 
   await page.waitForURL(`${app}/workspace/new`);
-  await page.getByLabel("Workspace name").fill(WORKSPACE);
+  await page.getByLabel("Workspace name").fill(workspace);
   await page.getByRole("button", { name: "Create workspace" }).click();
   await page.waitForURL(`${app}/plans`);
 }
@@ -64,7 +78,7 @@ test("sign up → workspace → plans", async ({ page, baseURL }) => {
   await signUpToPlans(page, new URL(baseURL!).origin);
   const choose = page.getByRole("button", { name: "Choose Starter" });
   await expect(choose).toBeVisible();
-  if (STRIPE_CONFIGURED) return;
+  if (STRIPE_CONFIGURED || MOCK_PAYMENT) return;
 
   // No key: the app says billing isn't set up, right away, and access stays denied.
   await choose.click();
@@ -76,7 +90,7 @@ test("sign up → workspace → plans", async ({ page, baseURL }) => {
 });
 
 test("sign up → workspace → pay → premium report", async ({ page, baseURL }) => {
-  if (!STRIPE_CONFIGURED) console.log(`Payment test skipped. ${NO_KEY}`); // the list reporter hides skip reasons
+  if (!STRIPE_CONFIGURED) console.log(`Stripe payment test skipped. ${NO_KEY}`); // the list reporter hides skip reasons
   test.skip(!STRIPE_CONFIGURED, NO_KEY);
   const app = new URL(baseURL!).origin;
   await signUpToPlans(page, app);
@@ -114,4 +128,82 @@ test("sign up → workspace → pay → premium report", async ({ page, baseURL 
     await expect(page.getByText(`Generated for ${WORKSPACE}`)).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 180_000, intervals: [3_000] });
   expect(backToStripe, "the app sent the browser back to Stripe after the card was saved").toEqual([]);
+});
+
+// Must fail if anything but Lago's webhook turns premium on. Delivery is held back by pausing Lago's
+// worker, and billing_reconcile (which would also repair the state, from Lago's API) is stopped, so
+// the webhook is the only thing left that can change the state.
+test("mock payment: sign up → workspace → mock payment → premium report from Lago's webhook", async ({ page, baseURL }) => {
+  test.skip(!MOCK_PAYMENT, "BILLING_MODE is not mock: mock payment is off, as it is by default");
+  const app = new URL(baseURL!).origin;
+  const workspace = `Mock Co ${Date.now()}`;
+  const toStripe: string[] = [];
+  page.on("request", (r) => {
+    if (/(^|\.)stripe\.(com|network)$/.test(new URL(r.url()).hostname)) toStripe.push(r.url());
+  });
+  const row = () =>
+    sql("app", `select s.state, s.lago_external_id, s.lago_subscription_id from subscriptions s join workspaces w ` +
+               `on w.id = s.workspace_id where w.name = '${workspace}'`).split("|");
+
+  let held = false;
+  compose("stop", "jobs");
+  try {
+    await signUpToPlans(page, app, workspace);
+    const banner = page.getByRole("status");
+    await expect(banner).toContainText("Mock payment");
+    await page.getByRole("button", { name: "Choose Starter" }).click();
+    await page.waitForURL(`${app}/billing/mock-payment`);
+    await expect(page.getByRole("heading", { name: "Mock payment" })).toBeVisible();
+    await expect(banner).toContainText("not real billing");
+
+    compose("pause", "lago-worker");
+    held = true;
+    const created = page.waitForResponse(
+      async (r) =>
+        r.url().endsWith("/billing/checkout") && r.request().method() === "POST" && r.status() === 200 &&
+        (await r.json()).checkout_url === null,
+    );
+    await page.getByRole("button", { name: "Confirm mock payment" }).click();
+    await page.waitForURL(`${app}/billing/return`);
+    await created;
+    await expect(page.getByText("Waiting for payment confirmation…")).toBeVisible();
+    await expect(banner).toContainText("Mock payment");
+
+    // The browser is back and Lago says active, but no webhook has landed: premium must stay off.
+    const [state, externalId, lagoId] = row();
+    expect(state, "the return alone must not change the state").toBe("pending");
+    expect(lagoId).toBe(externalId);
+    expect(sql("lago", `select status from subscriptions where external_id = '${externalId}'`)).toBe("1"); // active
+    const delivered = () =>
+      sql("app", `select type, processed_at is not null, signature_sha256 is not null from webhook_events ` +
+                 `where payload->'subscription'->>'external_id' = '${externalId}'`);
+    expect(delivered()).toBe("");
+    for (let check = 0; check < 3; check++) {
+      await page.goto("/premium");
+      await expect(page.getByRole("alert")).toContainText("402");
+      await page.waitForTimeout(3_000);
+    }
+    expect(row()[0]).toBe("pending");
+
+    compose("unpause", "lago-worker");
+    held = false;
+    await expect(async () => {
+      await page.goto("/premium");
+      await expect(page.getByText(`Generated for ${workspace}`)).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 120_000, intervals: [3_000] });
+
+    expect(row()[0], "Lago's webhook moves the state").toBe("active");
+    const events = delivered().split("\n");
+    expect(events, "a processed, signed subscription.started").toContain("subscription.started|t|t");
+    console.log(`Mock payment: pending -> active by Lago's signed webhook. Events for ${externalId}: ${events.join(", ")}`);
+
+    // Nothing here talked to Stripe: no browser request, no provider in Lago, stripe-cli idle.
+    expect(toStripe).toEqual([]);
+    expect(sql("lago", "select count(*) from payment_providers where deleted_at is null")).toBe("0");
+    expect(compose("logs", "--no-log-prefix", "stripe-cli")).toContain("idle");
+    console.log(`MOCK PAYMENT passed. The Stripe payment test did not run. ${NOT_A_STRIPE_PASS}`);
+  } finally {
+    if (held) compose("unpause", "lago-worker");
+    compose("start", "jobs");
+  }
 });

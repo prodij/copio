@@ -188,6 +188,8 @@ services:
       LAGO_API_KEY: ${LAGO_API_KEY}
       LAGO_WEBHOOK_ISSUER: http://lago-api.{{ domain }}:${LAGO_API_PORT:-3000}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}  # optional: empty means billing isn't set up
+      BILLING_MODE: ${BILLING_MODE:-}  # off unless .env says mock (mock payment); needs APP_ENV=local
+      APP_ENV: ${APP_ENV:-}
     volumes: [./.bootstrap/backend:/run/bootstrap:ro]
     ports: ["127.0.0.1:${API_PORT:-8000}:8000"]
     depends_on: {postgres: {condition: service_healthy}}
