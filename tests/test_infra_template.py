@@ -74,3 +74,17 @@ def test_ses_user_can_be_destroyed_with_its_out_of_band_key(product_dir: pathlib
     text = (product_dir / "infra" / "email.tf").read_text()
     assert "force_destroy = true" in text
     assert "aws_route53_record.ses_verification" in text
+
+
+def test_server_has_no_ssh_uses_imds_v2_and_reaches_the_role_from_containers(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "server.tf").read_text()
+    assert "key_name" not in text
+    assert 'http_tokens                 = "required"' in text
+    assert "http_put_response_hop_limit = 2" in text
+    assert "encrypted   = true" in text
+    assert "ignore_changes = [ami, user_data]" in text
+
+
+def test_server_opens_only_web_ports(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "server.tf").read_text()
+    assert re.findall(r"from_port\s*=\s*(\d+)", text.split('resource "aws_iam_role"')[0]) == ["80", "443", "0"]
