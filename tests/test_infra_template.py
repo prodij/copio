@@ -88,3 +88,17 @@ def test_server_has_no_ssh_uses_imds_v2_and_reaches_the_role_from_containers(pro
 def test_server_opens_only_web_ports(product_dir: pathlib.Path) -> None:
     text = (product_dir / "infra" / "server.tf").read_text()
     assert re.findall(r"from_port\s*=\s*(\d+)", text.split('resource "aws_iam_role"')[0]) == ["80", "443", "0"]
+
+
+def test_deploy_role_is_limited_to_main_and_has_no_terraform_or_secrets(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "ci.tf").read_text()
+    assert "repo:${var.github_repo}:ref:refs/heads/main" in text
+    assert "secretsmanager" not in text
+    assert "AdministratorAccess" not in text
+    assert 'allowedValues = ["backend", "jobs"]' in text
+
+
+def test_second_product_can_skip_the_oidc_provider(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "ci.tf").read_text()
+    assert re.search(r"count\s*=\s*var\.create_github_oidc_provider \? 1 : 0", text)
+    assert 'data "aws_iam_openid_connect_provider" "github"' in text

@@ -1028,6 +1028,7 @@ git commit -m "feat(infra): server, DNS, alarms and budget"
 
 - Three fixes to Task 4's files, from its review. `user_data.sh.tftpl`: replace `systemctl enable --now amazon-cloudwatch-agent` with `/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json`, because the agent ignores that file until told to load it, and the disk alarm would never fire. Add `mkdir -p /etc/docker` before writing `daemon.json`. `server.tf`: `aws_eip.server` gets `depends_on = [aws_internet_gateway.main]`, as the provider's docs advise.
 - `test_second_product_can_skip_the_oidc_provider`: `terraform fmt` aligns `count`, so match with `re.search(r"count\s*=\s*var\.create_github_oidc_provider \? 1 : 0", text)`.
+- Ran it: `terraform validate` passed first time with the brief's code unchanged; no fixes were needed across `template/infra/`. The Task 4 fixes and the `count` regex were applied as above, and `terraform fmt` re-aligned `server.tf`'s `aws_eip` arguments.
 
 **Files:**
 - Create: `template/infra/frontend.tf`, `ci.tf`

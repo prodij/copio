@@ -8,3 +8,4 @@ output "app_secret_name" { value = aws_secretsmanager_secret.app.name }
 output "bootstrap_secret_name" { value = aws_secretsmanager_secret.bootstrap.name }
 output "server_instance_id" { value = aws_instance.server.id }
 output "server_ip" { value = aws_eip.server.public_ip }
+output "deploy_role_arn" { value = aws_iam_role.deploy.arn }

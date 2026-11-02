@@ -131,8 +131,9 @@ resource "aws_instance" "server" {
 }
 
 resource "aws_eip" "server" {
-  instance = aws_instance.server.id
-  domain   = "vpc"
+  instance   = aws_instance.server.id
+  domain     = "vpc"
+  depends_on = [aws_internet_gateway.main]
 }
 
 resource "aws_ssm_parameter" "config" {
