@@ -18,6 +18,37 @@ def git(cwd: pathlib.Path, *args: str) -> None:
     )
 
 
+def test_logo_path_is_not_kept_in_the_answers_and_update_still_works(tmp_path: pathlib.Path) -> None:
+    template = tagged_template(tmp_path)
+    logo = tmp_path / "mine.svg"
+    logo.write_text(CUSTOM)
+    dest = tmp_path / "product"
+    generate_and_commit(template, logo, dest)
+    assert "logo_path:" not in (dest / ".copier-answers.yml").read_text()
+    release_v2(template)
+    run_update(str(dest), defaults=True, unsafe=True, overwrite=True, quiet=True)
+    assert "logo_path:" not in (dest / ".copier-answers.yml").read_text()
+    assert (dest / "brand" / "NOTE.txt").read_text() == "v2"
+    assert (dest / "brand" / "logo.svg").read_text() == CUSTOM
+
+
+@pytest.mark.parametrize("body", ["<script>alert(1)</script>", "<rect onload='alert(1)'/>", "<foreignObject/>"])
+def test_an_unsafe_logo_path_is_refused_on_copy(tmp_path: pathlib.Path, body: str) -> None:
+    logo = tmp_path / "mine.svg"
+    logo.write_text(f'<svg xmlns="http://www.w3.org/2000/svg">{body}</svg>')
+    with pytest.raises(Exception, match="logo_path"):
+        run_copy(str(ROOT), str(tmp_path / "p"), data={**ANSWERS, "logo_path": str(logo)},
+                 defaults=True, unsafe=True, vcs_ref="HEAD", quiet=True)
+
+
+def test_a_logo_path_that_isnt_svg_is_refused_on_copy(tmp_path: pathlib.Path) -> None:
+    logo = tmp_path / "mine.png"
+    logo.write_text(CUSTOM)
+    with pytest.raises(Exception, match="logo_path"):
+        run_copy(str(ROOT), str(tmp_path / "p"), data={**ANSWERS, "logo_path": str(logo)},
+                 defaults=True, unsafe=True, vcs_ref="HEAD", quiet=True)
+
+
 def test_logo_path_replaces_the_template_logo(tmp_path: pathlib.Path) -> None:
     logo = tmp_path / "mine.svg"
     logo.write_text(CUSTOM)

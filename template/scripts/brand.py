@@ -13,7 +13,6 @@ import base64
 import html
 import importlib
 import re
-import shutil
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -24,10 +23,13 @@ import httpx
 import resvg_py
 import yaml
 
+from svg_check import svg_problem
+
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 ROOT = Path(__file__).resolve().parents[1]
 FONT_MIME = {".ttf": "font/ttf", ".otf": "font/otf", ".woff": "font/woff", ".woff2": "font/woff2"}
 FONT_SUFFIXES = set(FONT_MIME)
+FONT_NAME_BAD = re.compile(r'["\\;{}<>\n\r]')  # the name goes inside a CSS string
 LOGO_PNG_WIDTH = 512
 # Zitadel answers 400 "No changes" (INSTANCE-28fHe) when the policy already has these values.
 ZITADEL_NOT_CHANGED = "INSTANCE-28fHe"
@@ -76,16 +78,29 @@ def _required(raw: dict[str, Any], key: str, where: str = "brand.yaml") -> Any:
     return raw[key]
 
 
+def _inside_brand(folder: Path, raw: Any, field: str) -> Path:
+    """Assets are copied into public/, so a path out of brand/ could publish any file on the machine."""
+    resolved = (folder / str(raw)).resolve()
+    if not resolved.is_relative_to(folder.resolve()):
+        raise BrandError(f"{field} must be a file inside brand/, not {raw!r}")
+    return resolved
+
+
 def load_brand(path: Path) -> Brand:
     raw = yaml.safe_load(path.read_text())
     if not isinstance(raw, dict):
         raise BrandError("brand.yaml must be a mapping")
-    logo = path.parent / str(_required(raw, "logo"))
+    logo = _inside_brand(path.parent, _required(raw, "logo"), "logo")
+    if logo.suffix.lower() != ".svg":
+        raise BrandError(f"logo must be an .svg file, not {logo.name}")
     if not logo.is_file():
         raise BrandError(f"logo file {logo.name} not found")
+    problem = svg_problem(logo.read_text(errors="replace"))
+    if problem:
+        raise BrandError(f"logo {logo.name} {problem}")
     font_file = None
     if raw.get("font_file"):
-        font_file = path.parent / str(raw["font_file"])
+        font_file = _inside_brand(path.parent, raw["font_file"], "font_file")
         if not font_file.is_file() or font_file.suffix.lower() not in FONT_SUFFIXES:
             raise BrandError(
                 f"font_file {font_file.name} must exist and be one of {sorted(FONT_SUFFIXES)}"
@@ -108,9 +123,10 @@ def load_brand(path: Path) -> Brand:
         _colour(dark_raw.get("background", "#0b0b0c"), "dark.background"),
         _colour(dark_raw.get("foreground", "#ececee"), "dark.foreground"),
     )
-    return Brand(
-        str(_required(raw, "name")), logo, str(_required(raw, "font")), light, dark, font_file
-    )
+    font = str(_required(raw, "font"))
+    if FONT_NAME_BAD.search(font):
+        raise BrandError(f'font {font!r} cannot contain " \\ ; {{ }} < > or a line break')
+    return Brand(str(_required(raw, "name")), logo, font, light, dark, font_file)
 
 
 def font_asset_name(font_file: Path) -> str:
@@ -182,20 +198,38 @@ def logo_png(brand: Brand) -> bytes:
         raise BrandError(f"logo {brand.logo_path.name} cannot be rendered: {exc}") from exc
 
 
-def write_frontend(brand: Brand, frontend: Path) -> None:
-    """brand.css, the logo and favicon served from public/, the page title, and any font_file."""
-    (frontend / "src" / "brand.css").write_text(css_tokens(brand))
-    public = frontend / "public"
-    public.mkdir(exist_ok=True)
-    logo = logo_svg(brand, brand.light.primary)  # an <img> has no text colour for currentColor
-    (public / "logo.svg").write_text(logo)
-    (public / "favicon.svg").write_text(logo)
+def frontend_files(brand: Brand, frontend: Path) -> dict[str, bytes]:
+    """Every file `make brand` writes under frontend/, by path relative to it, with its content."""
+    logo = logo_svg(brand, brand.light.primary).encode()  # an <img> has no text colour for currentColor
+    files = {
+        "src/brand.css": css_tokens(brand).encode(),
+        "public/logo.svg": logo,
+        "public/favicon.svg": logo,
+    }
     if brand.font_file:
-        shutil.copyfile(brand.font_file, public / font_asset_name(brand.font_file))
+        files[f"public/{font_asset_name(brand.font_file)}"] = brand.font_file.read_bytes()
     index = frontend / "index.html"
     if index.is_file():
-        title = f"<title>{html.escape(brand.name)}</title>"
-        index.write_text(re.sub(r"<title>.*?</title>", lambda _: title, index.read_text(), count=1, flags=re.S))
+        title = f"<title>{html.escape(brand.name, quote=False)}</title>"
+        text = re.sub(r"<title>.*?</title>", lambda _: title, index.read_text(), count=1, flags=re.S)
+        files["index.html"] = text.encode()
+    return files
+
+
+def write_frontend(brand: Brand, frontend: Path) -> None:
+    for name, content in frontend_files(brand, frontend).items():
+        (frontend / name).parent.mkdir(exist_ok=True)
+        (frontend / name).write_bytes(content)
+
+
+def stale_files(brand: Brand, frontend: Path) -> list[str]:
+    """Generated files that differ from what brand.yaml says. Reads only, so `make check` changes nothing."""
+    stale = []
+    for name, content in frontend_files(brand, frontend).items():
+        current = frontend / name
+        if not current.is_file() or current.read_bytes() != content:
+            stale.append(f"frontend/{name}")
+    return stale
 
 
 def _check(response: httpx.Response, what: str) -> None:
@@ -264,10 +298,16 @@ def apply_lago(brand: Brand, graphql: GraphQL) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--css-only", action="store_true")
+    parser.add_argument("--css-only", action="store_true", help="only the files under frontend/")
+    parser.add_argument("--check", action="store_true", help="fail if those files are out of date; change nothing")
     args = parser.parse_args()
     try:
         brand = load_brand(ROOT / "brand" / "brand.yaml")
+        if args.check:
+            stale = stale_files(brand, ROOT / "frontend")
+            if stale:
+                sys.exit(f"out of date with brand/ and scripts/brand.py: {', '.join(stale)}. Run `make regen`.")
+            return
         write_frontend(brand, ROOT / "frontend")
         print("wrote frontend/src/brand.css, the page title, logo and favicon")
         if args.css_only:

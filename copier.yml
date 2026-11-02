@@ -22,20 +22,33 @@ _tasks:
       - -c
       - |
         import os, shutil, sys
+        sys.path.insert(0, "scripts")
+        from svg_check import svg_problem
         src = os.path.expanduser(sys.argv[1])
         if src:
-            if not os.path.isfile(src) or b"<svg" not in open(src, "rb").read():
-                sys.exit(f"logo_path {src!r} is not an SVG file (use an absolute path)")
+            if not os.path.isfile(src) or not src.lower().endswith(".svg"):
+                sys.exit(f"logo_path {src!r} is not an .svg file (use an absolute path)")
+            problem = svg_problem(open(src, errors="replace").read())
+            if problem:
+                sys.exit(f"logo_path {src!r} {problem}")
             shutil.copyfile(src, "brand/logo.svg")
       - "{% if _copier_operation == 'copy' %}{{ logo_path }}{% endif %}"
+  # So the app has the product's colours, logo and title from the first commit, and `make check` passes.
+  - command:
+      - sh
+      - -c
+      - cd scripts && uv run --quiet python brand.py --css-only >/dev/null || echo "could not write the brand files; run make regen"
+    when: "{{ _copier_operation == 'copy' }}"
 
 product_name:
   type: str
   help: Human name of the product
+  validator: >-
+    {% if not product_name.strip() or (product_name | regex_search('["\\\\$<>{}`\n\r\t]')) %}cannot be empty or contain a double quote, backslash, dollar sign, angle bracket, curly brace, backtick or line break{% endif %}
 product_slug:
   type: str
   help: Lowercase slug, used for databases, buckets and Zitadel project
-  default: "{{ product_name | lower | replace(' ', '-') }}"
+  default: "{{ product_name | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '') }}"
   validator: "{% if not (product_slug | regex_search('^[a-z][a-z0-9-]{1,30}$')) %}lowercase letters, digits and dashes{% endif %}"
 domain:
   type: str
@@ -52,7 +65,10 @@ brand_accent:
   validator: "{% if not (brand_accent | regex_search('^#[0-9a-fA-F]{6}$')) %}hex colour like #ff7a33{% endif %}"
 brand_font:
   type: str
+  help: Font name. It loads only if installed, or with font_file in brand/brand.yaml; otherwise the app uses Inter
   default: Inter
+  validator: >-
+    {% if not brand_font.strip() or (brand_font | regex_search('["\\\\;{}<>\n\r]')) %}cannot be empty or contain a double quote, backslash, semicolon, angle bracket, curly brace or line break{% endif %}
 starter_plan_price_usd:
   type: int
   default: 29
@@ -64,3 +80,4 @@ logo_path:
   type: str
   help: Optional absolute path to an SVG logo (copied to brand/logo.svg); leave empty to use the template's brand/logo.svg
   default: ""
+  secret: true  # used once on copy, and not kept in .copier-answers.yml: it is a local path with a username

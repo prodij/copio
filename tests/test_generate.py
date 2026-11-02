@@ -112,17 +112,22 @@ SECRETS = {"ZITADEL_MASTERKEY": "m", "ZITADEL_ADMIN_PASSWORD": "z", "LAGO_RSA_PR
            "STRIPE_SECRET_KEY": "s", "LAGO_API_KEY": "k", "LAGO_ORG_USER_PASSWORD": "p"}
 
 
+# `npx --no-install openapi-typescript <input> -o <output>` in `make check-generated`: an empty file, like the fake tree's.
+SCHEMA_OUTPUT = 'if [ "$1" = --no-install ]; then : > "$5"; fi\n'
+
+
 def _env_seen_by_host_tools(product_dir: pathlib.Path, tmp_path: pathlib.Path, target: str) -> set[str]:
     """Runs the real Makefile target with fake `uv`, `npm` and `npx` that record the secrets they see."""
     (tmp_path / "Makefile").write_text((product_dir / "Makefile").read_text())
     (tmp_path / ".env").write_text("".join(f"{k}={v}\n" for k, v in SECRETS.items()))
-    for folder in ["scripts", "backend", "jobs", "frontend", "e2e", "bin"]:
-        (tmp_path / folder).mkdir(exist_ok=True)
+    for folder in ["scripts", "backend", "jobs", "frontend/src/api", "e2e", "bin"]:
+        (tmp_path / folder).mkdir(exist_ok=True, parents=True)
+    (tmp_path / "frontend" / "src" / "api" / "schema.d.ts").write_text("")
     seen = tmp_path / "seen"
     seen.write_text("")
     for tool in ["uv", "npm", "npx"]:
         fake = tmp_path / "bin" / tool
-        fake.write_text(f'#!/bin/sh\nenv | grep -E "^({"|".join(SECRETS)})=" | cut -d= -f1 >> "{seen}"\n')
+        fake.write_text(f'#!/bin/sh\nenv | grep -E "^({"|".join(SECRETS)})=" | cut -d= -f1 >> "{seen}"\n{SCHEMA_OUTPUT}')
         fake.chmod(0o755)
     env = {"PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin", "HOME": str(tmp_path)}
     subprocess.run(["make", "-s", target], cwd=tmp_path, env=env, capture_output=True, text=True, check=True)
@@ -194,13 +199,14 @@ def test_make_keeps_mock_payment_settings_from_other_host_tools(product_dir: pat
                                                                 target: str) -> None:
     (tmp_path / "Makefile").write_text((product_dir / "Makefile").read_text())
     (tmp_path / ".env").write_text("BILLING_MODE=mock\nAPP_ENV=local\n")
-    for folder in ["scripts", "backend", "jobs", "frontend", "e2e", "bin"]:
-        (tmp_path / folder).mkdir(exist_ok=True)
+    for folder in ["scripts", "backend", "jobs", "frontend/src/api", "e2e", "bin"]:
+        (tmp_path / folder).mkdir(exist_ok=True, parents=True)
+    (tmp_path / "frontend" / "src" / "api" / "schema.d.ts").write_text("")
     seen = tmp_path / "seen"
     seen.write_text("")
     for tool in ["uv", "npm", "npx"]:
         fake = tmp_path / "bin" / tool
-        fake.write_text(f'#!/bin/sh\nenv | grep -E "^(BILLING_MODE|APP_ENV)=" >> "{seen}"; exit 0\n')
+        fake.write_text(f'#!/bin/sh\nenv | grep -E "^(BILLING_MODE|APP_ENV)=" >> "{seen}"\n{SCHEMA_OUTPUT}exit 0\n')
         fake.chmod(0o755)
     env = {"PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin", "HOME": str(tmp_path)}
     subprocess.run(["make", "-s", target], cwd=tmp_path, env=env, capture_output=True, text=True, check=True)
@@ -276,3 +282,47 @@ def test_a_subdomain_of_localhost_is_accepted(tmp_path: pathlib.Path) -> None:
     run_copy(str(ROOT), str(tmp_path / "p"), data={**ANSWERS, "domain": "dev.acme.localhost"}, defaults=True,
              unsafe=True, vcs_ref="HEAD", quiet=True)
     assert "dev.acme.localhost" in (tmp_path / "p" / "docker-compose.yml").read_text()
+
+
+ORDINARY = {**ANSWERS, "product_name": "Bob's Tools & Co", "product_slug": "bobs-tools", "domain": "bobs-tools.localhost",
+            "brand_font": "Bob's & Sans"}
+
+
+def test_apostrophes_and_ampersands_render_correctly_everywhere(tmp_path: pathlib.Path) -> None:
+    run_copy(str(ROOT), str(tmp_path / "p"), data=ORDINARY, defaults=True, unsafe=True, vcs_ref="HEAD", quiet=True)
+    name = ORDINARY["product_name"]
+    compose = yaml.safe_load((tmp_path / "p" / "docker-compose.yml").read_text())
+    assert compose["services"]["lago-api"]["environment"]["LAGO_ORG_NAME"] == name
+    assert compose["services"]["zitadel-api"]["environment"]["ZITADEL_FIRSTINSTANCE_ORG_NAME"] == name
+    namespace: dict[str, str] = {}
+    exec((tmp_path / "p" / "scripts" / "product.py").read_text(), namespace)  # noqa: S102
+    assert namespace["NAME"] == name
+    brand = yaml.safe_load((tmp_path / "p" / "brand" / "brand.yaml").read_text())
+    assert (brand["name"], brand["font"]) == (name, "Bob's & Sans")
+    assert "<title>Bob's Tools &amp; Co</title>" in (tmp_path / "p" / "frontend" / "index.html").read_text()
+    assert '--brand-font: "Bob\'s & Sans",' in (tmp_path / "p" / "frontend" / "src" / "brand.css").read_text()
+
+
+def test_a_slug_is_derived_from_a_name_with_punctuation(tmp_path: pathlib.Path) -> None:
+    data = {k: v for k, v in ORDINARY.items() if k not in ("product_slug", "domain")}
+    run_copy(str(ROOT), str(tmp_path / "p"), data=data, defaults=True, unsafe=True, vcs_ref="HEAD", quiet=True)
+    assert yaml.safe_load((tmp_path / "p" / "docker-compose.yml").read_text())["name"] == "bob-s-tools-co"
+
+
+@pytest.mark.parametrize("bad", ['Bad "Name"', "Back\\slash", "Cost $5", "<b>Name</b>", "{Curly}", "Tick`", "Two\nlines", "  "])
+def test_a_product_name_that_would_break_generated_files_is_refused(tmp_path: pathlib.Path, bad: str) -> None:
+    with pytest.raises(ValueError, match="cannot be empty or contain"):
+        run_copy(str(ROOT), str(tmp_path / "p"), data={**ANSWERS, "product_name": bad},
+                 defaults=True, unsafe=True, vcs_ref="HEAD", quiet=True)
+
+
+@pytest.mark.parametrize("bad", ['Bad"Font', "Back\\slash", "a;b", "{x}", "<x>", " "])
+def test_a_font_that_would_break_the_css_is_refused(tmp_path: pathlib.Path, bad: str) -> None:
+    with pytest.raises(ValueError, match="cannot be empty or contain"):
+        run_copy(str(ROOT), str(tmp_path / "p"), data={**ANSWERS, "brand_font": bad},
+                 defaults=True, unsafe=True, vcs_ref="HEAD", quiet=True)
+
+
+def test_a_fresh_product_is_already_branded(product_dir: pathlib.Path) -> None:
+    assert "--brand-primary: #3355ff;" in (product_dir / "frontend" / "src" / "brand.css").read_text()
+    assert "#3355ff" in (product_dir / "frontend" / "public" / "logo.svg").read_text()

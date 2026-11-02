@@ -243,6 +243,126 @@ def test_font_file_is_served_to_the_app(tmp_path: pathlib.Path) -> None:
     assert 'src: url("/brand-font.woff2");' in css
 
 
+def test_stale_files_names_what_differs_and_touches_nothing(tmp_path: pathlib.Path) -> None:
+    frontend = frontend_dir(tmp_path)
+    (tmp_path / "brand").mkdir()
+    b = load_brand(write(tmp_path / "brand"))
+    assert sorted(brand.stale_files(b, frontend)) == [
+        "frontend/index.html", "frontend/public/favicon.svg", "frontend/public/logo.svg", "frontend/src/brand.css"]
+    assert not (frontend / "public").exists()
+    assert "Old name" in (frontend / "index.html").read_text()
+    brand.write_frontend(b, frontend)
+    assert brand.stale_files(b, frontend) == []
+    (frontend / "src" / "brand.css").write_text("/* older tokens */")
+    assert brand.stale_files(b, frontend) == ["frontend/src/brand.css"]
+
+
+def test_cli_check_fails_naming_make_regen_and_leaves_the_tree_alone(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "brand").mkdir()
+    write(tmp_path / "brand")
+    frontend = frontend_dir(tmp_path)
+    brand.write_frontend(load_brand(tmp_path / "brand" / "brand.yaml"), frontend)
+    monkeypatch.setattr(brand, "ROOT", tmp_path)
+    monkeypatch.setattr("sys.argv", ["brand.py", "--check"])
+    brand.main()  # in step: says nothing, changes nothing
+    assert capsys.readouterr().out == ""
+    (frontend / "src" / "brand.css").write_text("/* older tokens */")
+    with pytest.raises(SystemExit, match=r"frontend/src/brand\.css.*make regen"):
+        brand.main()
+    assert (frontend / "src" / "brand.css").read_text() == "/* older tokens */"
+
+
+@pytest.mark.parametrize(
+    ("line", "field"),
+    [
+        ("logo: ../x.svg", "logo"),
+        ("logo: /tmp/x.svg", "logo"),
+        ("font_file: ../x.woff2", "font_file"),
+        ("font_file: /tmp/x.woff2", "font_file"),
+    ],
+)
+def test_asset_paths_must_stay_inside_brand(tmp_path: pathlib.Path, line: str, field: str) -> None:
+    (tmp_path / "x.svg").write_text(SVG)
+    (tmp_path / "x.woff2").write_bytes(b"wOF2")
+    (tmp_path / "brand").mkdir()
+    text = YAML if field != "logo" else YAML.replace("logo: logo.svg", "")
+    with pytest.raises(BrandError, match=rf"{field} must be a file inside brand/"):
+        load_brand(write(tmp_path / "brand", f"{text}{line}\n"))
+
+
+def test_a_symlink_out_of_brand_is_refused(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "secret.svg").write_text(SVG)
+    (tmp_path / "brand").mkdir()
+    (tmp_path / "brand" / "link.svg").symlink_to(tmp_path / "secret.svg")
+    with pytest.raises(BrandError, match="logo must be a file inside brand/"):
+        load_brand(write(tmp_path / "brand", YAML.replace("logo.svg", "link.svg")))
+
+
+def test_logo_must_be_an_svg(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "logo.png").write_bytes(b"png")
+    with pytest.raises(BrandError, match=r"logo must be an \.svg"):
+        load_brand(write(tmp_path, YAML.replace("logo.svg", "logo.png")))
+
+
+@pytest.mark.parametrize(
+    ("body", "said"),
+    [
+        ("<script>alert(1)</script>", "script"),
+        ("<SCRIPT>alert(1)</SCRIPT>", "script"),
+        ("<svg:script xmlns:svg='http://www.w3.org/2000/svg'>alert(1)</svg:script>", "script"),
+        ("<rect onload='alert(1)'/>", "onload"),
+        ("<rect ONCLICK='alert(1)'/>", "onclick"),
+        ("<foreignObject/>", "foreignObject"),
+        ("<a href='javascript:alert(1)'/>", "javascript:"),
+        ("<a href=' JaVa&#10;Script:alert(1)'/>", "javascript:"),
+    ],
+)
+def test_unsafe_logos_are_refused(tmp_path: pathlib.Path, body: str, said: str) -> None:
+    (tmp_path / "logo.svg").write_text(f'<svg xmlns="http://www.w3.org/2000/svg">{body}</svg>')
+    p = tmp_path / "brand.yaml"
+    p.write_text(YAML)
+    with pytest.raises(BrandError, match=said):
+        load_brand(p)
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        ('<!DOCTYPE svg [<!ENTITY x "y">]><svg xmlns="http://www.w3.org/2000/svg"/>', "entities"),
+        ("<svg><rect></svg>", "well-formed"),
+        ('<html xmlns="http://www.w3.org/1999/xhtml"/>', "not an SVG"),
+    ],
+)
+def test_logos_that_cant_be_read_are_refused(tmp_path: pathlib.Path, text: str, said: str) -> None:
+    (tmp_path / "logo.svg").write_text(text)
+    p = tmp_path / "brand.yaml"
+    p.write_text(YAML)
+    with pytest.raises(BrandError, match=said):
+        load_brand(p)
+
+
+def test_an_ordinary_logo_with_namespaces_and_styles_is_fine(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "logo.svg").write_text(
+        '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+        '<style>.a{fill:red}</style><g id="once"><use xlink:href="#a"/></g></svg>')
+    p = tmp_path / "brand.yaml"
+    p.write_text(YAML)
+    load_brand(p)
+
+
+@pytest.mark.parametrize("font", ['Bad"Font', "Back\\\\slash", "Semi;colon", "Curly{"])
+def test_fonts_that_would_break_the_css_are_refused(tmp_path: pathlib.Path, font: str) -> None:
+    with pytest.raises(BrandError, match="font"):
+        load_brand(write(tmp_path, YAML.replace("font: Inter", f"font: {json.dumps(font)}")))
+
+
+def test_ordinary_font_names_are_kept(tmp_path: pathlib.Path) -> None:
+    b = load_brand(write(tmp_path, YAML.replace("font: Inter", 'font: "Bob\'s & Sans 2"')))
+    assert '--brand-font: "Bob\'s & Sans 2",' in css_tokens(b)
+
+
 @pytest.mark.parametrize(
     "section", ["light: [1, 2]", "light: {primary: '#3355ff', accent: '#ff7a33'}\ndark: red"]
 )

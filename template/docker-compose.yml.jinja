@@ -22,7 +22,7 @@ x-lago-env: &lago-env
   LAGO_DISABLE_SEGMENT: "true"
   LAGO_DISABLE_SIGNUP: "true"
   LAGO_CREATE_ORG: "true"
-  LAGO_ORG_NAME: "{{ product_name }}"
+  LAGO_ORG_NAME: {{ product_name | tojson }}
   LAGO_ORG_USER_EMAIL: ${LAGO_ORG_USER_EMAIL}
   LAGO_ORG_USER_PASSWORD: ${LAGO_ORG_USER_PASSWORD}
   LAGO_ORG_API_KEY: ${LAGO_API_KEY}
@@ -86,7 +86,7 @@ services:
       ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: postgres
       ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: postgres
       ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
-      ZITADEL_FIRSTINSTANCE_ORG_NAME: "{{ product_name }}"
+      ZITADEL_FIRSTINSTANCE_ORG_NAME: {{ product_name | tojson }}
       # The console admin: a plain login name and the generated password from .env, not Zitadel's default.
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin@{{ domain }}
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASSWORD}
