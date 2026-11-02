@@ -52,3 +52,25 @@ def test_terraform_is_valid(product_dir: pathlib.Path, tmp_path: pathlib.Path) -
     subprocess.run(["terraform", "fmt", "-check", "-recursive"], cwd=infra, check=True)
     subprocess.run(["terraform", "init", "-backend=false", "-input=false"], cwd=infra, check=True)
     subprocess.run(["terraform", "validate"], cwd=infra, check=True)
+
+
+def test_database_is_private_protected_and_backed_up(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "database.tf").read_text()
+    assert "publicly_accessible         = false" in text
+    assert "manage_master_user_password = true" in text
+    assert "deletion_protection         = var.protect" in text
+    assert "backup_retention_period     = 7" in text
+    assert 'engine_version              = "15"' in text
+
+
+def test_terraform_never_holds_secret_values(product_dir: pathlib.Path) -> None:
+    text = "\n".join(p.read_text() for p in tf_files(product_dir))
+    assert "aws_secretsmanager_secret_version" not in text
+    assert "aws_iam_access_key" not in text
+    assert "random_password" not in text
+
+
+def test_ses_user_can_be_destroyed_with_its_out_of_band_key(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "email.tf").read_text()
+    assert "force_destroy = true" in text
+    assert "aws_route53_record.ses_verification" in text
