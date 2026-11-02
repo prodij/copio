@@ -16,8 +16,10 @@ def test_live_stripe_key_is_rejected() -> None:
         Settings(**data)
 
 
-def test_stripe_key_may_be_empty() -> None:
-    settings = Settings(**(TEST_SETTINGS.model_dump() | {"stripe_secret_key": ""}))
+@pytest.mark.parametrize("key", ["", " "])
+def test_stripe_key_may_be_empty(key: str) -> None:
+    settings = Settings(**(TEST_SETTINGS.model_dump() | {"stripe_secret_key": key}))
+    assert settings.stripe_secret_key == ""
     assert not settings.stripe_configured
     assert TEST_SETTINGS.stripe_configured
 

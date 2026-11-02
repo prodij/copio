@@ -1,4 +1,5 @@
 import json
+import os
 import pathlib
 import subprocess
 
@@ -275,7 +276,7 @@ def test_bucket_step_survives_a_hung_shell(monkeypatch: pytest.MonkeyPatch) -> N
         bootstrap.ensure_bucket()
 
 
-@pytest.mark.parametrize("key", ["sk_live_x", "rk_test_x", "whatever"])
+@pytest.mark.parametrize("key", ["sk_live_x", "rk_test_x", "whatever", "sk_live_x "])
 def test_stripe_step_refuses_anything_but_a_test_key(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
     monkeypatch.setenv("STRIPE_SECRET_KEY", key)
     with pytest.raises(SystemExit, match=r"STRIPE_SECRET_KEY must be a Stripe TEST secret key"):
@@ -356,26 +357,63 @@ class FakeStripeSetup:
         return self.printed if "--print-secret" in args else ""
 
 
-@pytest.mark.parametrize("set_empty", [True, False])
+@pytest.mark.parametrize("key", [None, "", " ", '""', "''", '" "'])
 def test_bootstrap_stripe_is_skipped_plainly_without_a_key(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], set_empty: bool
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], key: str | None
 ) -> None:
     fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
-    if set_empty:
-        monkeypatch.setenv("STRIPE_SECRET_KEY", "")
-    else:
+    if key is None:
         monkeypatch.delenv("STRIPE_SECRET_KEY")
+    else:
+        monkeypatch.setenv("STRIPE_SECRET_KEY", key)
     bootstrap.bootstrap_stripe()
     assert fake.graphql == [] and fake.compose_calls == []  # no provider, and stripe-cli is left idle
     out = capsys.readouterr().out
     assert "SKIPPED" in out and "STRIPE_SECRET_KEY" in out and "`make bootstrap` again" in out
 
 
+@pytest.mark.parametrize("value", ["sk_test_x", ' sk_test_x ', '"sk_test_x"', "'sk_test_x'"])
+def test_stripe_key_is_read_without_quotes_or_spaces(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("STRIPE_SECRET_KEY", value)
+    assert bootstrap.stripe_secret_key() == "sk_test_x"
+
+
+@pytest.mark.parametrize("key", ["sk_live_x", "whatever"])
+def test_main_stops_on_a_wrong_key_before_touching_anything(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", key)
+    monkeypatch.setattr(bootstrap, "wait_for", lambda *_a, **_k: pytest.fail("a service was waited on"))
+    with pytest.raises(SystemExit, match="Nothing was changed"):
+        bootstrap.main()
+    assert fake.compose_calls == [] and fake.graphql == []
+
+
+@pytest.mark.parametrize("printed", ["", "not a secret"])
+def test_a_key_stripe_rejects_never_reaches_lago(monkeypatch: pytest.MonkeyPatch, printed: str) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], printed)
+    with pytest.raises(SystemExit, match="printed no whsec_ secret"):
+        bootstrap.bootstrap_stripe()
+    assert fake.graphql == []
+
+
+def test_a_failed_print_secret_never_reaches_lago(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "")
+
+    def rejected(*_args: str, capture: bool = False) -> str:
+        raise SystemExit("bootstrap: `docker compose run --rm --no-deps` failed (exit 1)")
+
+    monkeypatch.setattr(bootstrap, "compose", rejected)
+    with pytest.raises(SystemExit, match="failed"):
+        bootstrap.bootstrap_stripe()
+    assert fake.graphql == []
+
+
+@pytest.mark.parametrize("key", ["", '""'])
 def test_main_finishes_without_a_key_and_recreates_the_frontend_last(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], key: str
 ) -> None:
     fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
-    monkeypatch.setenv("STRIPE_SECRET_KEY", "")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", key)
     for port in ("API_PORT", "ZITADEL_PORT", "LAGO_API_PORT", "LAGO_FRONT_PORT", "S3_PORT"):
         monkeypatch.setenv(port, "1234")
     for name in ("http_ok", "bootstrap_zitadel", "bootstrap_lago", "ensure_bucket", "backend"):
@@ -389,6 +427,7 @@ def test_main_finishes_without_a_key_and_recreates_the_frontend_last(
     assert not any("stripe-cli" in call for call in fake.compose_calls)
     out = capsys.readouterr().out
     assert out.index("SKIPPED") < out.index("Ready.")
+    assert os.environ["STRIPE_SECRET_KEY"] == ""  # what Compose gets: it would keep Make's literal quotes
 
 
 def test_bootstrap_stripe_adds_the_provider_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     @field_validator("stripe_secret_key")
     @classmethod
     def test_mode_only(cls, value: str) -> str:
+        value = value.strip()
         if value and not value.startswith("sk_test_"):
             raise ValueError("Stripe must run in test-mode (sk_test_...) in milestone 1")
         return value

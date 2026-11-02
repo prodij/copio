@@ -14,7 +14,8 @@ bootstrap: export STRIPE_SECRET_KEY := $(STRIPE_SECRET_KEY)
 bootstrap: export LAGO_API_KEY := $(LAGO_API_KEY)
 bootstrap brand: export LAGO_ORG_USER_PASSWORD := $(LAGO_ORG_USER_PASSWORD)
 # The e2e tests need to know whether there is a key, never the key itself.
-e2e: export STRIPE_CONFIGURED := $(if $(STRIPE_SECRET_KEY),1,)
+# Blank or `""` in .env counts as no key, as in scripts/bootstrap.py. Make keeps quotes; Compose doesn't.
+e2e: export STRIPE_CONFIGURED := $(if $(strip $(subst ",,$(subst ',,$(STRIPE_SECRET_KEY)))),1,)
 
 # Zitadel writes its PATs into .bootstrap/zitadel as this user, so the host can read them.
 export HOST_UID := $(shell id -u)

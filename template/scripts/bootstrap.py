@@ -350,13 +350,16 @@ end
 
 
 def stripe_secret_key() -> str:
-    """The test key, or "" when none is set yet: Stripe is optional, a wrong kind of key is not."""
-    key = os.environ.get("STRIPE_SECRET_KEY", "")
+    """The test key, or "" when none is set yet: Stripe is optional, a wrong kind of key is not.
+
+    Make passes .env values as written, so `STRIPE_SECRET_KEY=""` arrives here with its quotes.
+    """
+    key = os.environ.get("STRIPE_SECRET_KEY", "").strip().strip("\"'").strip()
     if key and not key.startswith("sk_test_"):
         raise SystemExit(
-            "bootstrap: STRIPE_SECRET_KEY must be a Stripe TEST secret key (sk_test_...). Paste it into "
-            ".env from https://dashboard.stripe.com/test/apikeys and run `make bootstrap` again; "
-            "everything before this step is done and is skipped next time."
+            "bootstrap: STRIPE_SECRET_KEY must be a Stripe TEST secret key (sk_test_...), or empty to run "
+            "without billing. Nothing was changed. Fix it in .env (test keys are at "
+            "https://dashboard.stripe.com/test/apikeys) and run `make bootstrap` again."
         )
     return key
 
@@ -368,15 +371,17 @@ def bootstrap_stripe() -> None:
               "can't be bought.\n  To add it: paste a test key (sk_test_..., from "
               "https://dashboard.stripe.com/test/apikeys) into .env and run `make bootstrap` again.")
         return
-    providers = lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"]
-    if not any(p.get("code") == "stripe" for p in providers):
-        lago_graphql(ADD_STRIPE, {"i": {"name": "Stripe", "code": "stripe", "secretKey": key,
-                                        "successRedirectUrl": f"{app_url()}/billing/return"}})
+    # First, because it is what tests the key: bootstrap keeps an existing provider, so a key Stripe
+    # rejects must not reach Lago.
     printed = compose("run", "--rm", "--no-deps", "--entrypoint", "stripe", "stripe-cli",
                       "listen", "--print-secret", capture=True).splitlines()
     secret = printed[-1].strip() if printed else ""
     if not secret.startswith("whsec_"):
         raise SystemExit("bootstrap: `stripe listen --print-secret` printed no whsec_ secret")
+    providers = lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"]
+    if not any(p.get("code") == "stripe" for p in providers):
+        lago_graphql(ADD_STRIPE, {"i": {"name": "Stripe", "code": "stripe", "secretKey": key,
+                                        "successRedirectUrl": f"{app_url()}/billing/return"}})
     compose("up", "-d", "--force-recreate", "stripe-cli")
     apply_stripe_webhook_secret(secret)  # last: after any RegisterWebhookJob could have run
     print("Stripe: Lago connected; `stripe listen` forwards test webhooks to Lago")
@@ -422,6 +427,9 @@ def backend(*args: str) -> None:
 
 
 def main() -> None:
+    # First: a wrong key stops before any service is recreated. Saved back so Compose, which prefers
+    # this process's environment over .env, gets the cleaned value.
+    os.environ["STRIPE_SECRET_KEY"] = stripe_secret_key()
     zitadel, lago = zitadel_url(), lago_api_url()
     wait_for(f"Zitadel at {zitadel}", lambda: http_ok(zitadel, "/debug/ready"))
     wait_for("Zitadel's admin token", ADMIN_PAT.is_file)  # written before Zitadel serves

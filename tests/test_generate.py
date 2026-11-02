@@ -143,7 +143,8 @@ def test_make_gives_host_tools_only_the_secrets_they_need(
     assert _env_seen_by_host_tools(product_dir, tmp_path, target) == needed
 
 
-@pytest.mark.parametrize(("key", "seen"), [("sk_test_x", "1"), ("", "")])
+@pytest.mark.parametrize(("key", "seen"), [("sk_test_x", "1"), ('"sk_test_x"', "1"), ("", ""), ('""', ""), ("''", ""),
+                                           (" ", ""), ('" "', "")])
 def test_e2e_is_told_whether_there_is_a_stripe_key_not_the_key(
     product_dir: pathlib.Path, tmp_path: pathlib.Path, key: str, seen: str
 ) -> None:
