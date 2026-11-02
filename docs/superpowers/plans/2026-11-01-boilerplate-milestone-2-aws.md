@@ -2693,6 +2693,8 @@ git commit -m "feat(infra): make infra-* commands and infra-doctor"
 
 ### Task 10: Deploy workflows
 
+**Amendments, 2026-11-01:** `deploy-backend.yml` and `deploy-jobs.yml` both use `concurrency: {group: deploy-server}`, so one merge touching both folders doesn't run two deploys on one server at once (found in Task 7's review; `deploy.sh` also takes a lock).
+
 **Files:**
 - Create: `template/.github/workflows/deploy-frontend.yml`, `deploy-backend.yml`, `deploy-jobs.yml`
 - Test: `tests/test_workflows.py`
@@ -2784,7 +2786,7 @@ on:
     paths: ["backend/**", ".github/workflows/deploy-backend.yml"]
   workflow_dispatch:
 permissions: {contents: read, id-token: write}
-concurrency: {group: deploy-backend}
+concurrency: {group: deploy-server}
 jobs:
   deploy:
     if: vars.AWS_DEPLOY_ROLE_ARN != ''
@@ -2821,7 +2823,7 @@ jobs:
           test "$status" = Success
 ```
 
-`template/.github/workflows/deploy-jobs.yml`: identical to `deploy-backend.yml`, with `name: deploy-jobs`, `paths: ["jobs/**", ".github/workflows/deploy-jobs.yml"]`, `concurrency: {group: deploy-jobs}` and `SERVICE: jobs`.
+`template/.github/workflows/deploy-jobs.yml`: identical to `deploy-backend.yml`, with `name: deploy-jobs`, `paths: ["jobs/**", ".github/workflows/deploy-jobs.yml"]`, and `SERVICE: jobs`.
 
 - [ ] **Step 4: Run tests.** `uv run pytest tests/test_workflows.py tests/test_infra_template.py -q`. Expected: PASS.
 

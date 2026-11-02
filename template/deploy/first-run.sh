@@ -4,7 +4,7 @@ export HOME="${HOME:-/root}"
 export PATH="$PATH:/usr/local/bin"
 set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/app}"
-source "${APP_ENV_FILE:-/etc/app.env}"
+source "${APP_ENV_FILE:-/etc/app.env}" || exit 1
 export AWS_REGION COMPOSE_FILE=docker-compose.aws.yml
 cd "$APP_DIR"
 
@@ -12,7 +12,7 @@ cd "$APP_DIR"
 
 val() { { grep "^$1=" .env || true; } | cut -d= -f2-; }
 DB_ADMIN_PASSWORD="$(aws secretsmanager get-secret-value --secret-id "$(val DB_ADMIN_SECRET_ARN)" \
-  --query SecretString --output text | jq -r .password)"
+  --query SecretString --output text | jq -er .password)"
 export DB_ADMIN_PASSWORD
 
 echo "== databases"
@@ -31,9 +31,10 @@ docker compose up -d
 echo "== bootstrap"
 DOMAIN="$(val DOMAIN)"
 export DEPLOY_TARGET=aws SLUG DOMAIN
-export LAGO_API_KEY="$(val LAGO_API_KEY)"
-export LAGO_ORG_USER_PASSWORD="$(val LAGO_ORG_USER_PASSWORD)"
-export STRIPE_SECRET_KEY="$(val STRIPE_SECRET_KEY)"
+LAGO_API_KEY="$(val LAGO_API_KEY)"
+LAGO_ORG_USER_PASSWORD="$(val LAGO_ORG_USER_PASSWORD)"
+STRIPE_SECRET_KEY="$(val STRIPE_SECRET_KEY)"
+export LAGO_API_KEY LAGO_ORG_USER_PASSWORD STRIPE_SECRET_KEY
 export LAGO_ORG_USER_EMAIL="admin@$DOMAIN"
 cd scripts
 uv run python -u bootstrap.py

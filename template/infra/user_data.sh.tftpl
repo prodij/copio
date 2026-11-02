@@ -31,7 +31,7 @@ cat > /usr/local/bin/app-start <<'SCRIPT'
 set -euo pipefail
 source /etc/app.env
 mkdir -p /opt/app
-aws s3 sync --delete --exclude ".env" --exclude ".bootstrap/*" --exclude "scripts/.venv/*" "s3://$DEPLOY_BUCKET/current/" /opt/app/ --region "$AWS_REGION"
+aws s3 sync --delete --exclude ".env" --exclude ".bootstrap/*" --exclude ".deploy.lock" --exclude "scripts/.venv/*" "s3://$DEPLOY_BUCKET/current/" /opt/app/ --region "$AWS_REGION"
 chmod +x /opt/app/deploy/*.sh
 exec /opt/app/deploy/start.sh
 SCRIPT
