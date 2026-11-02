@@ -16,7 +16,7 @@ Milestone 1 is done when, in a freshly generated product running on Docker Compo
 3. choose the starter plan and pay with Stripe's test card `4242 4242 4242 4242`,
 4. see a sample `premium_report` feature switch on, driven by the Lago webhook, not by the browser returning from Stripe.
 
-`make e2e` proves this with one Playwright test.
+`make e2e` proves this with one Playwright test. Stripe is optional (note 2026-11-01): without a key steps 1 and 2 still work, step 3 says billing isn't set up, and the payment test is reported as skipped.
 
 ## 2. The pattern this serves
 
@@ -86,7 +86,7 @@ CLAUDE.md, .claude/ agent rules, settings and guard hook (§10)
 - `POST /workspaces {name}` (any signed-in user without a workspace):
   1. insert a `workspaces` row with `status = creating`,
   2. create the Zitadel organization through a service account, make the caller its owner, record `zitadel_org_id`,
-  3. create the Lago customer (`external_id = workspace.id`, Stripe as payment provider), record `lago_customer_id`,
+  3. create the Lago customer (`external_id = workspace.id`, Stripe as payment provider when a key is configured), record `lago_customer_id`,
   4. set `status = ready`.
 
   Each step is recorded, so a retry resumes from the last finished step and never creates duplicates.
@@ -95,10 +95,10 @@ CLAUDE.md, .claude/ agent rules, settings and guard hook (§10)
 ## 6. Billing and access
 
 - **Plans are code:** `backend/billing/plans.yaml` holds per plan the code, name, price, interval and features (booleans and limits, e.g. `premium_report: true`, `seats: 5`). `make sync-plans` creates or updates them in Lago. Milestone 1 ships one plan, `starter`.
-- **Checkout:** `POST /billing/checkout {plan_code}` (owner only) creates the Lago subscription for the workspace and returns the Stripe-hosted checkout URL that Lago provides for collecting the payment method. The frontend redirects there. Coming back from Stripe changes nothing by itself.
+- **Checkout:** `POST /billing/checkout {plan_code}` (owner only) creates the Lago subscription for the workspace and returns the Stripe-hosted checkout URL that Lago provides for collecting the payment method. The frontend redirects there. Coming back from Stripe changes nothing by itself. Without a Stripe key it answers `501` with a message saying billing isn't set up, and writes nothing. A Lago customer created before the key gets the Stripe provider at its first checkout (Lago's upsert on `external_id`).
 - **Webhooks:** `POST /billing/webhooks/lago` verifies Lago's webhook signature, inserts the event into `webhook_events` (unique on Lago's event ID; a duplicate is acknowledged and ignored), then updates `subscriptions`.
 - **States:** `pending` → `active` (invoice paid) → `past_due` (payment failed; Stripe retries) → `active` (retry paid) or `canceled` (retries exhausted or canceled at period end).
-- **Access:** `require_feature(name)` is a FastAPI dependency. It allows the request when the workspace's subscription is `active` or `past_due` and its plan grants the feature; otherwise it returns `402` with the reason. It is the only access check. `GET /me/access` returns plan, state and features so the frontend can show or hide UI; the backend re-checks on every request.
+- **Access:** `require_feature(name)` is a FastAPI dependency. It allows the request when the workspace's subscription is `active` or `past_due` and its plan grants the feature; otherwise it returns `402` with the reason. It is the only access check. `GET /me/access` returns plan, state, features and `billing_configured` so the frontend can show or hide UI; the backend re-checks on every request.
 - **Usage, ready but unpriced:** `billing.record_usage(workspace_id, metric, value)` sends events to Lago. One sample metric (`reports_generated`) is recorded, with no price attached.
 - **Reconcile:** a job (§7) asks Lago for each workspace's current subscription every 15 minutes and repairs any state that differs. Webhooks make changes fast; reconcile keeps them correct.
 
@@ -132,10 +132,10 @@ Products add their own tables. Every product table carries `workspace_id`.
   - Zitadel and its login UI,
   - Lago (api, worker, clock, front, pdf),
   - the backend, the frontend dev server and the job scheduler,
-  - `stripe listen`, forwarding Stripe test webhooks to Lago.
+  - `stripe listen`, forwarding Stripe test webhooks to Lago (idle without a key).
 - `make bootstrap` (once per machine):
   - creates the Zitadel project, app client and service account,
-  - connects Lago to Stripe test keys from `.env`,
+  - connects Lago to the Stripe test key from `.env`; with no key it says Stripe was skipped and how to add it, and finishes,
   - runs `sync-plans` and `brand`.
 - Image versions for Zitadel, Lago and other services are pinned in `docker-compose.yml`.
 - **Secrets:** `.env` is git-ignored and `.env.example` lists every variable without values. `prodij/copio` is public, so the template self-test fails if anything resembling a key is committed.
@@ -149,6 +149,7 @@ Products add their own tables. Every product table carries `workspace_id`.
 | Webhook with a bad signature or unknown type | `400`, logged, no state change |
 | Duplicate webhook | Acknowledged, ignored |
 | Webhook missed or late | Fixed by `billing_reconcile` within 15 minutes |
+| No Stripe key | Checkout `501` with a clear message, nothing written; `require_feature` still answers `402`; adding the key and re-running `make bootstrap` enables checkout, also for existing workspaces |
 | Frontend loading / error / missing value | Skeleton / HTTP status with the API's message / "Unavailable", never `0` |
 
 ## 10. Testing and rules for agents
@@ -159,7 +160,7 @@ Products add their own tables. Every product table carries `workspace_id`.
 - **Access:** a table-driven test of every state × plan × feature combination.
 - **Isolation:** an architecture test reads another workspace's data through every endpoint and job helper and must fail.
 - **Frontend:** Vitest and Testing Library with a mocked API.
-- **End to end:** `make e2e`, Playwright against real containers and Stripe test mode. Runs in the template self-test and nightly.
+- **End to end:** `make e2e`, Playwright against real containers and Stripe test mode (the payment test is skipped without a key). Runs in the template self-test and nightly.
 - **Template self-test (CI):** `copier copy --trust` into a temp dir, then lint, typecheck, unit tests, and e2e on the generated product.
 
 ### Agent rules (in each product's `CLAUDE.md` and `.claude/`)

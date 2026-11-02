@@ -2,8 +2,12 @@
   "components": {
     "schemas": {
       "AccessOut": {
-        "description": "`state` is the subscription's own state (including `pending`); `features` holds only what it grants now.",
+        "description": "`state` is the subscription's own state (including `pending`); `features` holds only what it grants now.\n\n`billing_configured` false: no Stripe key, so plans can't be bought. It grants nothing by itself.",
         "properties": {
+          "billing_configured": {
+            "title": "Billing Configured",
+            "type": "boolean"
+          },
           "current_period_end": {
             "anyOf": [
               {
@@ -54,6 +58,7 @@
           }
         },
         "required": [
+          "billing_configured",
           "plan_code",
           "state",
           "current_period_end",

@@ -15,6 +15,7 @@ from app.billing.webhooks import (
     get_webhook_verifier,
     handle_event,
 )
+from app.config import Settings, get_settings
 from app.db import get_session
 from app.integrations import get_lago
 from app.integrations.lago import LagoClient
@@ -22,6 +23,9 @@ from app.workspaces.routes import CurrentWorkspace, current_workspace
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/billing")
+
+BILLING_NOT_SET_UP = ("Billing isn't set up: this product has no Stripe key. "
+                      "Add a Stripe test key to STRIPE_SECRET_KEY in .env and run `make bootstrap`.")
 
 
 class CheckoutIn(BaseModel):
@@ -55,14 +59,20 @@ def checkout(
     session: Annotated[Session, Depends(get_session)],
     lago: Annotated[LagoClient, Depends(get_lago)],
     plans: Annotated[dict[str, Plan], Depends(get_plans)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> CheckoutOut:
     if current.role != "owner":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the workspace owner can change the plan")
     plan = plans.get(body.plan_code)
     if plan is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown plan {body.plan_code!r}")
+    # 501, not 503: nothing is down and retrying can't help until someone adds the key. Checked before
+    # start_checkout, so no subscription row is written and a later checkout starts clean.
+    if not settings.stripe_configured:
+        raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, BILLING_NOT_SET_UP)
     try:
-        return CheckoutOut(checkout_url=start_checkout(session, current.workspace, plan, lago))
+        code = settings.lago_stripe_provider_code
+        return CheckoutOut(checkout_url=start_checkout(session, current.workspace, plan, lago, code))
     except PlanChangeNotSupported as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, "plan change not supported yet") from exc
 

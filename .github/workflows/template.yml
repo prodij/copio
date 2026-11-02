@@ -1,5 +1,7 @@
 # Template self-test (spec §10): fast tests, then a generated product's `make check`, then (nightly
-# or on demand) the generated product's e2e against the real stack and Stripe test mode.
+# or on demand) the generated product's e2e against the real stack and, when the STRIPE_SECRET_KEY
+# secret is set, Stripe test mode (without it the payment test is reported as skipped, unless the repo
+# variable STRIPE_E2E_REQUIRED is "true", which fails the run).
 name: template
 on:
   pull_request:
@@ -57,10 +59,17 @@ jobs:
         run: |
           uvx copier@9.19.1 copy --trust --defaults --vcs-ref HEAD \
             -d product_name="Acme Reports" -d product_slug=acme-reports template product
-      - name: .env with the Stripe test key, then generated values
-        env: {STRIPE_SECRET_KEY: "${{ secrets.STRIPE_SECRET_KEY }}"}
+      - name: .env with the Stripe test key if any, then generated values
+        env: {STRIPE_SECRET_KEY: "${{ secrets.STRIPE_SECRET_KEY }}", STRIPE_E2E_REQUIRED: "${{ vars.STRIPE_E2E_REQUIRED }}"}
         run: |
-          case "$STRIPE_SECRET_KEY" in sk_test_*) ;; *) echo "STRIPE_SECRET_KEY must be a Stripe TEST key"; exit 1;; esac
+          case "$STRIPE_SECRET_KEY" in ""|sk_test_*) ;; *) echo "STRIPE_SECRET_KEY must be a Stripe TEST key"; exit 1;; esac
+          if [ -z "$STRIPE_SECRET_KEY" ]; then
+            if [ "$STRIPE_E2E_REQUIRED" = "true" ]; then
+              echo "::error::No STRIPE_SECRET_KEY secret, and the repo variable STRIPE_E2E_REQUIRED is true"; exit 1
+            fi
+            echo "::notice::No STRIPE_SECRET_KEY secret: the e2e payment test will be skipped"
+            echo "No STRIPE_SECRET_KEY secret: the e2e payment test was skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
           umask 077 && printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY" > .env
           make env
       - run: make up

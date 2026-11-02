@@ -167,8 +167,12 @@ export interface components {
         /**
          * AccessOut
          * @description `state` is the subscription's own state (including `pending`); `features` holds only what it grants now.
+         *
+         *     `billing_configured` false: no Stripe key, so plans can't be bought. It grants nothing by itself.
          */
         AccessOut: {
+            /** Billing Configured */
+            billing_configured: boolean;
             /** Current Period End */
             current_period_end: string | null;
             /** Features */

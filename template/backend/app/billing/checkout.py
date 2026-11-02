@@ -47,7 +47,7 @@ def _record_checkout(session: Session, ws: Workspace, plan: Plan) -> Subscriptio
     return sub
 
 
-def start_checkout(session: Session, ws: Workspace, plan: Plan, lago: LagoClient) -> str | None:
+def start_checkout(session: Session, ws: Workspace, plan: Plan, lago: LagoClient, provider_code: str) -> str | None:
     """Returns the Stripe setup URL to send the owner to, or None when no redirect is needed.
 
     Lago's payment-gated subscription needs a saved card first, and Lago sends no webhook when
@@ -59,7 +59,7 @@ def start_checkout(session: Session, ws: Workspace, plan: Plan, lago: LagoClient
         return None
     customer_id = str(ws.id)
     if not lago.has_default_payment_method(customer_id):
-        return lago.checkout_url(customer_id)
+        return lago.checkout_url(customer_id, provider_code)
     external_id = str(sub.lago_external_id)
     lago.create_subscription(customer_id, plan.code, external_id)
     sub.lago_subscription_id = external_id

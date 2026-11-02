@@ -3,18 +3,25 @@
 Generated from [prodij/copio](https://github.com/prodij/copio). Update with `copier update --trust`.
 
     make env          # writes .env (git-ignored) with generated local secrets
-    # paste a Stripe TEST secret key (sk_test_ only, not rk_test_: https://dashboard.stripe.com/test/apikeys)
-    # into STRIPE_SECRET_KEY= in .env, then:
     make up           # starts the stack
-    make bootstrap    # configures Zitadel, Lago and Stripe once; safe to run again
+    make bootstrap    # configures Zitadel, Lago and (with a key) Stripe; safe to run again
     open http://{{ domain }}:5173    # 5173 is the default APP_PORT; use yours if you changed it
+
+Stripe is optional. Without a key you can sign up, create a workspace and use the app, but billing
+isn't set up: `POST /billing/checkout` answers 501 with that message, Billing says so, and paid features
+stay off (`require_feature` still answers 402). To add it, paste a Stripe TEST secret key (sk_test_ only,
+not rk_test_: https://dashboard.stripe.com/test/apikeys) into `STRIPE_SECRET_KEY=` in `.env` and run
+`make bootstrap` again. `make up` alone is not enough: it gives the backend the key, but Lago has no
+Stripe provider until `make bootstrap` adds it, and new workspaces fail until then. Workspaces created
+before the key get their Stripe customer at their first checkout.
 
 Host ports are set in `.env` (defaults: app 5173, API 8000, Zitadel 8085, its login page 3100,
 Lago API 3000 and UI 8088, Postgres 5432, S3 (SeaweedFS) 8333). Change any that clash with another
 project, then `make up`. Every port is published on 127.0.0.1 only.
 
-- `make e2e` runs the Playwright sign-up-to-premium test against the running stack (after
-  `make bootstrap`). `make check` runs lint, types and unit tests (needs Postgres: `make up`).
+- `make e2e` runs the Playwright tests against the running stack (after `make bootstrap`): sign-up to
+  `/plans` always, and sign-up to premium when `.env` has a Stripe key (reported as skipped without
+  one). `make check` runs lint, types and unit tests (needs Postgres: `make up`).
 - Brand colours, font and logo live in `brand/brand.yaml`; they reach the app, the Zitadel login
   page and Lago when `make brand` runs (`make bootstrap` runs it too).
 - The Zitadel console (`http://auth.{{ domain }}:8085/ui/console`, with your ZITADEL_PORT) signs in

@@ -3,6 +3,7 @@ import re
 from typing import cast
 
 import httpx
+import pytest
 import respx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -11,8 +12,9 @@ from sqlalchemy.orm import Session
 
 from app.billing.models import Subscription
 from app.billing.plans import Plan, get_plans
+from app.config import Settings, get_settings
 from tests.auth_helpers import AuthHeaders
-from tests.fakes import LAGO, fake_lago_billing
+from tests.fakes import LAGO, fake_lago_billing, lago_customer
 
 STARTER = {"plan_code": "starter"}
 
@@ -175,6 +177,78 @@ def test_unsynced_stripe_customer_is_503_not_a_dead_checkout(client: TestClient,
     r = client.post("/billing/checkout", json=STARTER, headers=owner_headers)
     assert (r.status_code, r.json()) == (503, {"detail": "Stripe customer is unavailable"})
     assert lago["url"].call_count == 0
+    assert lago["upsert"].call_count == 0  # it has its provider; a repeat would queue a second Stripe customer
+
+
+@respx.mock
+def test_customer_from_before_the_key_gets_the_provider_at_checkout(client: TestClient, owner_headers: dict[str, str],
+                                                                    owner_workspace: str) -> None:
+    lago = fake_lago_billing(respx.mock, card=False, provider=False)
+    r = client.post("/billing/checkout", json=STARTER, headers=owner_headers)
+    # Lago now creates the Stripe customer in its background job: the same 503 the Plans page retries.
+    assert (r.status_code, r.json()) == (503, {"detail": "Stripe customer is unavailable"})
+    assert lago["url"].call_count == 0
+    assert json.loads(lago["upsert"].calls.last.request.content) == {"customer": {
+        "external_id": owner_workspace,  # only this and the provider: Lago keeps the name and email
+        "billing_configuration": {"payment_provider": "stripe", "payment_provider_code": "stripe",
+                                  "sync_with_provider": True, "provider_payment_methods": ["card"]}}}
+
+    lago["customer"].mock(return_value=lago_customer(synced=False))  # the job is still running
+    assert client.post("/billing/checkout", json=STARTER, headers=owner_headers).status_code == 503
+    assert lago["upsert"].call_count == 1
+
+    lago["customer"].mock(return_value=lago_customer())  # the job finished
+    r = client.post("/billing/checkout", json=STARTER, headers=owner_headers)
+    assert r.json() == {"checkout_url": "https://checkout.stripe.test/s"}
+    assert lago["upsert"].call_count == 1
+
+
+@respx.mock
+def test_attaching_a_provider_lago_does_not_have_is_a_clear_502(client: TestClient,
+                                                                owner_headers: dict[str, str]) -> None:
+    lago = fake_lago_billing(respx.mock, card=False, provider=False)
+    lago["upsert"].mock(return_value=httpx.Response(422, json={
+        "status": 422, "error": "Unprocessable Entity", "code": "payment_provider_not_found"}))
+    r = client.post("/billing/checkout", json=STARTER, headers=owner_headers)
+    assert r.status_code == 502
+    assert "payment_provider_not_found" in r.json()["detail"]
+
+
+@pytest.fixture
+def no_stripe(client: TestClient, settings: Settings) -> None:
+    without_key = settings.model_copy(update={"stripe_secret_key": ""})
+    cast(FastAPI, client.app).dependency_overrides[get_settings] = lambda: without_key
+
+
+@respx.mock
+def test_checkout_without_stripe_is_a_clear_501_and_writes_nothing(
+    client: TestClient, owner_headers: dict[str, str], no_stripe: None, db_session: Session,
+) -> None:
+    lago = fake_lago_billing(respx.mock, card=False)
+    r = client.post("/billing/checkout", json=STARTER, headers=owner_headers)
+    assert r.status_code == 501
+    assert r.json()["detail"].startswith("Billing isn't set up")
+    assert "STRIPE_SECRET_KEY" in r.json()["detail"]
+    assert db_session.scalars(select(Subscription)).first() is None
+    assert not any(route.called for route in lago.values())
+
+
+@respx.mock
+def test_checkout_works_once_the_key_is_added(client: TestClient, owner_headers: dict[str, str], no_stripe: None,
+                                              settings: Settings) -> None:
+    fake_lago_billing(respx.mock, card=False)
+    assert client.post("/billing/checkout", json=STARTER, headers=owner_headers).status_code == 501
+    cast(FastAPI, client.app).dependency_overrides[get_settings] = lambda: settings
+    r = client.post("/billing/checkout", json=STARTER, headers=owner_headers)
+    assert r.json() == {"checkout_url": "https://checkout.stripe.test/s"}
+
+
+def test_without_stripe_a_member_is_still_403_and_a_bad_plan_still_422(
+    client: TestClient, owner_workspace: str, auth: AuthHeaders, owner_headers: dict[str, str], no_stripe: None,
+) -> None:
+    member = auth("user-2", {owner_workspace: "member"})
+    assert client.post("/billing/checkout", json=STARTER, headers=member).status_code == 403
+    assert client.post("/billing/checkout", json={"plan_code": "gold"}, headers=owner_headers).status_code == 422
 
 
 def test_unknown_plan_is_422(client: TestClient, owner_headers: dict[str, str]) -> None:

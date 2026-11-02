@@ -22,22 +22,36 @@ class LagoClient:
             raise DependencyUnavailable("Lago")
         return response
 
-    def create_customer(self, external_id: str, name: str, email: str | None, provider_code: str) -> str:
-        """Lago upserts customers on external_id, so repeating this call never duplicates."""
-        body = {"customer": {
-            "external_id": external_id,
-            "name": name,
-            "email": email,
-            "billing_configuration": {
-                "payment_provider": "stripe",
-                "payment_provider_code": provider_code,
-                "sync_with_provider": True,
-                "provider_payment_methods": ["card"],
-            },
-        }}
-        response = self._call("POST", "/api/v1/customers", body)
+    @staticmethod
+    def _stripe_billing(provider_code: str) -> dict[str, Any]:
+        return {
+            "payment_provider": "stripe",
+            "payment_provider_code": provider_code,
+            "sync_with_provider": True,
+            "provider_payment_methods": ["card"],
+        }
+
+    def create_customer(self, external_id: str, name: str, email: str | None, provider_code: str | None) -> str:
+        """Lago upserts customers on external_id, so repeating this call never duplicates.
+
+        `provider_code` None (no Stripe configured): no billing configuration; checkout attaches it later.
+        """
+        customer: dict[str, Any] = {"external_id": external_id, "name": name, "email": email}
+        if provider_code is not None:
+            customer["billing_configuration"] = self._stripe_billing(provider_code)
+        response = self._call("POST", "/api/v1/customers", {"customer": customer})
         self._check(response)
         return str(response.json()["customer"]["lago_id"])
+
+    def _attach_stripe(self, external_id: str, provider_code: str) -> None:
+        """Give an existing customer the Stripe provider, for a workspace created before Stripe was set up.
+
+        Lago's upsert (v1.55.0 Customers::UpsertFromApiService) sets only the fields it receives, so
+        name and email stay, and queues the job that creates the Stripe customer. Each repeat while
+        that job has not finished queues another, so call this only when no provider is set yet.
+        """
+        body = {"customer": {"external_id": external_id, "billing_configuration": self._stripe_billing(provider_code)}}
+        self._check(self._call("POST", "/api/v1/customers", body))
 
     def upsert_plan(self, body: dict[str, Any]) -> None:
         code = body["plan"]["code"]
@@ -88,15 +102,20 @@ class LagoClient:
         self._check(response)
         return any(m.get("is_default") for m in response.json()["payment_methods"])
 
-    def checkout_url(self, external_customer_id: str) -> str:
+    def checkout_url(self, external_customer_id: str, provider_code: str) -> str:
         """URL of a Stripe Checkout page in setup mode: it saves a card, it charges nothing.
 
         Lago creates the Stripe customer in a background job. A checkout started before that
-        job ran has no Stripe customer, and Lago would never learn about the card, so refuse.
+        job ran has no Stripe customer, and Lago would never learn about the card, so refuse
+        (a customer from before Stripe was set up gets its provider now, which starts that job).
         """
         customer = self._call("GET", f"/api/v1/customers/{external_customer_id}")
         self._check(customer)
-        if not customer.json()["customer"].get("billing_configuration", {}).get("provider_customer_id"):
+        billing = customer.json()["customer"].get("billing_configuration", {})
+        if not billing.get("payment_provider"):
+            self._attach_stripe(external_customer_id, provider_code)
+            raise DependencyUnavailable("Stripe customer")
+        if not billing.get("provider_customer_id"):
             raise DependencyUnavailable("Stripe customer")
         response = self._call("POST", f"/api/v1/customers/{external_customer_id}/checkout_url")
         self._check(response)

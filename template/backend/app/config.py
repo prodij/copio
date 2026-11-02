@@ -21,14 +21,20 @@ class Settings(BaseSettings):
     lago_api_key: str
     lago_webhook_issuer: str
     lago_stripe_provider_code: str = "stripe"
-    stripe_secret_key: str
+    # Empty means billing isn't set up: the product works, checkout says so, paid features stay off.
+    stripe_secret_key: str = ""
 
     @field_validator("stripe_secret_key")
     @classmethod
     def test_mode_only(cls, value: str) -> str:
-        if not value.startswith("sk_test_"):
+        value = value.strip()
+        if value and not value.startswith("sk_test_"):
             raise ValueError("Stripe must run in test-mode (sk_test_...) in milestone 1")
         return value
+
+    @property
+    def stripe_configured(self) -> bool:
+        return bool(self.stripe_secret_key)
 
     @model_validator(mode="after")
     def token_from_file(self) -> "Settings":

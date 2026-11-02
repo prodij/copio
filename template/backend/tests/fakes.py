@@ -36,14 +36,26 @@ def fake_lago(mock: respx.MockRouter) -> dict[str, respx.Route]:
     }
 
 
-def fake_lago_billing(mock: respx.MockRouter, *, card: bool, synced: bool = True) -> dict[str, respx.Route]:
+def lago_customer(*, provider: bool = True, synced: bool = True) -> httpx.Response:
+    """GET /customers/{id}, shaped like lago-api v1.55.0's serializer: no `provider_customer_id` key without a provider."""
+    if not provider:
+        return httpx.Response(200, json={"customer": {"billing_configuration": {
+            "payment_provider": None, "payment_provider_code": None}}})
+    return httpx.Response(200, json={"customer": {"billing_configuration": {
+        "payment_provider": "stripe", "payment_provider_code": "stripe",
+        "provider_customer_id": "cus_x" if synced else None}}})
+
+
+def fake_lago_billing(mock: respx.MockRouter, *, card: bool, synced: bool = True,
+                      provider: bool = True) -> dict[str, respx.Route]:
     """Lago's checkout-side endpoints for one customer, shaped like lago-api v1.55.0's serializers."""
     methods = [{"lago_id": "pm-1", "is_default": True, "provider_method_id": "pm_x"}] if card else []
-    provider_customer_id = "cus_x" if synced else None
     return {
         "customer": mock.get(url__regex=rf"{LAGO}/api/v1/customers/[^/]+$").mock(
-            return_value=httpx.Response(200, json={"customer": {"billing_configuration": {
-                "payment_provider": "stripe", "provider_customer_id": provider_customer_id}}})
+            return_value=lago_customer(provider=provider, synced=synced)
+        ),
+        "upsert": mock.post(f"{LAGO}/api/v1/customers").mock(
+            return_value=httpx.Response(200, json={"customer": {"lago_id": "lago-cust-1"}})
         ),
         "methods": mock.get(url__regex=rf"{LAGO}/api/v1/customers/.+/payment_methods").mock(
             return_value=httpx.Response(200, json={"payment_methods": methods, "meta": {"current_page": 1}})

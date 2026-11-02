@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.access.rules import decide
 from app.billing.models import Subscription
 from app.billing.plans import Plan, get_plans
+from app.config import Settings, get_settings
 from app.db import get_session
 from app.workspaces.routes import CurrentWorkspace, current_workspace
 
@@ -15,8 +16,12 @@ router = APIRouter()
 
 
 class AccessOut(BaseModel):
-    """`state` is the subscription's own state (including `pending`); `features` holds only what it grants now."""
+    """`state` is the subscription's own state (including `pending`); `features` holds only what it grants now.
 
+    `billing_configured` false: no Stripe key, so plans can't be bought. It grants nothing by itself.
+    """
+
+    billing_configured: bool
     plan_code: str | None
     state: str | None
     current_period_end: datetime | None
@@ -28,12 +33,14 @@ def my_access(
     current: Annotated[CurrentWorkspace, Depends(current_workspace)],
     session: Annotated[Session, Depends(get_session)],
     plans: Annotated[dict[str, Plan], Depends(get_plans)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> AccessOut:
     sub = session.get(Subscription, current.workspace.id)
     if sub is None:
-        return AccessOut(plan_code=None, state=None, current_period_end=None, features={})
+        return AccessOut(billing_configured=settings.stripe_configured, plan_code=None, state=None,
+                         current_period_end=None, features={})
     plan = plans.get(sub.plan_code)
     names = plan.features if plan else {}
     features = {name: names[name] for name in names if decide(sub.state, sub.plan_code, plans, name).allowed}
-    return AccessOut(plan_code=sub.plan_code, state=sub.state, current_period_end=sub.current_period_end,
-                     features=features)
+    return AccessOut(billing_configured=settings.stripe_configured, plan_code=sub.plan_code, state=sub.state,
+                     current_period_end=sub.current_period_end, features=features)
