@@ -217,3 +217,25 @@ def test_rehearsal_asks_what_the_doctor_asks(product_dir: pathlib.Path) -> None:
     query = "select count(*) from partman.part_config where parent_table='public.enriched_events'"
     assert query in (product_dir / "deploy" / "rehearsal" / "run.sh").read_text()
     assert query in (product_dir / "scripts" / "infra_doctor.py").read_text()
+
+
+def test_runbook_covers_every_step_in_order(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "README.md").read_text()
+    order = ["make infra-init", "make infra-plan", "make infra-apply", "make infra-secrets",
+             "make infra-release", "make infra-bootstrap", "make infra-doctor"]
+    positions = [text.index(step) for step in order]
+    assert positions == sorted(positions)
+    for needed in ["destroy", "replace", "SES", "sandbox", "Product", "make infra-destroy", "restore",
+                   "make rehearse-aws", "part_config", "run_maintenance", "structure.sql"]:
+        assert needed in text, needed
+
+
+def test_runbook_commands_exist(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "README.md").read_text()
+    makefile = (product_dir / "Makefile").read_text()
+    for target in set(re.findall(r"make ((?:infra|rehearse)-[a-z-]+)", text)):
+        assert re.search(rf"^{re.escape(target)}:", makefile, re.M), target
+    for workflow in set(re.findall(r"gh workflow run ([a-z-]+)", text)):
+        assert (product_dir / ".github" / "workflows" / f"{workflow}.yml").exists(), workflow
+    for output in set(re.findall(r"terraform output -raw ([a-z_]+)", text)):
+        assert any(f'output "{output}"' in f.read_text() for f in tf_files(product_dir)), output

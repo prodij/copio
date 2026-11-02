@@ -3168,7 +3168,7 @@ An agent can't do this task, by the guard and by the rules on AWS writes. It nee
 **Files:**
 - Modify: `template/README.md.jinja` (measured numbers), this plan (dated notes)
 
-- [ ] **Step 1: Deploy.** Generate a test product, then follow `infra/README.md`, First deploy. After `make infra-apply` and before `make infra-bootstrap`, check RDS's `pg_partman` version as `dbadmin`: `SELECT default_version FROM pg_available_extensions WHERE name = 'pg_partman'`. The rehearsal ran 5.4.0, whose `create_parent` accepted `p_type := 'range'`, the value Lago's migration passes. If it is below 5, stop and fix this first, because that migration is expected to fail.
+- [ ] **Step 1: Deploy.** Generate a test product, then follow `infra/README.md`, First deploy. After `make infra-apply` and before `make infra-bootstrap`, check RDS's `pg_partman` version as `dbadmin`: `SELECT default_version FROM pg_available_extensions WHERE name = 'pg_partman'`. RDS is only reachable from the server: run it there through `aws ssm start-session`, using the snippet in `infra/README.md` ("Before the first `make infra-bootstrap`"), which reads the admin password from Secrets Manager on the server so no secret is in a command or a committed file. The rehearsal ran 5.4.0, whose `create_parent` accepted `p_type := 'range'`, the value Lago's migration passes. If it is below 5, stop and fix this first, because that migration is expected to fail.
 
 - [ ] **Step 2: Check spec §1 items 1 and 2.** Sign up at `https://app.<domain>` with an SES-verified address, create a workspace, confirm the branding, and open the plans page. Change one frontend file, merge, and confirm the backend's container start time is unchanged.
 

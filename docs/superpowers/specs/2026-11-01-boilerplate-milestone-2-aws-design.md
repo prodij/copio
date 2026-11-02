@@ -162,7 +162,7 @@ Each folder deploys on its own, on merge to `main`, when its path changes.
 | Database lost or corrupted | Restore from backup | Alarm email on RDS health and storage |
 | Bad backend deploy or migration | Previous version keeps running | CI |
 | Certificate can't be issued | Usually DNS isn't pointing at the server yet; `make infra-doctor` says so | `make infra-doctor` |
-| `pg_partman` missing | Lago's migration silently skips its setup, so `make infra-doctor` fails on this explicitly | `make infra-doctor` |
+| `pg_partman` missing | On an empty database Rails loads `structure.sql`, which would fail as a non-superuser, so `lago-migrate` deletes that file and runs the migrations; `make infra-doctor` fails explicitly if `partman.part_config` has no row | `make infra-doctor` |
 | Costs run away | Budget alert | Alarm email |
 | Wrong AWS profile | Terraform refuses, because of `allowed_account_ids` | Command fails |
 | Accidental database destroy | Deletion protection blocks it, and the plan shows it first | Plan output |

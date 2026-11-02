@@ -17,3 +17,7 @@ Generated from prodij/copio. Layout: `frontend/` `backend/` `jobs/` `infra/` `br
 - The guard reads commands, not intent: a Bash command that merely *mentions* `.env` or `.bootstrap` (an `echo`, a `sed` on the compose file, a glob like `.en*`, `grep -r` over the repo, `docker compose config`) is blocked too. Search with `git grep`/`rg` or the Grep tool, and change files that mention them with the Edit/Write tools, which check only the path.
 - Never hand-edit generated files: `frontend/src/brand.css`, `frontend/public/logo.svg` and `favicon.svg` come from `brand/` (`make brand`); `backend/openapi.json` and `frontend/src/api/schema.d.ts` from the routes (`make regen`). After `copier update`, resolve conflicts, then `make regen` and `make check`.
 - Business logic comes from intent notes in ~/brain; write it fresh, never port code.
+
+## AWS
+
+`infra/` and `deploy/` run this product on AWS (`infra/README.md`). Agents may run `make infra-plan` and `make infra-doctor`; a person runs every other `make infra-*` command, and the guard enforces this. Migrations must stay compatible with the previous version, because a rollback doesn't undo them.

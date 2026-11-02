@@ -86,6 +86,10 @@ Commit first, because Copier refuses a dirty tree. Then:
 - Plans: rename them, reorder them or add more. Keep one plan with the code `starter` that grants `premium_report`:
   the shipped backend tests and `make e2e` buy it by that code. To drop it, update those tests too.
 
+## Deploying
+
+To run this product on AWS (one server and a managed database), follow [infra/README.md](infra/README.md). It covers the first deploy, day-to-day changes, rollback and removal.
+
 ## Commands
 
 - `make e2e` runs the Playwright tests against the running stack (after `make bootstrap`): sign-up to
