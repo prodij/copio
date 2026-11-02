@@ -4,7 +4,7 @@ Copio is a SaaS boilerplate: a [Copier](https://copier.readthedocs.io) template 
 
     uvx copier copy --trust gh:prodij/copio my-product
 
-`--trust` is required: the template runs one small task that copies your `logo_path` SVG into `brand/logo.svg` (first copy only). Update later with `uvx copier update --trust`.
+`--trust` is required: on the first copy only, the template runs two small tasks. One copies your `logo_path` SVG into `brand/logo.svg`, and one writes the brand files from `brand/`. Update later with `uvx copier update --trust`.
 
 - Design: [docs/superpowers/specs/2026-10-30-boilerplate-milestone-1-design.md](docs/superpowers/specs/2026-10-30-boilerplate-milestone-1-design.md)
 - The earlier Phase 1.0 diagnostic agent is preserved at the git tag `v1-diagnostic-archive`.
