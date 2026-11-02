@@ -75,3 +75,21 @@ def test_make_check_catches_generated_drift_and_regen_fixes_it(
     assert regen.returncode == 0, (regen.stdout + regen.stderr)[-2000:]
     again = make(product, "check-generated")
     assert again.returncode == 0, (again.stdout + again.stderr)[-2000:]
+
+
+@pytest.mark.slow
+def test_regen_leaves_an_in_step_lock_alone_and_relocks_a_changed_one(
+    product_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    product = product_copy(product_dir, tmp_path)
+    locks = [product / "frontend" / "package-lock.json", product / "e2e" / "package-lock.json"]
+    before = [lock.read_bytes() for lock in locks]
+    regen = make(product, "regen")
+    assert regen.returncode == 0, (regen.stdout + regen.stderr)[-2000:]
+    assert [lock.read_bytes() for lock in locks] == before, "a fresh product's first make regen must not dirty git"
+
+    package = product / "frontend" / "package.json"
+    package.write_text(package.read_text().replace('"dependencies": {', '"dependencies": {\n    "clsx": "2.1.1",', 1))
+    regen = make(product, "regen")
+    assert regen.returncode == 0, (regen.stdout + regen.stderr)[-2000:]
+    assert "node_modules/clsx" in locks[0].read_text()

@@ -326,3 +326,25 @@ def test_a_font_that_would_break_the_css_is_refused(tmp_path: pathlib.Path, bad:
 def test_a_fresh_product_is_already_branded(product_dir: pathlib.Path) -> None:
     assert "--brand-primary: #3355ff;" in (product_dir / "frontend" / "src" / "brand.css").read_text()
     assert "#3355ff" in (product_dir / "frontend" / "public" / "logo.svg").read_text()
+
+
+def test_the_copy_task_installs_no_dev_tools(product_dir: pathlib.Path) -> None:
+    assert (product_dir / "scripts" / ".venv").is_dir()
+    assert not (product_dir / "scripts" / ".venv" / "bin" / "pytest").exists()
+
+
+def test_check_generated_says_so_when_it_cannot_run_openapi_typescript(
+    product_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    (tmp_path / "Makefile").write_text((product_dir / "Makefile").read_text())
+    for folder in ["scripts", "backend", "frontend/src/api", "bin"]:
+        (tmp_path / folder).mkdir(parents=True)
+    (tmp_path / "frontend" / "src" / "api" / "schema.d.ts").write_text("")
+    for tool, status in [("uv", 0), ("npx", 1)]:
+        fake = tmp_path / "bin" / tool
+        fake.write_text(f"#!/bin/sh\nexit {status}\n")
+        fake.chmod(0o755)
+    env = {"PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    done = subprocess.run(["make", "-s", "check-generated"], cwd=tmp_path, env=env, capture_output=True, text=True, check=False)
+    assert done.returncode != 0
+    assert "npm ci" in done.stdout and "out of date" not in done.stdout and "make regen" not in done.stdout

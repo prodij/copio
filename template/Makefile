@@ -62,22 +62,26 @@ migrate:
 doctor:
 	cd scripts && uv run python doctor.py
 
+# Only a lock that doesn't match package.json is rewritten: npm install also adds entries an in-step lock can do without.
+NPM_RELOCK = npm ci --dry-run --no-audit --no-fund >/dev/null 2>&1 || npm install --package-lock-only --no-audit --no-fund
+
 # After `copier update`, once conflicts are resolved: rebuilds what comes from other files.
 regen:
 	cd scripts && uv run python brand.py --css-only && uv lock
 	cd backend && uv lock && uv run python -m app.export_openapi
 	cd jobs && uv lock
-	cd frontend && npm install --package-lock-only --no-audit --no-fund && npm ci --no-audit --no-fund && npm run gen:api
-	cd e2e && npm install --package-lock-only --no-audit --no-fund
+	cd frontend && $(NPM_RELOCK) && npm ci --no-audit --no-fund && npm run gen:api
+	cd e2e && $(NPM_RELOCK)
 
 # Generated files that no longer match their sources. Needs no stack, and changes nothing in the tree.
 check-generated:
 	cd scripts && uv run python brand.py --check
 	cd backend && uv run python -m app.export_openapi --check
 	@cd frontend && tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
-	  npx --no-install openapi-typescript ../backend/openapi.json -o "$$tmp/schema.d.ts" >/dev/null && \
-	  cmp -s "$$tmp/schema.d.ts" src/api/schema.d.ts || \
-	  { echo "out of date with backend/openapi.json: frontend/src/api/schema.d.ts. Run \`make regen\`."; exit 1; }
+	  { npx --no-install openapi-typescript ../backend/openapi.json -o "$$tmp/schema.d.ts" >/dev/null || \
+	    { echo "could not compare frontend/src/api/schema.d.ts: openapi-typescript failed. Is frontend/node_modules missing? Run \`cd frontend && npm ci\`."; exit 1; }; } && \
+	  { cmp -s "$$tmp/schema.d.ts" src/api/schema.d.ts || \
+	    { echo "out of date with backend/openapi.json: frontend/src/api/schema.d.ts. Run \`make regen\`."; exit 1; }; }
 
 check:
 	cd backend && uv run ruff check . && uv run mypy && TEST_DATABASE_URL=$(TEST_DATABASE_URL) uv run pytest -q

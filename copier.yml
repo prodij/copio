@@ -12,11 +12,11 @@ _skip_if_exists:
   - frontend/src/api/schema.d.ts
   - backend/openapi.json
 
-# Runs on copy only (an update must not overwrite a logo the product has since edited, nor fail
-# because the source file moved). logo_path is read from where the user's file is, so a relative
-# path would resolve against the new product folder: pass an absolute path (or ~/...).
-# Tasks need `copier copy --trust`.
+# Both tasks run on the first copy only. An update must not overwrite a logo the product has since edited, nor
+# fail because the source file moved. logo_path is read from where the user's file is, so a relative path would
+# resolve against the new product folder: pass an absolute path (or ~/...). Tasks need `copier copy --trust`.
 _tasks:
+  # With a logo_path only. It runs under the python3 on PATH, which may be as old as 3.9.
   - command:
       - python3
       - -c
@@ -25,19 +25,19 @@ _tasks:
         sys.path.insert(0, "scripts")
         from svg_check import svg_problem
         src = os.path.expanduser(sys.argv[1])
-        if src:
-            if not os.path.isfile(src) or not src.lower().endswith(".svg"):
-                sys.exit(f"logo_path {src!r} is not an .svg file (use an absolute path)")
-            problem = svg_problem(open(src, errors="replace").read())
-            if problem:
-                sys.exit(f"logo_path {src!r} {problem}")
-            shutil.copyfile(src, "brand/logo.svg")
-      - "{% if _copier_operation == 'copy' %}{{ logo_path }}{% endif %}"
+        if not os.path.isfile(src) or not src.lower().endswith(".svg"):
+            sys.exit(f"logo_path {src!r} is not an .svg file (use an absolute path)")
+        problem = svg_problem(open(src, errors="replace").read())
+        if problem:
+            sys.exit(f"logo_path {src!r} {problem}")
+        shutil.copyfile(src, "brand/logo.svg")
+      - "{{ logo_path }}"
+    when: "{{ _copier_operation == 'copy' and logo_path }}"
   # So the app has the product's colours, logo and title from the first commit, and `make check` passes.
   - command:
       - sh
       - -c
-      - cd scripts && uv run --quiet python brand.py --css-only >/dev/null || echo "could not write the brand files; run make regen"
+      - cd scripts && uv run --no-dev --quiet python brand.py --css-only >/dev/null || echo "could not write the brand files; run make regen"
     when: "{{ _copier_operation == 'copy' }}"
 
 product_name:
@@ -80,4 +80,8 @@ logo_path:
   type: str
   help: Optional absolute path to an SVG logo (copied to brand/logo.svg); leave empty to use the template's brand/logo.svg
   default: ""
-  secret: true  # used once on copy, and not kept in .copier-answers.yml: it is a local path with a username
+  # Used once on copy. Not kept in .copier-answers.yml (a local path with a username), and not asked on update:
+  # an update always overwrites, a first copy doesn't. A question's `when` can't see `_copier_operation`, which
+  # Copier gives only to tasks. `-d logo_path=...` still works either way.
+  secret: true
+  when: "{{ not _copier_conf.overwrite }}"
