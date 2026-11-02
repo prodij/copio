@@ -12,6 +12,7 @@ import argparse
 import base64
 import html
 import importlib
+import os
 import re
 import sys
 from collections.abc import Callable
@@ -308,8 +309,9 @@ def main() -> None:
             if stale:
                 sys.exit(f"out of date with brand/ and scripts/brand.py: {', '.join(stale)}. Run `make regen`.")
             return
-        write_frontend(brand, ROOT / "frontend")
-        print("wrote frontend/src/brand.css, the page title, logo and favicon")
+        if os.environ.get("DEPLOY_TARGET") != "aws":  # the server's bundle has no frontend/
+            write_frontend(brand, ROOT / "frontend")
+            print("wrote frontend/src/brand.css, the page title, logo and favicon")
         if args.css_only:
             return
         bootstrap = importlib.import_module("bootstrap")

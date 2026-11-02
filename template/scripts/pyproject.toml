@@ -2,7 +2,7 @@
 name = "scripts"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["httpx>=0.28", "pyyaml>=6.0", "resvg-py>=0.5", "sqlalchemy>=2.0.36", "psycopg[binary]>=3.2"]
+dependencies = ["httpx>=0.28", "pyyaml>=6.0", "resvg-py>=0.5", "sqlalchemy>=2.0.36", "psycopg[binary]>=3.2", "boto3>=1.40"]
 
 [dependency-groups]
 dev = ["pytest>=8.3", "respx>=0.21", "ruff>=0.8", "mypy>=1.13", "types-pyyaml"]
@@ -18,9 +18,12 @@ ignore = ["E501"]
 
 [tool.mypy]
 strict = true
-files = ["brand.py", "bootstrap.py", "doctor.py", "make_env.py", "smoke_zitadel.py"]
+files = ["brand.py", "bootstrap.py", "doctor.py", "make_env.py", "smoke_zitadel.py", "aws_state.py"]
 [[tool.mypy.overrides]]
 module = ["resvg_py"]
+ignore_missing_imports = true
+[[tool.mypy.overrides]]
+module = ["boto3"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

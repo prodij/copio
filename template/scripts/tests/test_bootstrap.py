@@ -650,3 +650,52 @@ def test_backend_pat_check_other_errors_are_reported(
     respx.get(f"{Z}/auth/v1/users/me").respond(500, json={"message": "db down"})
     with httpx.Client(base_url=Z) as http, pytest.raises(SystemExit, match="backend token check failed: HTTP 500"):
         bootstrap.backend_pat_works(http)
+
+
+def test_aws_urls_are_https_without_ports(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    monkeypatch.setenv("DOMAIN", "x.test")
+    assert bootstrap.zitadel_url() == "https://auth.x.test"
+    assert bootstrap.app_url() == "https://app.x.test"
+    assert bootstrap.public_url("api", "API_PORT") == "https://api.x.test"
+
+
+def test_on_aws_zitadel_is_reached_publicly_and_lago_on_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    monkeypatch.setenv("DOMAIN", "x.test")
+    assert bootstrap.local("https://auth.x.test") == ("https://auth.x.test", {})
+    assert bootstrap.local("https://lago-api.x.test") == (
+        "http://127.0.0.1:3000", {"Host": "lago-api.x.test", "X-Forwarded-Proto": "https"})
+
+
+def test_on_aws_redirects_must_be_https(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    assert bootstrap.web_app_config("https://app.x.test")["devMode"] is False
+
+
+def test_locally_nothing_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DEPLOY_TARGET", raising=False)
+    monkeypatch.setenv("ZITADEL_PORT", "8085")
+    assert bootstrap.zitadel_url().startswith("http://auth.")
+    assert bootstrap.web_app_config("http://x.localhost:5173")["devMode"] is True
+
+
+def test_on_aws_stripe_registers_no_local_listener(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    monkeypatch.setenv("DOMAIN", "x.test")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    calls: list[str] = []
+    monkeypatch.setattr(bootstrap, "stripe_secret_key", lambda: "sk_test_x")
+    monkeypatch.setattr(bootstrap, "lago_graphql", lambda q, v: {
+        "paymentProviders": {"collection": [{"code": "stripe", "id": "p",
+                                             "successRedirectUrl": "https://app.x.test/billing/return"}]}})
+    monkeypatch.setattr(bootstrap, "compose", lambda *a, **k: calls.append(" ".join(a)) or "")
+    monkeypatch.setattr(bootstrap, "apply_stripe_webhook_secret", lambda s: calls.append("secret"))
+    bootstrap.bootstrap_stripe("")
+    assert calls == []
+
+
+def test_ensure_bucket_is_left_to_terraform_on_aws(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    monkeypatch.setattr(bootstrap, "wait_for", lambda *a, **k: pytest.fail("touched SeaweedFS"))
+    bootstrap.ensure_bucket()

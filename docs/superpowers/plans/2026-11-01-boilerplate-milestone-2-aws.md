@@ -1961,6 +1961,7 @@ git commit -m "feat(infra): server start, first-run and deploy scripts with roll
 - Call `publish_aws_state()` straight after `bootstrap_lago()` and before `ensure_bucket()` and the brand step, because brand needs Lago's S3 and that's the likeliest thing to fail on a first deploy. Tokens must already be saved by then.
 - `brand.py` `main`: the server's bundle has no `frontend/`, so `write_frontend` and its print are skipped when `DEPLOY_TARGET=aws`. Add a test.
 - `pyproject.toml`: add `aws_state.py` to mypy's `files`, and a `[[tool.mypy.overrides]]` for `boto3` with `ignore_missing_imports = true`.
+- Implemented as amended; deviations: `test_aws_state.py` uses `match=r"backend\.pat"` (ruff RUF043), and `test_bootstrap.py` adds tests that `bootstrap_stripe` and `ensure_bucket` do nothing local on AWS. The Ready summary builds the S3 line only locally.
 
 **Files:**
 - Create: `template/scripts/aws_state.py`, `template/scripts/tests/test_aws_state.py`

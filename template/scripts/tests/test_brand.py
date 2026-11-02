@@ -389,3 +389,15 @@ def test_cli_reports_unreachable_service_without_traceback(
         mock.put(LABEL).mock(side_effect=httpx.ConnectError("refused"))
         with pytest.raises(SystemExit, match=r"request failed.*refused"):
             brand.main()
+
+
+def test_on_aws_the_bundle_has_no_frontend_to_write(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "brand").mkdir()  # no frontend/ here, as in the server's bundle
+    write(tmp_path / "brand")
+    monkeypatch.setattr(brand, "ROOT", tmp_path)
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    monkeypatch.setattr("sys.argv", ["brand.py", "--css-only"])
+    brand.main()
+    assert not (tmp_path / "frontend").exists()
