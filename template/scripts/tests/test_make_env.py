@@ -1,6 +1,8 @@
 import base64
+import errno
 import pathlib
 import re
+import socket
 
 import pytest
 
@@ -17,6 +19,12 @@ ZITADEL_MASTERKEY=
 # Generate: openssl rand -base64 32
 COOKIE_SECRET=
 """
+
+
+@pytest.fixture(autouse=True)
+def every_port_is_free(monkeypatch: pytest.MonkeyPatch) -> None:
+    """So these tests don't depend on what runs on this machine, like this product's own stack."""
+    monkeypatch.setattr(make_env, "port_free", lambda port: True)
 
 
 def test_fills_defaults_and_generated_values_but_not_stripe(tmp_path: pathlib.Path) -> None:
@@ -78,3 +86,96 @@ def test_mock_payment_stays_off_and_is_not_reported_as_missing() -> None:
 def test_mock_payment_set_in_env_is_kept() -> None:
     text, _ = make_env.render("BILLING_MODE=\nAPP_ENV=\n", {"BILLING_MODE": "mock", "APP_ENV": "local"})
     assert text == "BILLING_MODE=mock\nAPP_ENV=local\n"
+
+
+PORTS = "# Default: 5173\nAPP_PORT=\n# Default: 8000\nAPI_PORT=\n# Default: 7\nNOT_A_PORT_VALUE=\n"
+
+
+def test_a_taken_default_moves_all_the_ports_together(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(make_env, "port_free", lambda port: port not in (8000, 5183))
+    text, _ = make_env.render(PORTS, {})
+    # 8000 is taken, so +10; 5183 is taken, so +20. Everything moves by the same step.
+    assert "APP_PORT=5193\n" in text and "API_PORT=8020\n" in text
+    assert "NOT_A_PORT_VALUE=7\n" in text
+    assert "moved up by 20: APP_PORT=5193, API_PORT=8020" in capsys.readouterr().out
+
+
+def test_free_defaults_stay_and_say_nothing(capsys: pytest.CaptureFixture[str]) -> None:
+    text, _ = make_env.render(PORTS, {})
+    assert "APP_PORT=5173\n" in text and "API_PORT=8000\n" in text
+    assert capsys.readouterr().out == ""
+
+
+def test_ports_already_in_env_are_kept_and_not_probed(monkeypatch: pytest.MonkeyPatch) -> None:
+    def probe(port: int) -> bool:
+        raise AssertionError(f"probed {port}")
+
+    monkeypatch.setattr(make_env, "port_free", probe)
+    text, _ = make_env.render(PORTS.replace("# Default: 7\nNOT_A_PORT_VALUE=\n", ""), {"APP_PORT": "5173", "API_PORT": "9"})
+    assert "APP_PORT=5173\n" in text and "API_PORT=9\n" in text
+
+
+def test_a_blanked_port_is_picked_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(make_env, "port_free", lambda port: port != 8000)
+    text, _ = make_env.render(PORTS, {"APP_PORT": "", "API_PORT": ""})
+    assert "APP_PORT=5183\n" in text and "API_PORT=8010\n" in text
+
+
+def test_port_free_sees_a_real_listener(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.undo()  # the real check
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        assert make_env.port_free(port) is False
+    assert make_env.port_free(port) is True
+
+
+def test_port_free_sees_an_ipv6_only_listener(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.undo()
+    if not socket.has_ipv6:
+        pytest.skip("no IPv6 on this host")
+    with socket.socket(socket.AF_INET6) as taken:
+        taken.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        try:
+            taken.bind(("::1", 0))
+        except OSError:
+            pytest.skip("no ::1 on this host")
+        taken.listen()
+        port = taken.getsockname()[1]
+        assert make_env.port_free(port) is False
+    assert make_env.port_free(port) is True
+
+
+@pytest.mark.parametrize("code", [errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL])
+def test_port_free_tolerates_a_host_without_ipv6(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+    monkeypatch.undo()
+    real = socket.socket
+
+    def no_ipv6(family: int = socket.AF_INET, *args: object) -> socket.socket:
+        if family == socket.AF_INET6:
+            raise OSError(code, "no IPv6")
+        return real(family)
+
+    monkeypatch.setattr(socket, "socket", no_ipv6)
+    with real() as finder:
+        finder.bind(("127.0.0.1", 0))
+        port = finder.getsockname()[1]
+    assert make_env.port_free(port) is True
+
+
+def test_a_new_port_never_lands_on_a_kept_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 3000 to 3090 are held, and the login port is kept at 3100: Lago's API must skip it too.
+    monkeypatch.setattr(make_env, "port_free", lambda port: not 3000 <= port <= 3090)
+    example = "# Default: 3100\nZITADEL_LOGIN_PORT=\n# Default: 3000\nLAGO_API_PORT=\n"
+    text, _ = make_env.render(example, {"ZITADEL_LOGIN_PORT": "3100"})
+    assert "ZITADEL_LOGIN_PORT=3100\n" in text
+    assert "LAGO_API_PORT=3110\n" in text
+
+
+def test_no_free_block_says_what_to_do(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(make_env, "port_free", lambda port: False)
+    with pytest.raises(SystemExit, match="by hand"):
+        make_env.render(PORTS, {})

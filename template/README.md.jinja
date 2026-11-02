@@ -39,14 +39,61 @@ It is off by default. To turn it on, keep `STRIPE_SECRET_KEY` empty, set `BILLIN
   workspace whose Lago customer has one, because those can reach Stripe.
 
 Host ports are set in `.env` (defaults: app 5173, API 8000, Zitadel 8085, its login page 3100,
-Lago API 3000 and UI 8088, Postgres 5432, S3 (SeaweedFS) 8333). Change any that clash with another
-project, then `make up`. Every port is published on 127.0.0.1 only.
+Lago API 3000 and UI 8088, Postgres 5432, S3 (SeaweedFS) 8333). Every port is published on 127.0.0.1 only.
+
+## Running two products
+
+Generate each product in its own folder with its own `product_slug` and `domain`, then run the same three
+commands in each. Nothing else needs setting, unless both use one Stripe test account (below):
+
+    make env && make up && make bootstrap
+
+- `make env` checks the default ports. If any is taken, it moves all of them up by the same step (10, then 20...),
+  says so, and writes them to `.env`. `make bootstrap` prints the URLs to open.
+- The Compose project is named from the slug, so containers, volumes, networks and built images are the product's
+  own. `.bootstrap/` and `.env` live in the product's folder. Browsers keep each `*.localhost` domain's sign-ins
+  and cookies apart.
+- `make env` sees only what is running now. If it ran for both before either started, or the other product was
+  down, both can hold the same ports and the second `make up` fails with `port is already allocated`. To fix it:
+  `make down` in that product, empty the `*_PORT=` values in its `.env`, then `make env && make up && make bootstrap`.
+  Moving a port later works the same way: `make bootstrap` brings Zitadel's redirect URIs and login page, and
+  Lago's Stripe return URL, along.
+- Two products on one Stripe test account is untested. Each `stripe listen` may receive the other's events. Use a
+  separate test account per product, or expect to check what Lago does with a customer it doesn't know.
+
+## Updating from the template
+
+Commit first, because Copier refuses a dirty tree. Then:
+
+    uvx copier update --trust --defaults
+    git status                 # UU means conflict markers to resolve; nothing is dropped silently
+    make regen                 # rebuilds lock files, the brand CSS and the API contract
+    make check
+
+- `.env`, `.bootstrap/` and your own files are never touched. Your edits merge with the template's. Where both
+  changed the same lines you get `<<<<<<< before updating` (yours) and `>>>>>>> after updating` (the template's).
+- A lock file with conflict markers: `git checkout HEAD -- <lock file>`, resolve `pyproject.toml` or
+  `package.json`, then `make regen`, which adds what the template wanted.
+- Never edit these by hand; `make check` fails, naming `make regen`, when they are out of date. An update leaves
+  them alone: `frontend/src/brand.css`, `frontend/public/logo.svg` and `frontend/public/favicon.svg` come from
+  `brand/`; `backend/openapi.json` and `frontend/src/api/schema.d.ts` come from the routes.
+- The title in `frontend/index.html` also comes from `brand/`, but an update can change that file, so its title line
+  can conflict. Keep your title, then `make regen`.
+- Don't edit `.copier-answers.yml`: Copier needs its commit to work out what changed.
+- Yours to edit, with the logo kept across updates: `brand/`, `backend/app/billing/plans.yaml`, this README, and
+  your own routes, tables and pages. Editing the template's own code (`scripts/`, `docker-compose.yml`, the billing and
+  auth modules) works, but expect conflicts there; send generic fixes back to the template.
+- Plans: rename them, reorder them or add more. Keep one plan with the code `starter` that grants `premium_report`:
+  the shipped backend tests and `make e2e` buy it by that code. To drop it, update those tests too.
+
+## Commands
 
 - `make e2e` runs the Playwright tests against the running stack (after `make bootstrap`): sign-up to
   `/plans` always, sign-up to premium when `.env` has a Stripe key (reported as skipped without one), and
   sign-up to premium by mock payment when `.env` has `BILLING_MODE=mock`. `make check` runs lint, types and unit tests (needs Postgres: `make up`).
-- Brand colours, font and logo live in `brand/brand.yaml`; they reach the app, the Zitadel login
-  page and Lago when `make brand` runs (`make bootstrap` runs it too).
+- Name, colours, font and logo live in `brand/brand.yaml`; they reach the app, the Zitadel login
+  page and Lago when `make brand` runs (`make bootstrap` runs it too). `font` is only a name: to load it
+  everywhere, set `font_file` too. Without it the app falls back to the bundled Inter unless that font is installed.
 - The Zitadel console (`http://auth.{{ domain }}:8085/ui/console`, with your ZITADEL_PORT) signs in
   as `admin@{{ domain }}` with `ZITADEL_ADMIN_PASSWORD` from `.env`; the Lago UI as
   `LAGO_ORG_USER_EMAIL` with `LAGO_ORG_USER_PASSWORD`.

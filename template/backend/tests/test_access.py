@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.access.rules import decide
 from app.billing.models import Subscription
-from app.billing.plans import Plan
+from app.billing.plans import Plan, load_plans
 from app.billing.usage import record_usage
 from app.config import Settings, get_settings
 from app.integrations.lago import LagoClient
@@ -101,7 +101,7 @@ def test_me_access(client: TestClient, owner_headers: dict[str, str], db_session
     _subscribe(db_session, "past_due", period_end=datetime(2026, 12, 1, tzinfo=UTC))
     assert client.get("/me/access", headers=owner_headers).json() == {
         "billing_configured": True, "mock_payment": False, "plan_code": "starter", "state": "past_due", "current_period_end": "2026-12-01T00:00:00Z",
-        "features": {"premium_report": True, "seats": 5}}
+        "features": load_plans()["starter"].features}  # the product's plans.yaml, whatever it grants
 
 
 def test_me_access_canceled_has_no_features(client: TestClient, owner_headers: dict[str, str],
@@ -113,7 +113,7 @@ def test_me_access_canceled_has_no_features(client: TestClient, owner_headers: d
 
 def test_plans_endpoint_shape(client: TestClient, owner_headers: dict[str, str]) -> None:
     plans = client.get("/billing/plans", headers=owner_headers).json()
-    assert {p["code"] for p in plans} == {"starter"}
+    assert {p["code"] for p in plans} == set(load_plans())
     assert all(set(p) == {"code", "name", "amount_cents", "currency", "interval", "features"} for p in plans)
 
 

@@ -11,6 +11,7 @@ import bootstrap
 import product
 from bootstrap import (
     ensure_backend_machine_user,
+    ensure_login_page,
     ensure_project,
     ensure_self_registration,
     ensure_web_app,
@@ -179,6 +180,29 @@ def test_self_registration_already_allowed_is_left_alone() -> None:
     put = respx.put(f"{Z}/admin/v1/policies/login")
     with httpx.Client(base_url=Z) as http:
         ensure_self_registration(http)
+    assert put.call_count == 0
+
+
+@respx.mock
+def test_login_page_follows_a_moved_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ZITADEL_LOGIN_PORT", "3120")
+    wanted = f"http://auth.{bootstrap.product.DOMAIN}:3120/ui/v2/login/"
+    respx.get(f"{Z}/v2/features/instance").respond(200, json={"loginV2": {
+        "required": True, "baseUri": wanted.replace("3120", "3110")}})
+    put = respx.put(f"{Z}/v2/features/instance").respond(200, json={})
+    with httpx.Client(base_url=Z) as http:
+        ensure_login_page(http)
+    assert body(put) == {"loginV2": {"required": True, "baseUri": wanted}}
+
+
+@respx.mock
+def test_login_page_already_right_is_left_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ZITADEL_LOGIN_PORT", "3100")
+    respx.get(f"{Z}/v2/features/instance").respond(200, json={"loginV2": {
+        "baseUri": f"http://auth.{bootstrap.product.DOMAIN}:3100/ui/v2/login/"}})
+    put = respx.put(f"{Z}/v2/features/instance")
+    with httpx.Client(base_url=Z) as http:
+        ensure_login_page(http)
     assert put.call_count == 0
 
 
@@ -594,9 +618,18 @@ def test_bootstrap_stripe_sets_the_webhook_secret_last(monkeypatch: pytest.Monke
 
 
 def test_bootstrap_stripe_keeps_an_existing_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], "whsec_abc")
+    current = f"http://{product.DOMAIN}:5173/billing/return"
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe", "successRedirectUrl": current}], "whsec_abc")
     bootstrap.bootstrap_stripe("whsec_abc")
-    assert all(q != bootstrap.ADD_STRIPE for q, _ in fake.graphql)
+    assert [q for q, _ in fake.graphql] == [bootstrap.STRIPE_PROVIDERS]
+
+
+def test_bootstrap_stripe_follows_a_moved_app_port_without_sending_the_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    stale = f"http://{product.DOMAIN}:5163/billing/return"
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe", "successRedirectUrl": stale}], "whsec_abc")
+    bootstrap.bootstrap_stripe("whsec_abc")
+    assert [v for q, v in fake.graphql if q == bootstrap.UPDATE_STRIPE] == [
+        {"i": {"id": "p1", "successRedirectUrl": f"http://{product.DOMAIN}:5173/billing/return"}}]
 
 
 @pytest.mark.parametrize("printed", ["", "\n", "Getting ready...\nnot a secret"])

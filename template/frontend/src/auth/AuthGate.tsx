@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { BrandMark } from "@/components/BrandMark";
 import { PageSkeleton } from "@/components/PageSkeleton";
 import { Button } from "@/components/ui/button";
 import { userManager } from "./userManager";
@@ -24,7 +25,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (state === "out") {
     return (
       <main className="mx-auto mt-24 max-w-sm space-y-4 text-center">
-        <h1 className="text-xl font-semibold">{document.title}</h1>
+        <h1 className="text-xl"><BrandMark /></h1>
         <Button onClick={() => void userManager.signinRedirect()}>Sign in</Button>
       </main>
     );

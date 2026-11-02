@@ -60,20 +60,45 @@ async function saveTestCard(page: Page) {
   await page.getByTestId("hosted-payment-submit-button").click();
 }
 
+// The plan the tests buy, found by its code: a product can rename it or list other plans first.
+const PLAN_CODE = "starter";
+
+// Resolves to the "Choose <plan's name>" button once the Plans page has loaded.
 async function signUpToPlans(page: Page, app: string, workspace = WORKSPACE) {
   await page.goto("/");
+  await expect(async () => {
+    const loaded = await page.getByRole("main").locator("img").evaluate((i) => (i as HTMLImageElement).naturalWidth > 0);
+    expect(loaded).toBe(true);
+  }, "the app's logo").toPass({ timeout: 10_000 });
   await page.getByRole("button", { name: "Sign in" }).click();
+  // Zitadel draws a light and a dark logo and hides one: both must load, or the page shows a broken image.
+  const logos = page.getByRole("img", { name: "logo", includeHidden: true });
+  await expect(logos).toHaveCount(2);
+  await expect(async () => {
+    expect(await logos.evaluateAll((images) => images.every((i) => (i as HTMLImageElement).naturalWidth > 0))).toBe(true);
+  }, "the sign-in page's logo").toPass({ timeout: 10_000 });
   await signUp(page, `e2e+${Date.now()}@example.com`);
 
   await page.waitForURL(`${app}/workspace/new`);
   await page.getByLabel("Workspace name").fill(workspace);
+  const plansLoaded = page.waitForResponse(
+    (r) => r.url().endsWith("/billing/plans") && r.request().method() === "GET" && r.ok(),
+  );
   await page.getByRole("button", { name: "Create workspace" }).click();
   await page.waitForURL(`${app}/plans`);
+  const plans: { code: string; name: string }[] = await (await plansLoaded).json();
+  const plan = plans.find((p) => p.code === PLAN_CODE);
+  expect(plan, `backend/app/billing/plans.yaml must keep a plan with code ${PLAN_CODE}`).toBeDefined();
+  return page.getByRole("button", { name: `Choose ${plan!.name}`, exact: true });
 }
 
 test("sign up → workspace → plans", async ({ page, baseURL }) => {
-  await signUpToPlans(page, new URL(baseURL!).origin);
-  const choose = page.getByRole("button", { name: "Choose Starter" });
+  const choose = await signUpToPlans(page, new URL(baseURL!).origin);
+  // Invoices embed the billing entity's logo; a missing file makes every invoice PDF fail.
+  const logoKey = sql("lago", "select b.key from active_storage_blobs b join active_storage_attachments a on a.blob_id = b.id " +
+                              "where a.record_type = 'BillingEntity' and a.name = 'logo'");
+  expect(logoKey, "make brand gave Lago's billing entity a logo").not.toBe("");
+  compose("exec", "-T", "lago-worker", "test", "-f", `storage/${logoKey.slice(0, 2)}/${logoKey.slice(2, 4)}/${logoKey}`);
   await expect(choose).toBeVisible();
   if (!MOCK_PAYMENT) await expect(page.getByText("Mock payment")).toHaveCount(0); // off by default
   if (STRIPE_CONFIGURED || MOCK_PAYMENT) return;
@@ -91,12 +116,12 @@ test("sign up → workspace → pay → premium report", async ({ page, baseURL 
   if (!STRIPE_CONFIGURED) console.log(`Stripe payment test skipped. ${NO_KEY}`); // the list reporter hides skip reasons
   test.skip(!STRIPE_CONFIGURED, NO_KEY);
   const app = new URL(baseURL!).origin;
-  await signUpToPlans(page, app);
+  const choose = await signUpToPlans(page, app);
 
   // Lago creates the Stripe customer in a background job; until then checkout answers 503 and
   // the page shows the error, so choosing the plan is retried until Stripe's page opens.
   await expect(async () => {
-    await page.getByRole("button", { name: "Choose Starter" }).click();
+    await choose.click();
     await page.waitForURL(/checkout\.stripe\.com/, { timeout: 10_000 });
   }).toPass({ timeout: 120_000, intervals: [5_000] });
 
@@ -146,10 +171,10 @@ test("mock payment: sign up → workspace → mock payment → premium report fr
   let passed = false;
   compose("stop", "jobs");
   try {
-    await signUpToPlans(page, app, workspace);
+    const choose = await signUpToPlans(page, app, workspace);
     const banner = page.getByRole("status");
     await expect(banner).toContainText("Mock payment");
-    await page.getByRole("button", { name: "Choose Starter" }).click();
+    await choose.click();
     await page.waitForURL(`${app}/billing/mock-payment`);
     await expect(page.getByRole("heading", { name: "Mock payment" })).toBeVisible();
     await expect(banner).toContainText("not real billing");

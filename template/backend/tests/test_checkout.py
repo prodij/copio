@@ -349,5 +349,5 @@ def test_checkout_needs_sign_in(client: TestClient) -> None:
 
 def test_list_plans(client: TestClient) -> None:
     plans = client.get("/billing/plans").json()
-    assert plans[0]["code"] == "starter"
-    assert set(plans[0]) == {"code", "name", "amount_cents", "currency", "interval", "features"}
+    starter = next(p for p in plans if p["code"] == "starter")
+    assert set(starter) == {"code", "name", "amount_cents", "currency", "interval", "features"}

@@ -1,5 +1,5 @@
 """Copier answers the local scripts need (re-rendered by `copier update`)."""
 
-NAME = "{{ product_name }}"
+NAME = {{ product_name | tojson }}
 SLUG = "{{ product_slug }}"
 DOMAIN = "{{ domain }}"
