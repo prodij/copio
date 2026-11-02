@@ -339,6 +339,7 @@ class FakeStripeSetup:
     def __init__(self, monkeypatch: pytest.MonkeyPatch, providers: list[dict[str, str]], printed: str) -> None:
         self.graphql: list[tuple[str, dict[str, object]]] = []
         self.compose_calls: list[tuple[str, ...]] = []
+        self.events: list[str] = []  # Compose calls and Lago GraphQL calls, in order
         self.providers, self.printed = providers, printed
         monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
         monkeypatch.setenv("APP_PORT", "5173")
@@ -348,12 +349,14 @@ class FakeStripeSetup:
 
     def lago_graphql(self, query: str, variables: dict[str, object]) -> dict[str, object]:
         self.graphql.append((query, variables))
+        self.events.append(query)
         if query == bootstrap.STRIPE_PROVIDERS:
             return {"paymentProviders": {"collection": self.providers}}
         return {"addStripePaymentProvider": {"id": "p1"}}
 
     def compose(self, *args: str, capture: bool = False) -> str:
         self.compose_calls.append(args)
+        self.events.append(" ".join(args))
         return self.printed if "--print-secret" in args else ""
 
 
@@ -366,7 +369,7 @@ def test_bootstrap_stripe_is_skipped_plainly_without_a_key(
         monkeypatch.delenv("STRIPE_SECRET_KEY")
     else:
         monkeypatch.setenv("STRIPE_SECRET_KEY", key)
-    bootstrap.bootstrap_stripe()
+    bootstrap.bootstrap_stripe("")
     assert fake.graphql == [] and fake.compose_calls == []  # no provider, and stripe-cli is left idle
     out = capsys.readouterr().out
     assert "SKIPPED" in out and "STRIPE_SECRET_KEY" in out and "`make bootstrap` again" in out
@@ -388,32 +391,9 @@ def test_main_stops_on_a_wrong_key_before_touching_anything(monkeypatch: pytest.
     assert fake.compose_calls == [] and fake.graphql == []
 
 
-@pytest.mark.parametrize("printed", ["", "not a secret"])
-def test_a_key_stripe_rejects_never_reaches_lago(monkeypatch: pytest.MonkeyPatch, printed: str) -> None:
-    fake = FakeStripeSetup(monkeypatch, [], printed)
-    with pytest.raises(SystemExit, match="printed no whsec_ secret"):
-        bootstrap.bootstrap_stripe()
-    assert fake.graphql == []
-
-
-def test_a_failed_print_secret_never_reaches_lago(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeStripeSetup(monkeypatch, [], "")
-
-    def rejected(*_args: str, capture: bool = False) -> str:
-        raise SystemExit("bootstrap: `docker compose run --rm --no-deps` failed (exit 1)")
-
-    monkeypatch.setattr(bootstrap, "compose", rejected)
-    with pytest.raises(SystemExit, match="failed"):
-        bootstrap.bootstrap_stripe()
-    assert fake.graphql == []
-
-
-@pytest.mark.parametrize("key", ["", '""'])
-def test_main_finishes_without_a_key_and_recreates_the_frontend_last(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], key: str
-) -> None:
-    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
-    monkeypatch.setenv("STRIPE_SECRET_KEY", key)
+@pytest.fixture
+def stubbed_main(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    """Everything main() does apart from Stripe and Compose, stubbed; use with FakeStripeSetup."""
     for port in ("API_PORT", "ZITADEL_PORT", "LAGO_API_PORT", "LAGO_FRONT_PORT", "S3_PORT"):
         monkeypatch.setenv(port, "1234")
     for name in ("http_ok", "bootstrap_zitadel", "bootstrap_lago", "ensure_bucket", "backend"):
@@ -422,9 +402,55 @@ def test_main_finishes_without_a_key_and_recreates_the_frontend_last(
     pat.write_text("x")
     monkeypatch.setattr(bootstrap, "ADMIN_PAT", pat)
     monkeypatch.setattr(bootstrap.subprocess, "run", lambda *_a, **_k: subprocess.CompletedProcess([], 0))
+
+
+def test_main_tests_the_key_first_and_applies_the_webhook_secret_last(
+    monkeypatch: pytest.MonkeyPatch, stubbed_main: None
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc\n")
+    bootstrap.main()
+    assert sum("--print-secret" in c for c in fake.compose_calls) == 1  # fetched once, then reused
+    assert "--print-secret" in fake.events[0]
+
+    def at(text: str) -> int:
+        return next(i for i, event in enumerate(fake.events) if text in event)
+
+    assert at("--force-recreate backend") < at(bootstrap.ADD_STRIPE) < at("--force-recreate stripe-cli") < at("runner")
+    assert at("runner") < at("--force-recreate frontend") == len(fake.events) - 1
+    assert "STRIPE_CLI_WEBHOOK_SECRET=whsec_abc" in fake.events[at("runner")]
+
+
+@pytest.mark.parametrize("printed", ["", "not a secret"])
+def test_a_key_stripe_rejects_changes_nothing(monkeypatch: pytest.MonkeyPatch, stubbed_main: None, printed: str) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], printed)
+    monkeypatch.setattr(bootstrap, "wait_for", lambda *_a, **_k: pytest.fail("a service was waited on"))
+    with pytest.raises(SystemExit, match="printed no whsec_ secret"):
+        bootstrap.main()
+    assert len(fake.events) == 1 and "--print-secret" in fake.events[0]
+
+
+def test_a_failed_print_secret_changes_nothing(monkeypatch: pytest.MonkeyPatch, stubbed_main: None) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "")
+
+    def rejected(*_args: str, capture: bool = False) -> str:
+        raise SystemExit("bootstrap: `docker compose run --rm --no-deps` failed (exit 1)")
+
+    monkeypatch.setattr(bootstrap, "compose", rejected)
+    monkeypatch.setattr(bootstrap, "wait_for", lambda *_a, **_k: pytest.fail("a service was waited on"))
+    with pytest.raises(SystemExit, match="failed"):
+        bootstrap.main()
+    assert fake.graphql == []
+
+
+@pytest.mark.parametrize("key", ["", '""'])
+def test_main_finishes_without_a_key_and_recreates_the_frontend_last(
+    monkeypatch: pytest.MonkeyPatch, stubbed_main: None, capsys: pytest.CaptureFixture[str], key: str
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", key)
     bootstrap.main()
     assert fake.compose_calls[-1] == ("up", "-d", "--force-recreate", "frontend")
-    assert not any("stripe-cli" in call for call in fake.compose_calls)
+    assert not any("stripe-cli" in call for call in fake.compose_calls)  # no print-secret either
     out = capsys.readouterr().out
     assert out.index("SKIPPED") < out.index("Ready.")
     assert os.environ["STRIPE_SECRET_KEY"] == ""  # what Compose gets: it would keep Make's literal quotes
@@ -432,7 +458,7 @@ def test_main_finishes_without_a_key_and_recreates_the_frontend_last(
 
 def test_bootstrap_stripe_adds_the_provider_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeStripeSetup(monkeypatch, [], "whsec_abc\n")
-    bootstrap.bootstrap_stripe()
+    bootstrap.bootstrap_stripe("whsec_abc")
     added = [v for q, v in fake.graphql if q == bootstrap.ADD_STRIPE]
     assert added == [{"i": {"name": "Stripe", "code": "stripe", "secretKey": "sk_test_x",
                             "successRedirectUrl": f"http://{product.DOMAIN}:5173/billing/return"}}]
@@ -444,8 +470,8 @@ def test_bootstrap_stripe_sets_the_webhook_secret_last(monkeypatch: pytest.Monke
     # Lago's RegisterWebhookJob (queued when the provider is added) would overwrite the secret, so
     # the secret is written after everything else, each run, and only when Lago's value differs.
     fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
-    bootstrap.bootstrap_stripe()
-    bootstrap.bootstrap_stripe()
+    bootstrap.bootstrap_stripe("whsec_abc")
+    bootstrap.bootstrap_stripe("whsec_abc")
     runs = [i for i, c in enumerate(fake.compose_calls) if "runner" in c]
     recreates = [i for i, c in enumerate(fake.compose_calls) if c == ("up", "-d", "--force-recreate", "stripe-cli")]
     assert len(runs) == len(recreates) == 2
@@ -458,15 +484,15 @@ def test_bootstrap_stripe_sets_the_webhook_secret_last(monkeypatch: pytest.Monke
 
 def test_bootstrap_stripe_keeps_an_existing_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], "whsec_abc")
-    bootstrap.bootstrap_stripe()
+    bootstrap.bootstrap_stripe("whsec_abc")
     assert all(q != bootstrap.ADD_STRIPE for q, _ in fake.graphql)
 
 
 @pytest.mark.parametrize("printed", ["", "\n", "Getting ready...\nnot a secret"])
-def test_bootstrap_stripe_needs_a_whsec_secret(monkeypatch: pytest.MonkeyPatch, printed: str) -> None:
+def test_stripe_webhook_secret_must_be_a_whsec_secret(monkeypatch: pytest.MonkeyPatch, printed: str) -> None:
     fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], printed)
     with pytest.raises(SystemExit, match="printed no whsec_ secret"):
-        bootstrap.bootstrap_stripe()
+        bootstrap.stripe_webhook_secret()
     assert not any("runner" in c for c in fake.compose_calls)
 
 
