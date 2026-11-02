@@ -212,6 +212,13 @@ def test_unreadable_input_is_blocked() -> None:
         "make infra-release",
         "make infra-bootstrap",
         "aws secretsmanager get-secret-value --secret-id x",
+        "aws --profile p secretsmanager get-secret-value --secret-id x",
+        "aws --region r secretsmanager get-secret-value --secret-id x",
+        "aws secretsmanager batch-get-secret-value --secret-id-list x",
+        "terraform test",
+        "terraform refresh",
+        "terraform workspace new x",
+        "gmake infra-apply",
     ],
 )
 def test_infrastructure_writes_are_blocked(command: str) -> None:

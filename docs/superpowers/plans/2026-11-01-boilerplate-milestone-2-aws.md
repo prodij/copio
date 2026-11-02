@@ -89,6 +89,7 @@ tests/test_infra_template.py template-level checks on a generated product
 
 - Spec edits also: set the Status line to approved; in §3 replace "so it needs upgrading first" wording only if it reads as a blocker (agents use a pinned binary; James upgrades for Task 13); in §6 say `make infra-plan` prints the account, and that `make infra-destroy` shows Terraform's plan and asks for confirmation at each stage instead of auto-approving; in §14 say this work is stacked on PRs #7 to #9.
 - `run` is the helper's real name in `test_guard.py`. `.dev/acme` comes from root `make dev`.
+- Guard fix round 1: `check_aws` blocks `secretsmanager` with `get-secret-value` or `batch-get-secret-value` anywhere in the non-dash words (global option values like `--profile p` bypassed the positional check); `TERRAFORM_WRITES` also has `test`, `refresh`, `workspace`; `gmake` is treated as `make`.
 
 **Files:**
 - Modify: `template/.claude/hooks/guard.py`, `template/.claude/hooks/test_guard.py`, `docs/superpowers/specs/2026-11-01-boilerplate-milestone-2-aws-design.md`

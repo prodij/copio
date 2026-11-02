@@ -235,7 +235,8 @@ def check_docker(args: list[str]) -> None:
         raise Blocked("`docker compose config` prints every value from .env; read docker-compose.yml instead")
 
 
-TERRAFORM_WRITES = {"apply", "destroy", "import", "state", "taint", "untaint", "force-unlock"}
+TERRAFORM_WRITES = {"apply", "destroy", "import", "state", "taint", "untaint", "force-unlock", "test", "refresh",
+                    "workspace"}
 MAKE_WRITES = {"infra-apply", "infra-destroy", "infra-secrets", "infra-set-stripe-key",
                "infra-release", "infra-bootstrap"}
 INFRA_HINT = "a person runs this one; give them the command (see infra/README.md)"
@@ -255,7 +256,7 @@ def check_make(args: list[str]) -> None:
 
 def check_aws(args: list[str]) -> None:
     words = [a for a in args if not a.startswith("-")]
-    if words[:2] == ["secretsmanager", "get-secret-value"]:
+    if "secretsmanager" in words and {"get-secret-value", "batch-get-secret-value"} & set(words):
         raise Blocked("reading secret values is not allowed")
 
 
@@ -290,7 +291,7 @@ def check_command(argv: list[str], cwd: Path, depth: int) -> Path:
         check_docker(["compose", *args])
     elif head in {"terraform", "tofu"}:
         check_terraform(args)
-    elif head == "make":
+    elif head in {"make", "gmake"}:
         check_make(args)
     elif head == "aws":
         check_aws(args)
