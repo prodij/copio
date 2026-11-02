@@ -5,11 +5,12 @@ on:
     paths: ["jobs/**", ".github/workflows/deploy-jobs.yml"]
   workflow_dispatch:
 permissions: {contents: read, id-token: write}
-concurrency: {group: deploy-server}
+concurrency: {group: deploy-jobs}
 jobs:
   deploy:
     if: vars.AWS_DEPLOY_ROLE_ARN != ''
     timeout-minutes: 30
+    defaults: {run: {shell: bash}}
     runs-on: ubuntu-24.04
     env:
       SERVICE: jobs
@@ -24,7 +25,7 @@ jobs:
         run: |
           slug="$(basename "$AWS_ROLE" -deploy)"
           tag="$(git rev-parse --short=12 HEAD)"
-          registry="$(aws ssm get-parameter --name "/$slug/config" --query Parameter.Value --output text | jq -r .ECR_REGISTRY)"
+          registry="$(aws ssm get-parameter --name "/$slug/config" --query Parameter.Value --output text | jq -er .ECR_REGISTRY)"
           aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
           docker build -t "$registry/$slug-$SERVICE:$tag" "$SERVICE"
           docker push "$registry/$slug-$SERVICE:$tag"
@@ -32,7 +33,7 @@ jobs:
           echo "TAG=$tag" >> "$GITHUB_ENV"
       - name: Deploy on the server
         run: |
-          instance="$(aws ssm get-parameter --name "/$SLUG/config" --query Parameter.Value --output text | jq -r .INSTANCE_ID)"
+          instance="$(aws ssm get-parameter --name "/$SLUG/config" --query Parameter.Value --output text | jq -er .INSTANCE_ID)"
           command_id="$(aws ssm send-command --instance-ids "$instance" --document-name "$SLUG-deploy" \
             --parameters "service=$SERVICE,tag=$TAG" --query Command.CommandId --output text)"
           # Poll for up to 15 minutes: the waiter gives up after about 100 seconds, and deploy.sh can wait 600 for its lock.

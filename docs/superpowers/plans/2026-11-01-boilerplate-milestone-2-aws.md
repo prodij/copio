@@ -2698,8 +2698,12 @@ git commit -m "feat(infra): make infra-* commands and infra-doctor"
 
 ### Task 10: Deploy workflows
 
-**Amendments, 2026-11-01:** `deploy-backend.yml` and `deploy-jobs.yml` both use `concurrency: {group: deploy-server}`, so one merge touching both folders doesn't run two deploys on one server at once (found in Task 7's review; `deploy.sh` also takes a lock).
+**Amendments, 2026-11-01:**
+- `deploy-backend.yml` uses `concurrency: {group: deploy-backend}` and `deploy-jobs.yml` uses `concurrency: {group: deploy-jobs}`; separate groups, because a shared group lets a newer backend push silently cancel a queued jobs deploy. `deploy.sh`'s lock serialises them on the server.
 - `deploy-backend.yml` and `deploy-jobs.yml` poll `get-command-invocation` every 10 seconds for up to 15 minutes instead of `aws ssm wait command-executed` (about 100 seconds, which gave false reds while `deploy.sh` waits up to 600 for its lock), and the job has `timeout-minutes: 30`.
+
+- All three jobs set `defaults: {run: {shell: bash}}` (`-eo pipefail`), so a failed SSM fetch piped into `jq` fails the job; config values use `jq -er`, assigned to variables before `echo` so a failure isn't masked by the command substitution.
+- `deploy-frontend.yml`: only `assets/` gets `public,max-age=31536000,immutable`; the rest gets `no-cache`. Order: `dist/assets`, everything else except `index.html`, `index.html`, then the `--delete` pass. The job has `timeout-minutes: 15`.
 
 **Files:**
 - Create: `template/.github/workflows/deploy-frontend.yml`, `deploy-backend.yml`, `deploy-jobs.yml`
@@ -2792,7 +2796,7 @@ on:
     paths: ["backend/**", ".github/workflows/deploy-backend.yml"]
   workflow_dispatch:
 permissions: {contents: read, id-token: write}
-concurrency: {group: deploy-server}
+concurrency: {group: deploy-backend}
 jobs:
   deploy:
     if: vars.AWS_DEPLOY_ROLE_ARN != ''
@@ -2829,7 +2833,7 @@ jobs:
           test "$status" = Success
 ```
 
-`template/.github/workflows/deploy-jobs.yml`: identical to `deploy-backend.yml`, with `name: deploy-jobs`, `paths: ["jobs/**", ".github/workflows/deploy-jobs.yml"]`, and `SERVICE: jobs`.
+`template/.github/workflows/deploy-jobs.yml`: identical to `deploy-backend.yml`, with `name: deploy-jobs`, `concurrency: {group: deploy-jobs}`, `paths: ["jobs/**", ".github/workflows/deploy-jobs.yml"]`, and `SERVICE: jobs`.
 
 - [ ] **Step 4: Run tests.** `uv run pytest tests/test_workflows.py tests/test_infra_template.py -q`. Expected: PASS.
 

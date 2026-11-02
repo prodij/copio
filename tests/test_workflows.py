@@ -134,3 +134,13 @@ def test_server_deploys_poll_instead_of_using_the_ssm_waiter() -> None:
         text = (ROOT / "template/.github/workflows" / name).read_text()
         assert "command-executed" not in text
         assert "get-command-invocation" in text and "timeout-minutes: 30" in text
+
+
+def test_deploys_fail_on_piped_errors_and_do_not_share_a_concurrency_group() -> None:
+    groups = []
+    for name in DEPLOYS:
+        workflow = yaml.safe_load((ROOT / "template/.github/workflows" / name).read_text())
+        job = next(iter(workflow["jobs"].values()))
+        assert job["defaults"]["run"]["shell"] == "bash"  # -eo pipefail
+        groups.append(workflow["concurrency"]["group"])
+    assert len(set(groups)) == len(groups)
