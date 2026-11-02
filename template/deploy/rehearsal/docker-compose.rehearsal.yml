@@ -22,11 +22,12 @@ services:
     ports: !reset []
   zitadel-api:
     depends_on: {db: {condition: service_healthy}}
+    # Long form: older Compose can't parse the short form's colons with --no-interpolate.
     volumes: !override
-      - ${REHEARSAL_BOOTSTRAP:?run.sh sets this}:/zitadel/bootstrap
+      - {type: bind, source: "${REHEARSAL_BOOTSTRAP:?run.sh sets this}", target: /zitadel/bootstrap}
   zitadel-login:
     volumes: !override
-      - ${REHEARSAL_BOOTSTRAP:?run.sh sets this}:/zitadel/bootstrap:ro
+      - {type: bind, source: "${REHEARSAL_BOOTSTRAP:?run.sh sets this}", target: /zitadel/bootstrap, read_only: true}
   lago-migrate:
     depends_on: {db: {condition: service_healthy}}
   lago-api:
