@@ -78,6 +78,7 @@ test("sign up → workspace → plans", async ({ page, baseURL }) => {
   await signUpToPlans(page, new URL(baseURL!).origin);
   const choose = page.getByRole("button", { name: "Choose Starter" });
   await expect(choose).toBeVisible();
+  if (!MOCK_PAYMENT) await expect(page.getByText("Mock payment")).toHaveCount(0); // off by default
   if (STRIPE_CONFIGURED || MOCK_PAYMENT) return;
 
   // No key: the app says billing isn't set up, right away, and access stays denied.

@@ -117,6 +117,16 @@ def test_the_backend_refuses_to_start_on_unsafe_mock_payment(env: dict[str, str]
     assert result.returncode != 0 and message in result.stderr
 
 
+def test_a_refusal_never_prints_the_stripe_key() -> None:
+    clean = {k: v for k, v in os.environ.items() if k.lower() not in Settings.model_fields}
+    env = {"BILLING_MODE": "mock", "APP_ENV": "local", "STRIPE_SECRET_KEY": "sk_test_tail-of-the-key"}
+    result = subprocess.run([sys.executable, "-c", "import app.main"], env=clean | env, capture_output=True, text=True)
+    assert "is set" in result.stderr and "tail-of-the-key" not in result.stderr
+    with pytest.raises(ValidationError) as refused:
+        Settings(**(TEST_SETTINGS.model_dump() | {"stripe_secret_key": "sk_live_tail-of-the-key"}))
+    assert "tail-of-the-key" not in str(refused.value)
+
+
 def test_the_backend_starts_with_mock_payment_when_it_is_safe() -> None:
     clean = {k: v for k, v in os.environ.items() if k.lower() not in Settings.model_fields}
     result = subprocess.run(

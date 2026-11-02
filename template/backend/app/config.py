@@ -9,7 +9,8 @@ class BillingModeSettings(BaseSettings):
     """What decides mock payment: server config only, no request can change it. create_app checks this
     when the process starts, so an unsafe mix stops the backend instead of faking payments."""
 
-    model_config = SettingsConfigDict(extra="ignore")
+    # Hide inputs: pydantic's message otherwise prints them, and the logs would get part of the Stripe key.
+    model_config = SettingsConfigDict(extra="ignore", hide_input_in_errors=True)
 
     # Empty is real billing. `mock` is mock payment: only with APP_ENV=local and no Stripe key.
     billing_mode: str = ""

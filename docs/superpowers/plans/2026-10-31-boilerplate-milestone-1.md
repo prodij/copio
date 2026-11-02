@@ -4625,3 +4625,17 @@ Stripe stays optional, not removed, so a generated product works before anyone h
 - **Not verified live:** anything needing real Stripe, including the Stripe customer job finishing after the attach, and the payment test.
 - **Known limits, unchanged:** bootstrap keeps an existing Lago provider, so replacing one working key with another in `.env` doesn't reach Lago (`make reset` starts over). A customer whose Stripe customer job failed keeps answering 503, with or without this change.
 
+
+## Mock payment (2026-11-01)
+
+No real Stripe key is coming for now, so `make e2e` can prove sign-up → workspace → a faked payment step → premium turning on from Lago's webhook, with no Stripe and no key of any kind. Real Zitadel, real Lago and Lago's real signed webhook stay in the path.
+
+- **How:** `BILLING_MODE=mock` makes `POST /billing/checkout` create the Lago subscription with no activation rule. Read in lago-api v1.55.0 `Subscriptions::CreateService#handle_today_subscription` → `ActivateService#activate_standalone`: no pending rule means active at once, then `SendWebhookJob("subscription.started")`. The customer has no provider, so `Invoices::Payments::CreateService#should_process_payment?` is false and nothing calls Stripe. `next_state` already maps `subscription.started` to active; `require_feature` and the state machine are unchanged.
+- **Flow:** `/plans` → `/billing/mock-payment` ("Confirm mock payment") → `/billing/return`, which makes the one checkout call and polls, as after Stripe. `/me/access` gained `mock_payment`, used only to label the UI and route to that page; the backend decides from its own config.
+- **Can't reach production:** off by default. The backend refuses to start (checked when `app.main` is imported) and bootstrap stops, before changing anything, unless `APP_ENV=local` and `STRIPE_SECRET_KEY` is empty. Bootstrap also stops if Lago still has a Stripe provider. Settings errors no longer print their inputs: a refusal was printing the end of the Stripe key.
+- **Not marked paid:** the invoice stays `pending` in Lago. `next_state` ignores `invoice.payment_status_updated` unless the subscription is `past_due`, so marking it would add code and no proof.
+- **The e2e test** stops `jobs`, pauses `lago-worker`, confirms the mock payment, checks Lago says active while our row is `pending` with no webhook row and `/premium` shows 402, unpauses, then checks premium, `active`, and a processed, signed `subscription.started`. Pausing is what holds delivery back; `jobs` is stopped because `billing_reconcile` would also turn it on (next point).
+- **`billing_reconcile` is a second way to `active`.** Lago's subscription is active with no payment here, so the job grants access with no webhook on its next run: every 15 minutes, and at once when the scheduler starts. Seen live. Unchanged, it is the spec's repair path, but in mock mode "premium stays off without the webhook" holds only while the job isn't running.
+- **CI:** with no `STRIPE_SECRET_KEY` secret, both e2e workflows write `BILLING_MODE=mock` and `APP_ENV=local` to `.env` and say in the step summary that this is not a Stripe pass. With a key, nothing changes.
+- **`stripe_webhook_secret()`** failures now say Stripe rejected the key or could not be reached, that nothing changed, and to fix or empty it.
+- **Not verified:** everything Stripe. A mock payment pass is not a Stripe pass; the payment test still hasn't run against real Stripe.
