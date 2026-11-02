@@ -16,6 +16,8 @@ x-lago-env: &lago-env
   LAGO_API_URL: http://lago-api.{{ domain }}:${LAGO_API_PORT:-3000}
   LAGO_FRONT_URL: http://lago.{{ domain }}:${LAGO_FRONT_PORT:-8088}
   LAGO_PDF_URL: http://lago-pdf:3000
+  # Plain http here: Rails would otherwise send browsers to https:// for Lago's logo and files.
+  LAGO_DISABLE_SSL: "true"
   LAGO_WEBHOOK_ALLOW_PRIVATE_URLS: "true"
   LAGO_DISABLE_SEGMENT: "true"
   LAGO_DISABLE_SIGNUP: "true"
@@ -116,6 +118,9 @@ services:
       ZITADEL_API_URL: *zitadel-url
       ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel/bootstrap/login-client.pat
       ZITADEL_SESSION_COOKIE_SECRET: ${LOGIN_SESSION_COOKIE_SECRET}
+      # Zitadel builds logo and font URLs from this host. Without it they point at this login port,
+      # which doesn't serve /assets, and the sign-in page shows a broken logo.
+      CUSTOM_REQUEST_HEADERS: x-zitadel-public-host:auth.{{ domain }}:${ZITADEL_PORT:-8085}
     volumes: [./.bootstrap/zitadel:/zitadel/bootstrap:ro]
     ports: ["127.0.0.1:${ZITADEL_LOGIN_PORT:-3100}:3000"]
     depends_on: {zitadel-api: {condition: service_healthy}}

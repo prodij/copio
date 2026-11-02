@@ -4,7 +4,7 @@
   --brand-accent: #ff7a33;
   --brand-background: #ffffff;
   --brand-foreground: #111114;
-  --brand-font: "Inter", system-ui, sans-serif;
+  --brand-font: "Inter", "Inter Variable", system-ui, sans-serif;
 }
 .dark {
   --brand-primary: #6390ff;

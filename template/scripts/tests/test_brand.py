@@ -24,6 +24,7 @@ SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8"
 BASE = "http://auth.test"
 LABEL = f"{BASE}/admin/v1/policies/label"
 ASSETS = f"{BASE}/assets/v1/instance/policy/label"
+TEXT = f"{BASE}/v2/settings/hosted_login_translation"
 YAML = "name: Acme\nfont: Inter\nlogo: logo.svg\nlight: {primary: '#3355ff', accent: '#ff7a33'}\n"
 
 
@@ -38,7 +39,8 @@ def test_css_has_light_and_dark(tmp_path: pathlib.Path) -> None:
     css = css_tokens(load_brand(write(tmp_path)))
     assert "--brand-primary: #3355ff;" in css
     assert ".dark {" in css
-    assert '--brand-font: "Inter", system-ui, sans-serif;' in css
+    assert '--brand-font: "Inter", "Inter Variable", system-ui, sans-serif;' in css
+    assert "@font-face" not in css
 
 
 def test_css_emits_exactly_the_tokens_the_frontend_derives_from(tmp_path: pathlib.Path) -> None:
@@ -120,13 +122,18 @@ def test_apply_zitadel_updates_policy_uploads_logos_then_activates(tmp_path: pat
         mock.post(f"{ASSETS}/logo").respond(200, json={})
         mock.post(f"{ASSETS}/logo/dark").respond(200, json={})
         mock.post(f"{LABEL}/_activate").respond(200, json={})
+        text = mock.put(TEXT).respond(200, json={})
         apply_zitadel(b, BASE, "tok")
+        assert json.loads(text.calls[0].request.content)["translations"]["register"]["description"] == (
+            "Create your Acme account."
+        )
         order = [(c.request.method, c.request.url.path) for c in mock.calls]
         assert order == [
             ("PUT", "/admin/v1/policies/label"),
             ("POST", "/assets/v1/instance/policy/label/logo"),
             ("POST", "/assets/v1/instance/policy/label/logo/dark"),
             ("POST", "/admin/v1/policies/label/_activate"),
+            ("PUT", "/v2/settings/hosted_login_translation"),
         ]
         put = mock.calls[0].request
         assert put.headers["authorization"] == "Bearer tok"
@@ -144,6 +151,7 @@ def test_apply_zitadel_uploads_font_only_when_given(tmp_path: pathlib.Path) -> N
         mock.put(LABEL).respond(200, json={})
         mock.post(url__regex=rf"{re.escape(ASSETS)}/.*").respond(200, json={})
         mock.post(f"{LABEL}/_activate").respond(200, json={})
+        mock.put(TEXT).respond(200, json={})
         apply_zitadel(b, BASE, "tok")
         font = [body for path, body in posted(mock) if path.endswith("/font")]
         assert len(font) == 1
@@ -157,6 +165,7 @@ def test_apply_zitadel_treats_unchanged_policy_as_done(tmp_path: pathlib.Path) -
         mock.put(LABEL).respond(400, json={"code": 9, "message": "No changes (INSTANCE-28fHe)"})
         mock.post(url__regex=rf"{re.escape(ASSETS)}/.*").respond(200, json={})
         activate = mock.post(f"{LABEL}/_activate").respond(200, json={})
+        mock.put(TEXT).respond(200, json={})
         apply_zitadel(b, BASE, "tok")
         assert activate.called
 
@@ -205,6 +214,37 @@ def test_cli_css_only_writes_frontend_tokens(
     brand.main()
     css = (tmp_path / "frontend" / "src" / "brand.css").read_text()
     assert css == css_tokens(load_brand(tmp_path / "brand" / "brand.yaml"))
+
+
+def frontend_dir(tmp_path: pathlib.Path) -> pathlib.Path:
+    frontend = tmp_path / "frontend"
+    (frontend / "src").mkdir(parents=True)
+    (frontend / "index.html").write_text("<head>\n  <title>Old name</title>\n</head>\n")
+    return frontend
+
+
+def test_frontend_gets_the_coloured_logo_favicon_and_title(tmp_path: pathlib.Path) -> None:
+    frontend = frontend_dir(tmp_path)
+    (tmp_path / "brand").mkdir()
+    b = load_brand(write(tmp_path / "brand", YAML.replace("name: Acme", "name: A & B")))
+    brand.write_frontend(b, frontend)
+    logo = (frontend / "public" / "logo.svg").read_text()
+    assert 'fill="#3355ff"' in logo and "currentColor" not in logo
+    assert (frontend / "public" / "favicon.svg").read_text() == logo
+    assert (frontend / "index.html").read_text() == "<head>\n  <title>A &amp; B</title>\n</head>\n"
+    assert (frontend / "src" / "brand.css").read_text() == css_tokens(b)
+
+
+def test_font_file_is_served_to_the_app(tmp_path: pathlib.Path) -> None:
+    frontend = frontend_dir(tmp_path)
+    (tmp_path / "brand").mkdir()
+    (tmp_path / "brand" / "Mine.WOFF2").write_bytes(b"wOF2-font")
+    b = load_brand(write(tmp_path / "brand", YAML.replace("font: Inter", "font: Mine") + "font_file: Mine.WOFF2\n"))
+    brand.write_frontend(b, frontend)
+    assert (frontend / "public" / "brand-font.woff2").read_bytes() == b"wOF2-font"
+    css = (frontend / "src" / "brand.css").read_text()
+    assert 'font-family: "Mine";' in css
+    assert 'src: url("/brand-font.woff2");' in css
 
 
 @pytest.mark.parametrize(

@@ -39,14 +39,31 @@ It is off by default. To turn it on, keep `STRIPE_SECRET_KEY` empty, set `BILLIN
   workspace whose Lago customer has one, because those can reach Stripe.
 
 Host ports are set in `.env` (defaults: app 5173, API 8000, Zitadel 8085, its login page 3100,
-Lago API 3000 and UI 8088, Postgres 5432, S3 (SeaweedFS) 8333). Change any that clash with another
-project, then `make up`. Every port is published on 127.0.0.1 only.
+Lago API 3000 and UI 8088, Postgres 5432, S3 (SeaweedFS) 8333). Every port is published on 127.0.0.1 only.
+
+## Running two products
+
+Generate each product in its own folder with its own `product_slug` and `domain`, then run the same three
+commands in each. Nothing else needs setting:
+
+    make env && make up && make bootstrap
+
+- `make env` checks the default ports. If any is taken, it moves all of them up by the same step (10, then 20...),
+  says so, and writes them to `.env`. `make bootstrap` prints the URLs to open.
+- The Compose project is named from the slug, so containers, volumes, networks and built images are the product's
+  own. `.bootstrap/` and `.env` live in the product's folder. Browsers keep each `*.localhost` domain's sign-ins
+  and cookies apart.
+- `make env` sees only what is running now. If it ran for both before either started, or the other product was
+  down, both can hold the same ports and the second `make up` fails with `port is already allocated`. To fix it:
+  `make down` in that product, empty the `*_PORT=` values in its `.env`, then `make env && make up && make bootstrap`.
+  Moving a port later works the same way, and `make bootstrap` is what brings Zitadel's redirect URIs along.
 
 - `make e2e` runs the Playwright tests against the running stack (after `make bootstrap`): sign-up to
   `/plans` always, sign-up to premium when `.env` has a Stripe key (reported as skipped without one), and
   sign-up to premium by mock payment when `.env` has `BILLING_MODE=mock`. `make check` runs lint, types and unit tests (needs Postgres: `make up`).
-- Brand colours, font and logo live in `brand/brand.yaml`; they reach the app, the Zitadel login
-  page and Lago when `make brand` runs (`make bootstrap` runs it too).
+- Name, colours, font and logo live in `brand/brand.yaml`; they reach the app, the Zitadel login
+  page and Lago when `make brand` runs (`make bootstrap` runs it too). `font` is only a name: to load it
+  everywhere, set `font_file` too. Without it the app falls back to the bundled Inter unless that font is installed.
 - The Zitadel console (`http://auth.{{ domain }}:8085/ui/console`, with your ZITADEL_PORT) signs in
   as `admin@{{ domain }}` with `ZITADEL_ADMIN_PASSWORD` from `.env`; the Lago UI as
   `LAGO_ORG_USER_EMAIL` with `LAGO_ORG_USER_PASSWORD`.

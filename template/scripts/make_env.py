@@ -4,11 +4,15 @@ A blank key with a `# Default: <value>` line above it gets that value; one with 
 `# Generate: <openssl command>` line gets a fresh random value of that shape (`password <n>`: n
 characters that meet Zitadel's password policy). Keys that already have
 a value in .env are kept, and keys with neither marker (the Stripe key) are left for the human.
+
+Host ports (`*_PORT` with a `# Default:`) get their defaults, or, when any of them is already taken on
+this machine (say by a second product), all move up by the same step so the next product just works.
 """
 
 import base64
 import re
 import secrets
+import socket
 import string
 import subprocess
 import sys
@@ -20,6 +24,9 @@ KEY = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
 MARKER = re.compile(r"^# (Default|Generate): (.+)$")
 # Empty on purpose: mock payment is off unless someone turns it on, so these are not "still to fill".
 OFF_BY_DEFAULT = {"BILLING_MODE", "APP_ENV"}
+PORT_DEFAULT = re.compile(r"^# Default: (\d+)\n([A-Z][A-Z0-9_]*_PORT)=[ \t]*$", re.M)
+PORT_STEP = 10
+PORT_TRIES = 50
 
 
 def _rand_hex(n: int) -> str:
@@ -75,8 +82,31 @@ def read_env(path: Path) -> dict[str, str]:
     return values
 
 
+def port_free(port: int) -> bool:
+    """True when nothing listens on this port. It sees only what is running now, not a stopped stack."""
+    with socket.socket() as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def port_shift(ports: list[int]) -> int:
+    """The smallest step up that makes every port free, so one product's ports stay together."""
+    for shift in range(0, PORT_STEP * PORT_TRIES, PORT_STEP):
+        if all(port_free(port + shift) for port in ports):
+            return shift
+    raise SystemExit(f"make env: no free block of ports near {ports}; set the *_PORT values in .env by hand")
+
+
 def render(example: str, current: dict[str, str]) -> tuple[str, list[str]]:
     """The .env text (example layout, current values kept, blanks filled) and the keys still empty."""
+    ports = {name: int(default) for default, name in PORT_DEFAULT.findall(example) if not current.get(name)}
+    shift = port_shift(list(ports.values())) if ports else 0
+    if shift:
+        moved = ", ".join(f"{name}={port + shift}" for name, port in ports.items())
+        print(f"default ports are taken on this machine, so these moved up by {shift}: {moved}")
     lines: list[str] = []
     missing: list[str] = []
     seen: set[str] = set()
@@ -96,6 +126,8 @@ def render(example: str, current: dict[str, str]) -> tuple[str, list[str]]:
         if not value and marker:
             kind, arg = marker
             value = arg if kind == "Default" else generate(arg)
+            if name in ports:
+                value = str(ports[name] + shift)
         if not value and name not in OFF_BY_DEFAULT:
             missing.append(name)
         lines[-1] = f"{name}={value}"

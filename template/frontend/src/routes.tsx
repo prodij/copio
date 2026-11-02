@@ -1,5 +1,6 @@
 import { Link, Navigate, Outlet, createBrowserRouter, useLocation } from "react-router";
 import { userManager } from "@/auth/userManager";
+import { BrandMark } from "@/components/BrandMark";
 import { MockPaymentBanner } from "@/components/MockPaymentBanner";
 import { Billing } from "@/pages/Billing";
 import { CheckoutReturn } from "@/pages/CheckoutReturn";
@@ -13,7 +14,8 @@ function Layout() {
   const { pathname } = useLocation();
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <nav className="flex gap-4 text-sm">
+      <nav className="flex items-center gap-4 text-sm">
+        <BrandMark className="mr-2 text-base" />
         <Link to="/premium">Report</Link>
         <Link to="/plans">Plans</Link>
         <Link to="/billing">Billing</Link>

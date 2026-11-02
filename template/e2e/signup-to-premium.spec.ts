@@ -60,9 +60,18 @@ async function saveTestCard(page: Page) {
   await page.getByTestId("hosted-payment-submit-button").click();
 }
 
+const imageLoaded = (image: HTMLImageElement) => image.complete && image.naturalWidth > 0;
+
 async function signUpToPlans(page: Page, app: string, workspace = WORKSPACE) {
   await page.goto("/");
+  expect(await page.getByRole("main").locator("img").evaluate(imageLoaded), "the app's logo").toBe(true);
   await page.getByRole("button", { name: "Sign in" }).click();
+  // Zitadel draws a light and a dark logo and hides one: both must load, or the page shows a broken image.
+  const logos = page.getByRole("img", { name: "logo", includeHidden: true });
+  await expect(logos).toHaveCount(2);
+  await expect(async () => {
+    expect(await logos.evaluateAll((images) => images.every((i) => (i as HTMLImageElement).naturalWidth > 0))).toBe(true);
+  }, "the sign-in page's logo").toPass({ timeout: 10_000 });
   await signUp(page, `e2e+${Date.now()}@example.com`);
 
   await page.waitForURL(`${app}/workspace/new`);

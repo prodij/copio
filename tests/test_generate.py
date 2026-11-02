@@ -229,6 +229,33 @@ def test_published_ports_bind_only_to_loopback(product_dir: pathlib.Path) -> Non
     assert [m for m in mappings if not m[1].startswith("127.0.0.1:")] == []
 
 
+def test_each_product_has_its_own_compose_project(tmp_path: pathlib.Path) -> None:
+    def project(slug: str) -> str:
+        run_copy(str(ROOT), str(tmp_path / slug), data={**ANSWERS, "product_slug": slug, "domain": f"{slug}.localhost"},
+                 defaults=True, unsafe=True, vcs_ref="HEAD", quiet=True)
+        compose = yaml.safe_load((tmp_path / slug / "docker-compose.yml").read_text())
+        # Fixed names would clash between products; only `name:` should tell them apart.
+        names = [s["container_name"] for s in compose["services"].values() if "container_name" in s]
+        assert names == [] and all(not (v or {}).get("name") for v in compose["volumes"].values())
+        return compose["name"]
+
+    assert project("one-co") == "one-co"
+    assert project("two-co") == "two-co"
+
+
+def test_login_page_gets_asset_urls_it_can_load(product_dir: pathlib.Path) -> None:
+    compose = yaml.safe_load((product_dir / "docker-compose.yml").read_text())
+    headers = compose["services"]["zitadel-login"]["environment"]["CUSTOM_REQUEST_HEADERS"]
+    # Otherwise Zitadel builds logo URLs on the login port, which answers 404: a broken logo.
+    assert headers == "x-zitadel-public-host:auth.acme-reports.localhost:${ZITADEL_PORT:-8085}"
+
+
+def test_lago_serves_its_files_over_http(product_dir: pathlib.Path) -> None:
+    compose = yaml.safe_load((product_dir / "docker-compose.yml").read_text())
+    # Lago's production mode otherwise redirects its logo URL to https, which this stack doesn't serve.
+    assert compose["services"]["lago-api"]["environment"]["LAGO_DISABLE_SSL"] == "true"
+
+
 def test_zitadel_admin_gets_a_generated_password(product_dir: pathlib.Path) -> None:
     compose = yaml.safe_load((product_dir / "docker-compose.yml").read_text())
     zitadel = compose["services"]["zitadel-api"]["environment"]
