@@ -178,29 +178,25 @@ def test_apply_zitadel_reports_other_failures(tmp_path: pathlib.Path) -> None:
             apply_zitadel(b, BASE, "tok")
 
 
-def test_apply_lago_sends_legal_name_and_png_logo_through_graphql(tmp_path: pathlib.Path) -> None:
+def test_apply_lago_brands_the_organization_and_then_each_billing_entity(tmp_path: pathlib.Path) -> None:
     b = load_brand(write(tmp_path))
+    sent: list[tuple[str, dict[str, Any]]] = []
 
     def graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        reply = httpx.post(
-            "http://lago.test/graphql", json={"query": query, "variables": variables}
-        )
-        data: dict[str, Any] = reply.json()["data"]
-        return data
+        sent.append((query, variables))
+        return {"billingEntities": {"collection": [{"id": "e1"}, {"id": "e2"}]}} if "collection" in query else {}
 
-    with respx.mock() as mock:
-        route = mock.post("http://lago.test/graphql").respond(
-            200, json={"data": {"updateOrganization": {"id": "o1"}}}
-        )
-        apply_lago(b, graphql)
-        sent = json.loads(route.calls[0].request.content)
-    assert "updateOrganization" in sent["query"]
-    organization = sent["variables"]["i"]
+    apply_lago(b, graphql)
+    assert ["updateOrganization" in sent[0][0], "billingEntities" in sent[1][0]] == [True, True]
+    organization = sent[0][1]["i"]
     assert set(organization) == {"legalName", "logo"}
     assert organization["legalName"] == "Acme"
     prefix, _, data = organization["logo"].partition(",")
     assert prefix == "data:image/png;base64"
     assert base64.b64decode(data).startswith(b"\x89PNG\r\n\x1a\n")
+    # Last, or invoice PDFs fail: updating the organization leaves the entity's logo with no file.
+    assert all("updateBillingEntity" in query for query, _ in sent[2:])
+    assert [variables["i"] for _, variables in sent[2:]] == [{"id": e, **organization} for e in ("e1", "e2")]
 
 
 def test_cli_css_only_writes_frontend_tokens(

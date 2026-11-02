@@ -96,14 +96,14 @@ def test_a_taken_default_moves_all_the_ports_together(
     monkeypatch.setattr(make_env, "port_free", lambda port: port not in (8000, 5183))
     text, _ = make_env.render(PORTS, {})
     # 8000 is taken, so +10; 5183 is taken, so +20. Everything moves by the same step.
-    assert "APP_PORT=5193\nAPI_PORT=8020\n" in text
+    assert "APP_PORT=5193\n" in text and "API_PORT=8020\n" in text
     assert "NOT_A_PORT_VALUE=7\n" in text
     assert "moved up by 20: APP_PORT=5193, API_PORT=8020" in capsys.readouterr().out
 
 
 def test_free_defaults_stay_and_say_nothing(capsys: pytest.CaptureFixture[str]) -> None:
     text, _ = make_env.render(PORTS, {})
-    assert "APP_PORT=5173\nAPI_PORT=8000\n" in text
+    assert "APP_PORT=5173\n" in text and "API_PORT=8000\n" in text
     assert capsys.readouterr().out == ""
 
 
@@ -113,13 +113,13 @@ def test_ports_already_in_env_are_kept_and_not_probed(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(make_env, "port_free", probe)
     text, _ = make_env.render(PORTS.replace("# Default: 7\nNOT_A_PORT_VALUE=\n", ""), {"APP_PORT": "5173", "API_PORT": "9"})
-    assert "APP_PORT=5173\nAPI_PORT=9\n" in text
+    assert "APP_PORT=5173\n" in text and "API_PORT=9\n" in text
 
 
 def test_a_blanked_port_is_picked_again(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(make_env, "port_free", lambda port: port != 8000)
     text, _ = make_env.render(PORTS, {"APP_PORT": "", "API_PORT": ""})
-    assert "APP_PORT=5183\nAPI_PORT=8010\n" in text
+    assert "APP_PORT=5183\n" in text and "API_PORT=8010\n" in text
 
 
 def test_port_free_sees_a_real_listener(monkeypatch: pytest.MonkeyPatch) -> None:

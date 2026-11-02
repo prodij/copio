@@ -82,6 +82,11 @@ async function signUpToPlans(page: Page, app: string, workspace = WORKSPACE) {
 
 test("sign up → workspace → plans", async ({ page, baseURL }) => {
   await signUpToPlans(page, new URL(baseURL!).origin);
+  // Invoices embed the billing entity's logo; a missing file makes every invoice PDF fail.
+  const logoKey = sql("lago", "select b.key from active_storage_blobs b join active_storage_attachments a on a.blob_id = b.id " +
+                              "where a.record_type = 'BillingEntity' and a.name = 'logo'");
+  expect(logoKey, "make brand gave Lago's billing entity a logo").not.toBe("");
+  compose("exec", "-T", "lago-worker", "test", "-f", `storage/${logoKey.slice(0, 2)}/${logoKey.slice(2, 4)}/${logoKey}`);
   const choose = page.getByRole("button", { name: "Choose Starter" });
   await expect(choose).toBeVisible();
   if (!MOCK_PAYMENT) await expect(page.getByText("Mock payment")).toHaveCount(0); // off by default

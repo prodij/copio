@@ -513,6 +513,7 @@ def main() -> None:
         bootstrap_stripe(webhook_secret)  # the backend already has the key: it was recreated from the same .env
     # Last: the app gets its client id only once everything behind it is configured.
     compose("up", "-d", "--force-recreate", "frontend")
+    wait_for(f"the app at {app_url()}", lambda: http_ok(app_url(), "/"))  # it runs `npm ci` first
     print(f"""
 Ready.
   App          {app_url()}
