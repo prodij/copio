@@ -1,6 +1,6 @@
 # Boilerplate milestone 2: AWS deployment
 
-Date: 2026-11-01. Status: design, awaiting review. Builds on [milestone 1](2026-10-30-boilerplate-milestone-1-design.md).
+Date: 2026-11-01. Status: approved. Builds on [milestone 1](2026-10-30-boilerplate-milestone-1-design.md).
 
 ## 1. Goal
 
@@ -44,7 +44,7 @@ Payments aren't part of this. They stay unproven until a real Stripe test key is
 | M11 | Separate `docker-compose.aws.yml`; the local file stays as it is | One file with conditionals: the two differ in credentials, HTTPS, storage and exposed ports, and a mistake could weaken production |
 | M12 | Email through Amazon SES over SMTP | No email: password reset and email verification don't work |
 
-Terraform is pinned to `~> 1.17` and the AWS provider to `~> 6.71` (latest on 2026-11-01: 1.17.1 and 6.71.0), with `.terraform.lock.hcl` committed. This machine has Terraform 1.16.0, so it needs upgrading first.
+Terraform is pinned to `~> 1.17` and the AWS provider to `~> 6.71` (latest on 2026-11-01: 1.17.1 and 6.71.0), with `.terraform.lock.hcl` committed. This machine has Terraform 1.16.0. Agents use a pinned 1.17.1 binary, and James upgrades the system one before the real deploy.
 
 ## 4. Architecture
 
@@ -75,7 +75,7 @@ The subdomains are `auth.`, `lago.` and `lago-api.`, matching the local stack, r
 
 **Network:** one VPC with public subnets for the server and private subnets for RDS. No NAT gateway. The server's firewall allows only 80 and 443 in; admins reach it through Session Manager.
 
-**Server:** Amazon Linux with Docker, encrypted disk, metadata service v2 only, and log rotation. An instance role grants only what it needs: this product's secrets, S3 bucket and ECR repositories. It starts as `t3.large`; the size is confirmed by measuring (§10).
+**Server:** Amazon Linux with Docker, encrypted disk, metadata service v2 only with a hop limit of 2 so containers can use the server's role, and log rotation. An instance role grants only what it needs: this product's secrets, S3 bucket and ECR repositories. It starts as `t3.large`; the size is confirmed by measuring (§10).
 
 **Database:** one single-zone RDS Postgres 15 instance, matching the local major version, holding databases `app`, `zitadel` and `lago`. Reachable only from the server. Backups kept 7 days, deletion protection on, final snapshot on delete.
 
@@ -83,7 +83,7 @@ The subdomains are `auth.`, `lago.` and `lago-api.`, matching the local stack, r
 
 **Redis:** stays on the server. Queued background work can be lost if the server is lost. `billing_reconcile` recovers subscription state afterwards.
 
-**What's public on `lago-api.` and `lago.`:** only `lago-api.<domain>/webhooks/*` is public, because Stripe must reach it. Lago's UI and the rest of its API are limited by Caddy to the `admin_cidrs` list, and the backend reaches Lago over the internal Compose network. An empty list means no outside access, and an admin uses a Session Manager port forward instead.
+**What's public on `lago-api.` and `lago.`:** only `lago-api.<domain>/webhooks/*` is public, because Stripe must reach it. Lago's UI and the rest of its API are limited by Caddy to the `admin_cidrs` list, and the backend reaches Lago over the internal Compose network. An empty list means the UI is unavailable, because its browser code calls the public `lago-api.` host, so a port forward doesn't help. To use it, add your IP to `admin_cidrs` and apply.
 
 **No Stripe CLI and no mock payments:** `stripe-cli` isn't in the AWS file, and milestone 1's mock payment path can't be enabled in this configuration, which a test enforces. Billing stays off until a key is added, using milestone 1's no-Stripe mode.
 
@@ -100,9 +100,8 @@ The subdomains are `auth.`, `lago.` and `lago-api.`, matching the local stack, r
 | `github_repo` | Which repo may deploy through OIDC |
 | `alert_email` | Alarms and budget alerts |
 | `monthly_budget_usd` | Budget alert threshold |
-| `admin_cidrs` | Who can open Lago's UI. Default empty |
+| `admin_cidrs` | Who can open Lago's UI. Default empty, which means the UI is unavailable |
 | `instance_type` | Default `t3.large` |
-| `use_staging_certificates` | Let's Encrypt's staging service, for repeated rebuild tests that would hit rate limits |
 
 The AWS profile is passed by the person running the command and is never committed.
 
@@ -111,14 +110,16 @@ The AWS profile is passed by the person running the command and is never committ
 | Command | What it does |
 |---|---|
 | `make infra-init` | Once per product: creates the state bucket, then initializes Terraform with S3 state and S3 native locking |
-| `make infra-secrets` | Generates app secrets into Secrets Manager. Never overwrites an existing one |
 | `make infra-plan` | Prints the target account, then saves a plan |
 | `make infra-apply` | Applies exactly the saved plan |
+| `make infra-secrets` | Run after the first apply, because it fills secrets and an IAM user that Terraform creates. Generates app secrets into Secrets Manager and never overwrites an existing one |
+| `make infra-release` | Builds the images and uploads a bundle of the deploy files. The server needs both before it can start |
 | `make infra-bootstrap` | Runs database setup and the existing bootstrap on the server, through Session Manager |
+| `make infra-set-stripe-key` | Stores the Stripe test key you paste in Secrets Manager |
 | `make infra-doctor` | Checks DNS, certificates, service health, Zitadel, Lago and `pg_partman` |
-| `make infra-destroy` | Removes everything after you type the product slug. Deletion protection is switched off by a separate, visible plan first |
+| `make infra-destroy` | Removes everything. It shows Terraform's plan and asks for confirmation at each stage instead of auto-approving. Deletion protection is switched off by a separate, visible plan first |
 
-The template's agent guard blocks agents from `infra-apply`, `infra-destroy` and Terraform `apply` or `destroy`. Agents can run `infra-plan`.
+The template's agent guard blocks agents from every `make infra-*` command except `infra-plan` and `infra-doctor`, from Terraform writes (`apply`, `destroy`, `import`, `state`, `taint`, `untaint`, `force-unlock`), and from `aws secretsmanager get-secret-value`.
 
 ## 7. App deploys
 
@@ -148,6 +149,7 @@ Each folder deploys on its own, on merge to `main`, when its path changes.
 
 - The server renders them to a root-only `.env` on its encrypted disk at startup. They exist on that disk while the server runs.
 - **Zitadel's tokens must be saved.** Zitadel creates them only on its first start against an empty database. Locally they sit in `.bootstrap/`. On AWS, a replaced server would otherwise have no way to get them back.
+- **Zitadel gets the RDS admin login only once**, in a one-shot `zitadel-init` service. Normal starts use its own database role.
 - Only `sk_test_` keys are accepted in this milestone, as locally. Going live is a later checklist (§12).
 
 ## 9. Failures
@@ -215,4 +217,4 @@ These are facts about upstream tools to check, not open design choices:
 
 ## 14. Depends on
 
-Milestone 1's `feat/run-without-stripe` must be merged first, because the first deploy runs with billing off.
+Milestone 1's `feat/run-without-stripe` must be merged first, because the first deploy runs with billing off. This work is stacked on PRs #7 to #9.

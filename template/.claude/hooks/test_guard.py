@@ -194,3 +194,34 @@ def test_unreadable_input_is_blocked() -> None:
     result = subprocess.run([sys.executable, str(GUARD)], input="not json", text=True, capture_output=True,
                             check=False)
     assert result.returncode == 2
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "terraform apply tfplan",
+        "cd infra && terraform destroy",
+        "terraform -chdir=infra apply",
+        "tofu apply",
+        "terraform state rm aws_db_instance.main",
+        "terraform force-unlock abc",
+        "make infra-apply",
+        "make infra-destroy",
+        "make infra-secrets",
+        "make infra-set-stripe-key",
+        "make infra-release",
+        "make infra-bootstrap",
+        "aws secretsmanager get-secret-value --secret-id x",
+    ],
+)
+def test_infrastructure_writes_are_blocked(command: str) -> None:
+    assert run("Bash", {"command": command}).returncode == 2
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["terraform plan -out=tfplan", "terraform -chdir=infra validate", "terraform fmt -check",
+     "make infra-plan", "make infra-doctor", "cat infra/README.md"],
+)
+def test_infrastructure_reads_are_allowed(command: str) -> None:
+    assert run("Bash", {"command": command}).returncode == 0
