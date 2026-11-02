@@ -4608,3 +4608,19 @@ Live check of the loopback and Zitadel-email fixes against the real images, with
 - **Zitadel:** non-2xx replies not handled elsewhere become `DependencyRejected` (502 "Zitadel rejected the request: HTTP <status>"); Zitadel's message goes only to the log.
 - **Repo:** `template/.gitignore` keeps `.env.example.jinja` visible; root pytest filters copier's `DirtyLocalWarning`.
 - **Not verified live:** the Stripe payment leg; `stripe listen --print-secret` and `--events` against Stripe with a real key.
+
+## Run without Stripe (2026-11-01)
+
+Stripe stays optional, not removed, so a generated product works before anyone has a Stripe account: `make env && make up && make bootstrap` completes with an empty `STRIPE_SECRET_KEY`, and a person can sign up, create a workspace and see `/plans`, `/billing` and `/me/access`.
+
+- **Settings:** `stripe_secret_key` defaults to `""`. An empty value is allowed; anything non-empty must still be `sk_test_` (backend, bootstrap, `stripe-listen.sh`, CI).
+- **Checkout without a key answers `501`,** checked before anything is written, so no subscription row blocks a later checkout. Not 503: nothing is down and a retry can't help, and the Plans page retries only 503. Not 402: that means "this workspace has no paid plan". Not 409: that already means a plan change, and the conflict isn't with the request.
+- **`/me/access` gained `billing_configured`** so Billing can say billing isn't set up. It grants nothing: `require_feature` is unchanged and answers 402 with its normal message.
+- **Workspace creation** sends Lago no `billing_configuration` without a key.
+- **Adding a key later:** paste it and re-run `make bootstrap`. At the first checkout `LagoClient.checkout_url` sees a customer with no `payment_provider`, upserts `{external_id, billing_configuration}` and answers the existing 503 while Lago's job creates the Stripe customer. Read in lago-api v1.55.0 `Customers::UpsertFromApiService`: `should_create_billing_configuration?` is true for a customer with no provider customer, each field is set only `if params.key?`, so name and email stay, and `Stripe::Customers::CreateService` queues `StripeCreateJob`. Every repeat before that job finishes queues another, so it is sent only while no provider is set.
+- **e2e:** sign-up → workspace → `/plans` always runs (and without a key checks the 501 message, Billing and the premium 402). The payment test is skipped without a key. `make e2e` passes `STRIPE_CONFIGURED`, never the key.
+- **CI:** both e2e workflows now accept an empty secret, with a `::notice::`, so a missing secret no longer fails the nightly run; it shows the payment test as skipped. Any other non-test key is still refused.
+- **Checked live** on a generated product with no key and with the placeholder `sk_test_x`: the placeholder stops bootstrap at `stripe listen --print-secret`, after the provider is added; a workspace from before the key got its provider, keeping its name and email.
+- **Not verified live:** anything needing real Stripe, including the Stripe customer job finishing after the attach, and the payment test.
+- **Known limits, unchanged:** bootstrap keeps an existing Lago provider, so replacing a wrong key in `.env` doesn't reach Lago (`make reset` starts over). A customer whose Stripe customer job failed keeps answering 503, with or without this change.
+

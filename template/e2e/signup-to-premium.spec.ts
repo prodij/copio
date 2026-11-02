@@ -14,6 +14,7 @@ const PASSWORD = "Correct-horse-battery-9";
 const WORKSPACE = "E2E Co";
 const STRIPE_CONFIGURED = !!process.env.STRIPE_CONFIGURED;
 const NOT_SET_UP = /billing isn't set up/i;
+const NO_KEY = "STRIPE_SECRET_KEY is empty: add a Stripe test key to .env and run make bootstrap";
 
 async function signUp(page: Page, email: string) {
   // No email code: the login UI asks for one only when EMAIL_VERIFICATION=true (unset in Compose).
@@ -75,7 +76,8 @@ test("sign up → workspace → plans", async ({ page, baseURL }) => {
 });
 
 test("sign up → workspace → pay → premium report", async ({ page, baseURL }) => {
-  test.skip(!STRIPE_CONFIGURED, "STRIPE_SECRET_KEY is empty: add a Stripe test key to .env and run make bootstrap");
+  if (!STRIPE_CONFIGURED) console.log(`Payment test skipped. ${NO_KEY}`); // the list reporter hides skip reasons
+  test.skip(!STRIPE_CONFIGURED, NO_KEY);
   const app = new URL(baseURL!).origin;
   await signUpToPlans(page, app);
 
