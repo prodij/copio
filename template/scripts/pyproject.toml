@@ -18,7 +18,7 @@ ignore = ["E501"]
 
 [tool.mypy]
 strict = true
-files = ["brand.py", "bootstrap.py", "doctor.py", "make_env.py", "smoke_zitadel.py", "aws_state.py"]
+files = ["brand.py", "bootstrap.py", "doctor.py", "make_env.py", "smoke_zitadel.py", "aws_state.py", "infra.py", "infra_doctor.py"]
 [[tool.mypy.overrides]]
 module = ["resvg_py"]
 ignore_missing_imports = true

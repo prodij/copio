@@ -2206,6 +2206,7 @@ git commit -m "feat(infra): bootstrap runs on AWS and saves tokens and frontend 
 - `destroy` also deletes this product's SSM parameters that Terraform doesn't own (`/<slug>/tags/*`, `/<slug>/frontend`), through a small `delete_parameters(ssm, slug)` with a MagicMock-based test. Otherwise a redeploy of the slug starts from stale tags, and "removes everything" is false.
 - `upload_bundle` also skips `.pytest_cache`, `.mypy_cache` and `.ruff_cache`.
 - `infra-plan` first prints the account (spec §6): `@echo "Account: $$(aws sts get-caller-identity --query Account --output text)"`.
+- Implementation notes (Task 9 run): `read_secret` and `run_on_server` wrap their `Any` results (`value: dict[str, str]`, `str(...)`) for strict mypy; `# noqa: S603, S607` on Terraform/docker calls; `rehearse-aws` was dropped from the new `.PHONY` line because no such target exists yet; `delete_parameters` uses the fixed names `/<slug>/tags/{backend,jobs}` and `/<slug>/frontend`.
 
 **Files:**
 - Create: `template/scripts/infra.py`, `template/scripts/infra_doctor.py`, `template/scripts/tests/test_infra.py`, `template/scripts/tests/test_infra_doctor.py`

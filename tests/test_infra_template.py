@@ -152,3 +152,10 @@ def test_aws_compose_config_is_valid(product_dir: pathlib.Path) -> None:
         cwd=product_dir, capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_make_has_every_infra_command(product_dir: pathlib.Path) -> None:
+    makefile = (product_dir / "Makefile").read_text()
+    for target in ["infra-init", "infra-plan", "infra-apply", "infra-secrets", "infra-set-stripe-key",
+                   "infra-release", "infra-bootstrap", "infra-doctor", "infra-destroy"]:
+        assert f"\n{target}:" in makefile, target
