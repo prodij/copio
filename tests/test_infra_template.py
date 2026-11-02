@@ -375,6 +375,23 @@ def test_app_service_retries_and_a_failed_first_try_does_not_fail_user_data(prod
         assert needed in text, needed
 
 
+def test_app_start_and_the_unit_hold_the_deploy_lock(product_dir: pathlib.Path) -> None:
+    # Only checks the text. The behaviour needs flock and systemd, so it was run by hand (final-fix-report.md).
+    text = (product_dir / "infra" / "user_data.sh.tftpl").read_text()
+    script = text.split("<<'SCRIPT'")[1].split("\nSCRIPT")[0]
+    lock = script.index("exec 9>/opt/app/.deploy.lock")
+    assert script.index("mkdir -p /opt/app") < lock < script.index("flock -w 600 9 ||") < script.index("aws s3 sync")
+    assert script.index("flock -w 600 9 ||") < script.index("exec /opt/app/deploy/start.sh")
+    assert '--exclude ".deploy.lock"' in script  # a sync with --delete must not remove the lock file
+    assert "TimeoutStartSec=1800" in text.split("<<'UNIT'")[1]
+    deploy = (product_dir / "deploy" / "deploy.sh").read_text()
+    assert '"$APP_DIR/.deploy.lock"' in deploy and "flock -w 600 9" in deploy
+    # A child waiting on a lock its parent holds would hang: nothing under the lock may start these.
+    start = (product_dir / "deploy" / "start.sh").read_text()
+    assert "flock" not in start and "app-start" not in start
+    assert "app-start" not in deploy and "start.sh" not in deploy
+
+
 def test_tfstate_is_ignored_and_nothing_committed_matches(product_dir: pathlib.Path) -> None:
     lines = (product_dir / ".gitignore").read_text().splitlines()
     assert "*.tfstate" in lines and "*.tfstate.*" in lines
@@ -405,6 +422,7 @@ def test_product_ci_runs_when_deploy_changes(product_dir: pathlib.Path) -> None:
 def test_runbook_covers_day_two_limits(product_dir: pathlib.Path) -> None:
     text = (product_dir / "infra" / "README.md").read_text()
     for needed in ["uploads the deploy files only", "must be committed", "5 Elastic IPs", "hosted zone",
-                   "delete it first", "surviving product", "--force-recreate caddy", "no health check"]:
+                   "delete it first", "surviving product", "--force-recreate caddy", "no health check",
+                   "aws ssm delete-parameters", "share the deploy lock"]:
         assert needed in text, needed
     assert text.count("create_github_oidc_provider = true") >= 2

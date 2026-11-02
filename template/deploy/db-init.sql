@@ -1,5 +1,5 @@
 -- Run once as the RDS admin (database `postgres`). Zitadel creates its own role and database.
--- The passwords come from the environment, not psql's arguments. If one is unset, ON_ERROR_STOP ends the run at its first use.
+-- The passwords come from the environment, not the arguments. Unset: ON_ERROR_STOP ends the run at its first use. Empty would mean a role with no password, so first-run.sh refuses that first.
 \getenv app_password APP_DB_PASSWORD
 \getenv lago_password LAGO_DB_PASSWORD
 SELECT format('CREATE ROLE app LOGIN PASSWORD %L', :'app_password')

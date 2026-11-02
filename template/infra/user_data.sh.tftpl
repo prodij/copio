@@ -31,6 +31,10 @@ cat > /usr/local/bin/app-start <<'SCRIPT'
 set -euo pipefail
 source /etc/app.env
 mkdir -p /opt/app
+# The deploy lock, kept through the exec below. Without it, a retry could rewrite .env from the older SSM
+# tag during a deploy, and the deploy would report success on the old image. first-run.sh runs after this exits.
+exec 9>/opt/app/.deploy.lock
+flock -w 600 9 || { echo "app-start: a deploy has held the lock for 10 minutes; giving up on this try" >&2; exit 1; }
 aws s3 sync --delete --exclude ".env" --exclude ".bootstrap/*" --exclude ".deploy.lock" --exclude "scripts/.venv/*" "s3://$DEPLOY_BUCKET/current/" /opt/app/ --region "$AWS_REGION"
 if [ ! -f /opt/app/deploy/start.sh ]; then
   echo "app-start: no deploy files yet: run make infra-release" >&2
@@ -56,6 +60,8 @@ ExecStart=/usr/local/bin/app-start
 Restart=on-failure
 RestartSec=60
 SuccessExitStatus=45
+# 10 minutes' wait for the lock plus a slow start. A hung pull is killed, which frees the lock, and then retried.
+TimeoutStartSec=1800
 [Install]
 WantedBy=multi-user.target
 UNIT

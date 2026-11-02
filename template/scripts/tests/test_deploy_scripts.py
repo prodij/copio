@@ -170,6 +170,35 @@ esac""")  # type: ignore[arg-type]
     assert "uv run python -u bootstrap.py" in calls(box)
 
 
+@pytest.mark.parametrize("key", ["APP_DB_PASSWORD", "LAGO_DB_PASSWORD"])
+@pytest.mark.parametrize("empty_how", ["empty", "absent"])
+def test_first_run_refuses_an_empty_database_password(box: dict[str, object], key: str, empty_how: str) -> None:
+    app = box["app"]
+    (app / "deploy" / "db-init.sql").write_text("select 1;\n")  # type: ignore[operator]
+    app_secret = {"DB_ADMIN_SECRET_ARN": "arn:admin", "APP_DB_PASSWORD": "app-s3cret", "LAGO_DB_PASSWORD": "lago-s3cret"}
+    if empty_how == "empty":
+        app_secret[key] = ""
+    else:
+        del app_secret[key]
+    stub(box["bin"], "aws", f"""
+case "$*" in
+  *"--secret-id acme/app"*) echo '{json.dumps(app_secret)}';;
+  *"--secret-id acme/bootstrap"*) echo '{{}}';;
+  *"--secret-id arn:admin"*) echo '{json.dumps({"password": "admin-s3cret"})}';;
+  *"/acme/config"*) echo '{json.dumps({"DOMAIN": "x.test", "ECR_REGISTRY": "r", "DB_HOST": "h"})}';;
+  *) echo aaaaaaa;;
+esac""")  # type: ignore[arg-type]
+    for name in ("start.sh", "first-run.sh"):
+        (app / "deploy" / name).write_bytes((DEPLOY / name).read_bytes())  # type: ignore[operator]
+        (app / "deploy" / name).chmod(0o755)  # type: ignore[operator]
+    result = subprocess.run(["bash", str(DEPLOY / "first-run.sh")], env=box["env"],  # type: ignore[arg-type]  # noqa: S607
+                            capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    assert key in result.stderr
+    assert "s3cret" not in result.stdout + result.stderr
+    assert "psql" not in calls(box)
+
+
 def counting_docker(box: dict[str, object], body: str) -> None:
     """A docker stub with a per-pattern counter: `n` is how many times the stub has run before."""
     stub(box["bin"], "docker", f'n=$(cat "$CALLS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$CALLS.n"\n{body}')  # type: ignore[arg-type]

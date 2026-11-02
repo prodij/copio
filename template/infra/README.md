@@ -105,6 +105,10 @@ Going back across a release that added a database migration fails, and fails saf
 
 `gh workflow run` can't do this: the deploy role only trusts the `main` branch, so a run from an earlier commit is refused.
 
+### If the first image is bad
+
+`make infra-release` won't replace an image once its tag exists. Merge a fix to `main` and let the deploy workflow replace it. If CI can't deploy yet, delete the tags so the next release counts as a first release: `aws ssm delete-parameters --names /<slug>/tags/backend /<slug>/tags/jobs`, then `make infra-release`, which builds from your checkout, then `sudo systemctl restart app` in an SSM session. That path has no migration, health check or rollback. Use it only before real data depends on the old image.
+
 ### Changing `docker-compose.aws.yml`, `deploy/`, or the Zitadel and Lago versions
 
 Edit them, merge to `main`, and from an up-to-date `main` run `make infra-release`, because the server gets whatever your checkout holds. Once image tags exist, it uploads the deploy files only, leaves images and tags alone, and says so. The backend and jobs move only through the deploy workflows, which migrate, check health and roll back. Then, in an SSM session: `sudo systemctl restart app`.
@@ -114,7 +118,8 @@ The restart fetches the deploy files, rebuilds `.env` from Secrets Manager and S
 - **The backend and jobs stay safe.** They restart on the tags in SSM, so it is the same code on the same schema, with no migration to run.
 - **Everything else gets no health check and no rollback.** This covers a new Zitadel or Lago version, which also run their own migrations as they start. Run `make rehearse-aws` first and `make infra-doctor` after. A migration isn't undone by editing the version back.
 - **Caddy doesn't pick up a changed `Caddyfile` by itself:** Compose doesn't see inside the file. After the restart: `cd /opt/app && COMPOSE_FILE=docker-compose.aws.yml docker compose up -d --force-recreate caddy`.
-- **Don't restart during a deploy:** the restart doesn't take the deploy lock. And if a deploy ended with `deployed but not recorded`, redeploy first, because the restart and every reboot use the tag in SSM.
+- **A restart during a deploy waits for it:** they share the deploy lock, and a deploy waits for a restart the same way. `make infra-bootstrap` only holds the lock for its first step, so don't run it during a deploy.
+- **If a deploy ended with `deployed but not recorded`, redeploy first,** because the restart and every reboot use the tag in SSM.
 - **If the restart reports a failure, it's still retrying.** `systemctl` says the job failed at the first failed try, but the service tries again every minute and never gives up. Read `journalctl -u app`, and use `sudo systemctl stop app` to end the retries. The same retries cover boot, so a registry outage during a server replacement clears by itself.
 
 To change infrastructure: `make infra-plan`, read it, `make infra-apply`. A merge never changes infrastructure.

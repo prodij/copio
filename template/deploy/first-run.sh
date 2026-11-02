@@ -11,6 +11,13 @@ cd "$APP_DIR"
 "$APP_DIR/deploy/start.sh"
 
 val() { { grep "^$1=" .env || true; } | cut -d= -f2-; }
+# An empty value would quietly create a role with no password.
+for key in APP_DB_PASSWORD LAGO_DB_PASSWORD; do
+  if [ -z "$(val "$key")" ]; then
+    echo "first-run: $key is empty in $SLUG/app: run make infra-secrets" >&2
+    exit 1
+  fi
+done
 DB_ADMIN_PASSWORD="$(aws secretsmanager get-secret-value --secret-id "$(val DB_ADMIN_SECRET_ARN)" \
   --query SecretString --output text | jq -er .password)"
 export DB_ADMIN_PASSWORD

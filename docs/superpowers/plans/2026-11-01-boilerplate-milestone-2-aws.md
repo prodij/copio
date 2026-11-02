@@ -656,6 +656,7 @@ git commit -m "feat(infra): RDS, S3, ECR, secret containers and SES"
 - In `user_data.sh.tftpl`, `aws s3 sync` also gets `--exclude "scripts/.venv/*"`, or every boot deletes and rebuilds the scripts' environment.
 - `ami = data.aws_ssm_parameter.al2023.insecure_value`: `.value` is sensitive, which hides the AMI in the plan a person has to read.
 - Final review, 2026-11-02: `monitoring.tf` adds `aws_db_event_subscription.database` (availability, failover, failure, low storage) and `aws_sns_topic_policy.alerts` (SNS's default statement plus CloudWatch and `events.rds.amazonaws.com`; the budget emails directly and isn't on the topic). `server_unhealthy` sets `treat_missing_data = "breaching"`, so a new server emails once before its first data; `server_recover` stays explicitly on `missing`, so a gap can't recover a healthy server. `app.service` gets `Restart=on-failure`, `RestartSec=60` and `StartLimitIntervalSec=0`, which is allowed for `Type=oneshot`. `app-start` exits 45 with a message when there's no bundle yet, and `SuccessExitStatus=45` means that isn't retried. `user_data` starts the unit with `--no-block`.
+- Final review re-check, 2026-11-02: `app-start` takes the deploy lock (`exec 9>/opt/app/.deploy.lock; flock -w 600 9`), kept through the `exec` to `start.sh`, and `app.service` sets `TimeoutStartSec=1800`. A retry could otherwise rewrite `.env` from the older SSM tag during a deploy, and the deploy would report success on the old image.
 
 **Files:**
 - Create: `template/infra/server.tf`, `user_data.sh.tftpl`, `monitoring.tf`, `dns.tf`
@@ -1642,6 +1643,7 @@ git commit -m "feat(infra): AWS Compose file, Caddy routing and database setup"
 - Commit the three scripts with the executable bit.
 - Fix round 1 (review): `deploy.sh` checks `up -d` (a failed start goes to rollback; a failed rollback restart prints "the service may be down"), retries `put-parameter` 3 times then exits 1 "deployed but not recorded", refuses with exit 1 when the previous tag is empty, needs 5 consecutive running polls for `jobs`, takes `flock -w 600` on `$APP_DIR/.deploy.lock` when `flock` exists (the sync in `user_data.sh.tftpl` excludes it), and exits 1 if `/etc/app.env` cannot be sourced. `start.sh` reads secrets and tags into variables before writing `.env`, treats only `ResourceNotFoundException` on the bootstrap secret as "no tokens yet" (other errors and non-JSON content exit non-zero), and uses `jq -er` per token. `first-run.sh` uses `jq -er .password` and splits `export` from assignment (SC2155).
 - Final review, 2026-11-02: `first-run.sh` hands the admin and service passwords to `docker run` by name (`-e PGPASSWORD -e APP_DB_PASSWORD -e LAGO_DB_PASSWORD`), and `db-init.sql` reads the service passwords with psql's `\getenv` instead of `-v`. `start.sh` prints a message before exit 44 when `<slug>/app` has no value.
+- Final review re-check, 2026-11-02: `first-run.sh` refuses an empty `APP_DB_PASSWORD` or `LAGO_DB_PASSWORD`, naming the key and never a value. An empty value would create a role with no password.
 
 **Files:**
 - Create: `template/deploy/start.sh`, `template/deploy/first-run.sh`, `template/deploy/deploy.sh`, `template/scripts/tests/test_deploy_scripts.py`
@@ -3051,6 +3053,7 @@ git commit -m "feat(infra): local rehearsal of the AWS database setup and routin
 - "Database": say plainly that switching production to a restored instance isn't automated in this milestone. Restoring and reading from it is what's documented and tested.
 - "Removing a product": Terraform shows two plans, and you confirm each one.
 - Final review, 2026-11-02: the runbook's day-2 section is rewritten for bundle-only releases, including what `systemctl restart app` does and doesn't cover and that a changed Caddyfile needs `--force-recreate caddy`. It says `terraform.tfvars` must be committed before `make infra-release`, gives the VPC and Elastic IP quotas, what `make infra-destroy` leaves, and the OIDC recovery in both places. The README lists `jq` for `make check`, which fails with a clear message without it. `CLAUDE.md` says what the guard doesn't catch.
+- Final review re-check, 2026-11-02: the runbook says a bad first image is replaced by merging through CI or by deleting the SSM tags, and replaces "don't restart during a deploy" with the shared lock and a warning about `make infra-bootstrap`.
 
 **Files:**
 - Create: `template/infra/README.md` (replacing the stub)
@@ -3186,12 +3189,13 @@ An agent can't do this task, by the guard and by the rules on AWS writes. It nee
   - Lago can write to S3 with the server's role. On the server: `docker compose exec lago-api bin/rails runner 'ActiveStorage::Blob.service.upload("rehearsal-check", StringIO.new("x")); puts "ok"'`. If this fails, the fallback is a dedicated IAM user whose key is in `<slug>/app`, passed as `LAGO_AWS_S3_ACCESS_KEY_ID` and `LAGO_AWS_S3_SECRET_ACCESS_KEY`.
   - The budget's `cost_filter` value in the plan reads `user:Product$<slug>`.
   - The disk alarm's dimensions match the real device (`nvme0n1p1` and `xfs`) in CloudWatch. If the alarm shows "insufficient data", correct them.
+  - An RDS event reaches the alert email: reboot the database from the RDS console, and expect an availability event by email. If none arrives, check the topic policy's `events.rds.amazonaws.com` statement first.
 
-- [ ] **Step 4: Replace the server.** Terminate it in the console. Rebuild it with `terraform plan -replace=aws_instance.server -out=tfplan`, then `make infra-apply`. Confirm you can still sign in with the same user and see the same workspace.
+- [ ] **Step 4: Replace the server.** Terminate it in the console. Rebuild it with `terraform plan -replace=aws_instance.server -out=tfplan`, then `make infra-apply`. Confirm you can still sign in with the same user and see the same workspace. Check the emails: `server_unhealthy` fires after about 10 minutes without data from the terminated server, and the replacement sends only the one expected email, from the new server having no data yet, before the alarm clears.
 
 - [ ] **Step 5: Restore the database.** Restore to a new instance from the RDS console, connect from the server, count rows in `app.workspaces`, and delete the new instance.
 
-- [ ] **Step 6: Remove it.** `make infra-destroy`. The next day, confirm with AWS Billing and the console that nothing billable is left.
+- [ ] **Step 6: Remove it.** `make infra-destroy`. The next day, confirm with AWS Billing and the console that nothing billable is left. If a second product shared the account and the provider's owner was destroyed, also check OIDC recovery: set `create_github_oidc_provider = true` on the surviving product, apply, and confirm a deploy workflow signs in. Skip this if recovery is never used.
 
 - [ ] **Step 7: Record.** Put the measured monthly cost and the time from `copier copy` to live in `template/README.md.jinja`. Note any template fixes here as dated notes, then commit.
 
