@@ -54,6 +54,20 @@ it("shows the API error when checkout is rejected, without retrying", async () =
   expect(checkoutCalls(spy)).toBe(1);
 });
 
+it("shows that billing isn't set up, without retrying", async () => {
+  const detail = "Billing isn't set up: this product has no Stripe key.";
+  const spy = mockFetch({
+    "GET /billing/plans": { status: 200, body: [plan] },
+    "POST /billing/checkout": { status: 501, body: { detail } },
+  });
+  window.sessionStorage.removeItem("checkout_plan");
+  renderWithQuery(<Plans />);
+  fireEvent.click(await screen.findByRole("button", { name: "Choose Starter" }));
+  expect(await screen.findByText(detail)).toBeInTheDocument();
+  expect(checkoutCalls(spy)).toBe(1);
+  expect(window.sessionStorage.getItem("checkout_plan")).toBeNull();
+});
+
 it("retries a 503 a few times before showing it", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const spy = mockFetch({

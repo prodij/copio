@@ -13,7 +13,16 @@ export function Billing() {
   if (!data.plan_code) {
     return (
       <div className="space-y-2">
-        <p>No plan yet</p>
+        {data.billing_configured ? (
+          <p>No plan yet</p>
+        ) : (
+          <>
+            <p>Billing isn&apos;t set up</p>
+            <p className="text-sm text-muted-foreground">
+              Plans can&apos;t be bought until a Stripe test key is added: put it in STRIPE_SECRET_KEY in .env and run make bootstrap.
+            </p>
+          </>
+        )}
         <Link to="/plans" className="text-primary underline">See plans</Link>
       </div>
     );

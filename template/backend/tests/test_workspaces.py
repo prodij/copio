@@ -1,12 +1,15 @@
 import json
+from typing import cast
 
 import httpx
 import pytest
 import respx
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import Settings, get_settings
 from app.workspaces import service
 from app.workspaces.models import Workspace
 from tests.auth_helpers import AuthHeaders
@@ -36,6 +39,20 @@ def test_create_workspace_happy_path(client: TestClient, auth: AuthHeaders, db_s
     customer = json.loads(lago["customer"].calls.last.request.content)["customer"]
     assert customer["external_id"] == str(ws.id)
     assert customer["billing_configuration"]["payment_provider"] == "stripe"
+
+
+@respx.mock
+def test_without_stripe_the_lago_customer_has_no_provider(client: TestClient, auth: AuthHeaders, db_session: Session,
+                                                          settings: Settings) -> None:
+    without_key = settings.model_copy(update={"stripe_secret_key": ""})
+    cast(FastAPI, client.app).dependency_overrides[get_settings] = lambda: without_key
+    fake_zitadel(respx.mock)
+    lago = fake_lago(respx.mock)
+    assert client.post("/workspaces", json={"name": "Acme"}, headers=auth("user-1")).status_code == 201
+    ws = db_session.scalars(select(Workspace)).one()
+    assert ws.status == "ready"
+    assert json.loads(lago["customer"].calls.last.request.content) == {"customer": {
+        "external_id": str(ws.id), "name": "Acme", "email": "owner@example.com"}}
 
 
 @respx.mock

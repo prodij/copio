@@ -350,8 +350,9 @@ end
 
 
 def stripe_secret_key() -> str:
+    """The test key, or "" when none is set yet: Stripe is optional, a wrong kind of key is not."""
     key = os.environ.get("STRIPE_SECRET_KEY", "")
-    if not key.startswith("sk_test_"):
+    if key and not key.startswith("sk_test_"):
         raise SystemExit(
             "bootstrap: STRIPE_SECRET_KEY must be a Stripe TEST secret key (sk_test_...). Paste it into "
             ".env from https://dashboard.stripe.com/test/apikeys and run `make bootstrap` again; "
@@ -362,6 +363,11 @@ def stripe_secret_key() -> str:
 
 def bootstrap_stripe() -> None:
     key = stripe_secret_key()
+    if not key:  # stripe-cli stays idle: scripts/stripe-listen.sh exits 0 without a key
+        print("Stripe: SKIPPED, STRIPE_SECRET_KEY is empty. The app works, but billing isn't set up, so plans "
+              "can't be bought.\n  To add it: paste a test key (sk_test_..., from "
+              "https://dashboard.stripe.com/test/apikeys) into .env and run `make bootstrap` again.")
+        return
     providers = lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"]
     if not any(p.get("code") == "stripe" for p in providers):
         lago_graphql(ADD_STRIPE, {"i": {"name": "Stripe", "code": "stripe", "secretKey": key,

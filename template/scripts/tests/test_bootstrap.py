@@ -275,8 +275,8 @@ def test_bucket_step_survives_a_hung_shell(monkeypatch: pytest.MonkeyPatch) -> N
         bootstrap.ensure_bucket()
 
 
-@pytest.mark.parametrize("key", ["", "sk_live_x"])
-def test_stripe_step_needs_a_test_key(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
+@pytest.mark.parametrize("key", ["sk_live_x", "rk_test_x", "whatever"])
+def test_stripe_step_refuses_anything_but_a_test_key(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
     monkeypatch.setenv("STRIPE_SECRET_KEY", key)
     with pytest.raises(SystemExit, match=r"STRIPE_SECRET_KEY must be a Stripe TEST secret key"):
         bootstrap.stripe_secret_key()
@@ -354,6 +354,41 @@ class FakeStripeSetup:
     def compose(self, *args: str, capture: bool = False) -> str:
         self.compose_calls.append(args)
         return self.printed if "--print-secret" in args else ""
+
+
+@pytest.mark.parametrize("set_empty", [True, False])
+def test_bootstrap_stripe_is_skipped_plainly_without_a_key(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], set_empty: bool
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
+    if set_empty:
+        monkeypatch.setenv("STRIPE_SECRET_KEY", "")
+    else:
+        monkeypatch.delenv("STRIPE_SECRET_KEY")
+    bootstrap.bootstrap_stripe()
+    assert fake.graphql == [] and fake.compose_calls == []  # no provider, and stripe-cli is left idle
+    out = capsys.readouterr().out
+    assert "SKIPPED" in out and "STRIPE_SECRET_KEY" in out and "`make bootstrap` again" in out
+
+
+def test_main_finishes_without_a_key_and_recreates_the_frontend_last(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "")
+    for port in ("API_PORT", "ZITADEL_PORT", "LAGO_API_PORT", "LAGO_FRONT_PORT", "S3_PORT"):
+        monkeypatch.setenv(port, "1234")
+    for name in ("http_ok", "bootstrap_zitadel", "bootstrap_lago", "ensure_bucket", "backend"):
+        monkeypatch.setattr(bootstrap, name, lambda *_a, **_k: True)
+    pat = tmp_path / "admin.pat"
+    pat.write_text("x")
+    monkeypatch.setattr(bootstrap, "ADMIN_PAT", pat)
+    monkeypatch.setattr(bootstrap.subprocess, "run", lambda *_a, **_k: subprocess.CompletedProcess([], 0))
+    bootstrap.main()
+    assert fake.compose_calls[-1] == ("up", "-d", "--force-recreate", "frontend")
+    assert not any("stripe-cli" in call for call in fake.compose_calls)
+    out = capsys.readouterr().out
+    assert out.index("SKIPPED") < out.index("Ready.")
 
 
 def test_bootstrap_stripe_adds_the_provider_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:

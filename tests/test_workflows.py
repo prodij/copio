@@ -1,7 +1,9 @@
 import json
 import pathlib
 import re
+import subprocess
 
+import pytest
 import yaml
 
 from conftest import ROOT
@@ -17,6 +19,14 @@ def test_every_action_is_pinned_to_a_commit() -> None:
         for line in path.read_text().splitlines():
             if re.match(r"^\s*(-\s+)?uses:", line):
                 assert PINNED.match(line), f"{path.relative_to(ROOT)}: {line.strip()}"
+
+
+@pytest.mark.parametrize("path", [ROOT / ".github/workflows/template.yml", ROOT / "template/.github/workflows/e2e.yml"])
+@pytest.mark.parametrize(("key", "code"), [("", 0), ("sk_test_x", 0), ("sk_live_x", 1), ("rk_test_x", 1), ("x", 1)])
+def test_ci_refuses_every_stripe_key_but_a_test_key(path: pathlib.Path, key: str, code: int) -> None:
+    guard = next(line for line in path.read_text().splitlines() if 'case "$STRIPE_SECRET_KEY"' in line)
+    result = subprocess.run(["/bin/sh", "-c", guard], env={"STRIPE_SECRET_KEY": key}, capture_output=True, check=False)
+    assert result.returncode == code
 
 
 def test_product_gets_agent_rules_and_the_guard(product_dir: pathlib.Path) -> None:

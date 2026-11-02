@@ -143,6 +143,30 @@ def test_make_gives_host_tools_only_the_secrets_they_need(
     assert _env_seen_by_host_tools(product_dir, tmp_path, target) == needed
 
 
+@pytest.mark.parametrize(("key", "seen"), [("sk_test_x", "1"), ("", "")])
+def test_e2e_is_told_whether_there_is_a_stripe_key_not_the_key(
+    product_dir: pathlib.Path, tmp_path: pathlib.Path, key: str, seen: str
+) -> None:
+    (tmp_path / "Makefile").write_text((product_dir / "Makefile").read_text())
+    (tmp_path / ".env").write_text(f"STRIPE_SECRET_KEY={key}\n")
+    (tmp_path / "e2e").mkdir()
+    (tmp_path / "bin").mkdir()
+    out = tmp_path / "seen"
+    for tool in ["npm", "npx"]:
+        fake = tmp_path / "bin" / tool
+        fake.write_text(f'#!/bin/sh\necho "$STRIPE_CONFIGURED/$STRIPE_SECRET_KEY" > "{out}"\n')
+        fake.chmod(0o755)
+    env = {"PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    subprocess.run(["make", "-s", "e2e"], cwd=tmp_path, env=env, capture_output=True, text=True, check=True)
+    assert out.read_text().strip() == f"{seen}/"
+
+
+def test_stripe_key_is_optional_in_compose(product_dir: pathlib.Path) -> None:
+    compose = yaml.safe_load((product_dir / "docker-compose.yml").read_text())
+    assert compose["services"]["backend"]["environment"]["STRIPE_SECRET_KEY"] == "${STRIPE_SECRET_KEY:-}"
+    assert compose["services"]["stripe-cli"]["environment"]["STRIPE_API_KEY"] == "${STRIPE_SECRET_KEY:-}"
+
+
 def test_published_ports_bind_only_to_loopback(product_dir: pathlib.Path) -> None:
     # The stack runs with known local credentials (postgres/postgres, Lago's superuser): never on 0.0.0.0.
     compose = yaml.safe_load((product_dir / "docker-compose.yml").read_text())

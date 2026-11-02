@@ -6,7 +6,7 @@ const APP_URL = process.env.APP_URL ?? `http://{{ domain }}:${process.env.APP_PO
 
 export default defineConfig({
   testDir: ".",
-  // One journey through real Zitadel, Lago, Stripe and webhooks: slow, and not parallel.
+  // Journeys through real Zitadel, Lago, Stripe and webhooks: slow, and not parallel.
   timeout: 5 * 60_000,
   expect: { timeout: 15_000 },
   workers: 1,

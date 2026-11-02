@@ -88,7 +88,8 @@ def test_own_workspace_never_sees_another_workspaces_plan(client: TestClient, ow
         access = client.get("/me/access", headers=owner_headers)
         report = client.get("/demo/premium-report", headers=owner_headers)
     assert me.json()["workspace"]["id"] == owner_workspace
-    assert access.json() == {"plan_code": None, "state": None, "current_period_end": None, "features": {}}
+    assert access.json() == {"billing_configured": True, "plan_code": None, "state": None,
+                             "current_period_end": None, "features": {}}
     assert report.status_code == 402
 
 

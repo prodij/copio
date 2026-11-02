@@ -1,5 +1,6 @@
-# Local development. `make env` once, paste the Stripe test key into .env, then `make up` and
-# `make bootstrap`. `make check` needs only Postgres (`make up`, or TEST_DATABASE_URL).
+# Local development. `make env` once, then `make up` and `make bootstrap`. The Stripe test key in .env
+# is optional; add it any time and re-run `make bootstrap`. `make check` needs only Postgres (`make up`,
+# or TEST_DATABASE_URL).
 -include .env
 export
 # Secrets only the containers need (Compose reads .env itself). Keep them out of every host
@@ -12,6 +13,8 @@ unexport STRIPE_SECRET_KEY LAGO_API_KEY LAGO_ORG_USER_PASSWORD
 bootstrap: export STRIPE_SECRET_KEY := $(STRIPE_SECRET_KEY)
 bootstrap: export LAGO_API_KEY := $(LAGO_API_KEY)
 bootstrap brand: export LAGO_ORG_USER_PASSWORD := $(LAGO_ORG_USER_PASSWORD)
+# The e2e tests need to know whether there is a key, never the key itself.
+e2e: export STRIPE_CONFIGURED := $(if $(STRIPE_SECRET_KEY),1,)
 
 # Zitadel writes its PATs into .bootstrap/zitadel as this user, so the host can read them.
 export HOST_UID := $(shell id -u)

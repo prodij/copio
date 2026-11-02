@@ -16,6 +16,25 @@ def test_live_stripe_key_is_rejected() -> None:
         Settings(**data)
 
 
+def test_stripe_key_may_be_empty() -> None:
+    settings = Settings(**(TEST_SETTINGS.model_dump() | {"stripe_secret_key": ""}))
+    assert not settings.stripe_configured
+    assert TEST_SETTINGS.stripe_configured
+
+
+def test_stripe_key_may_be_left_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+    data = TEST_SETTINGS.model_dump()
+    del data["stripe_secret_key"]
+    assert Settings(**data).stripe_secret_key == ""
+
+
+@pytest.mark.parametrize("key", ["rk_test_x", "pk_test_x", "whatever"])
+def test_any_other_stripe_key_is_rejected(key: str) -> None:
+    with pytest.raises(ValidationError, match="test-mode"):
+        Settings(**(TEST_SETTINGS.model_dump() | {"stripe_secret_key": key}))
+
+
 def test_importing_app_main_needs_no_env() -> None:
     env = {k: v for k, v in os.environ.items() if k.lower() not in Settings.model_fields}
     result = subprocess.run(
