@@ -650,3 +650,133 @@ def test_backend_pat_check_other_errors_are_reported(
     respx.get(f"{Z}/auth/v1/users/me").respond(500, json={"message": "db down"})
     with httpx.Client(base_url=Z) as http, pytest.raises(SystemExit, match="backend token check failed: HTTP 500"):
         bootstrap.backend_pat_works(http)
+
+
+def test_aws_urls_are_https_without_ports(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    monkeypatch.setenv("DOMAIN", "x.test")
+    assert bootstrap.zitadel_url() == "https://auth.x.test"
+    assert bootstrap.app_url() == "https://app.x.test"
+    assert bootstrap.public_url("api", "API_PORT") == "https://api.x.test"
+
+
+def test_on_aws_zitadel_is_reached_publicly_and_lago_on_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    monkeypatch.setenv("DOMAIN", "x.test")
+    assert bootstrap.local("https://auth.x.test") == ("https://auth.x.test", {})
+    assert bootstrap.local("https://lago-api.x.test") == (
+        "http://127.0.0.1:3000", {"Host": "lago-api.x.test", "X-Forwarded-Proto": "https"})
+
+
+def test_on_aws_redirects_must_be_https(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    assert bootstrap.web_app_config("https://app.x.test")["devMode"] is False
+
+
+def test_locally_nothing_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DEPLOY_TARGET", raising=False)
+    monkeypatch.setenv("ZITADEL_PORT", "8085")
+    assert bootstrap.zitadel_url().startswith("http://auth.")
+    assert bootstrap.web_app_config("http://x.localhost:5173")["devMode"] is True
+
+
+def test_on_aws_stripe_registers_no_local_listener(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    monkeypatch.setenv("DOMAIN", "x.test")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    calls: list[str] = []
+    monkeypatch.setattr(bootstrap, "stripe_secret_key", lambda: "sk_test_x")
+    monkeypatch.setattr(bootstrap, "lago_graphql", lambda q, v: {
+        "paymentProviders": {"collection": [{"code": "stripe", "id": "p",
+                                             "successRedirectUrl": "https://app.x.test/billing/return"}]}})
+    monkeypatch.setattr(bootstrap, "compose", lambda *a, **k: calls.append(" ".join(a)) or "")
+    monkeypatch.setattr(bootstrap, "apply_stripe_webhook_secret", lambda s: calls.append("secret"))
+    bootstrap.bootstrap_stripe("")
+    assert calls == []
+
+
+def test_ensure_bucket_is_left_to_terraform_on_aws(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    monkeypatch.setattr(bootstrap, "wait_for", lambda *a, **k: pytest.fail("touched SeaweedFS"))
+    bootstrap.ensure_bucket()
+
+
+def test_aws_main_publishes_state_before_brand_and_touches_nothing_local(
+    monkeypatch: pytest.MonkeyPatch, stubbed_main: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
+    for name in list(os.environ):
+        if name.endswith("_PORT"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    monkeypatch.setenv("DOMAIN", "x.test")
+    monkeypatch.setenv("AWS_REGION", "eu-west-2")
+    monkeypatch.setenv("SLUG", "acme")
+    monkeypatch.setattr(bootstrap, "publish_aws_state", lambda: fake.events.append("publish"))
+    monkeypatch.setattr(bootstrap.subprocess, "run",
+                        lambda *a, **_k: fake.events.append("brand") or subprocess.CompletedProcess([], 0))
+    bootstrap.main()
+    assert fake.events.index("publish") < fake.events.index("brand")
+    text = " | ".join(fake.events)
+    assert "--print-secret" not in text and "stripe-cli" not in text and "frontend" not in text.replace("publish", "")
+    out = capsys.readouterr().out
+    assert "gh workflow run deploy-frontend" in out and "Open " not in out and "S3 " not in out
+
+
+def test_publish_aws_state_saves_tokens_before_the_frontend_values(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    from unittest.mock import MagicMock
+
+    import boto3
+
+    (tmp_path / "zitadel").mkdir()
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "zitadel/admin.pat").write_text("A")
+    (tmp_path / "zitadel/login-client.pat").write_text("L")
+    (tmp_path / "backend/backend.pat").write_text("B")
+    (tmp_path / "ids.env").write_text("ZITADEL_CLIENT_ID=c1\nZITADEL_PROJECT_ID=p1\n")
+    monkeypatch.setattr(bootstrap, "STATE", tmp_path)
+    monkeypatch.setattr(bootstrap, "IDS", tmp_path / "ids.env")
+    for name, value in {"AWS_REGION": "eu-west-2", "SLUG": "acme", "DOMAIN": "x.test"}.items():
+        monkeypatch.setenv(name, value)
+    clients = {"ssm": MagicMock(), "secretsmanager": MagicMock()}
+    order: list[str] = []
+    clients["secretsmanager"].put_secret_value.side_effect = lambda **_k: order.append("tokens")
+    clients["ssm"].put_parameter.side_effect = lambda **_k: order.append("frontend")
+    monkeypatch.setattr(boto3, "client", lambda service, **_k: clients[service])
+    bootstrap.publish_aws_state()
+    assert order == ["tokens", "frontend"]
+    assert clients["ssm"].put_parameter.call_args.kwargs["Name"] == "/acme/frontend"
+    secret = clients["secretsmanager"].put_secret_value.call_args.kwargs
+    assert secret["SecretId"] == "acme/bootstrap"
+    assert set(json.loads(secret["SecretString"])) == {"admin_pat", "login_client_pat", "backend_pat", "ids_env"}
+
+
+def test_publish_aws_state_turns_an_aws_error_into_a_plain_stop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    import boto3
+    from botocore.exceptions import ClientError
+
+    (tmp_path / "ids.env").write_text("ZITADEL_CLIENT_ID=c1\nZITADEL_PROJECT_ID=p1\n")
+    monkeypatch.setattr(bootstrap, "IDS", tmp_path / "ids.env")
+    for name, value in {"AWS_REGION": "eu-west-2", "SLUG": "acme", "DOMAIN": "x.test"}.items():
+        monkeypatch.setenv(name, value)
+
+    def denied(*_a: object, **_k: object) -> object:
+        raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "secret-detail"}}, "PutSecretValue")
+
+    from unittest.mock import MagicMock
+
+    client = MagicMock()
+    client.put_secret_value.side_effect = denied
+    monkeypatch.setattr(boto3, "client", lambda *_a, **_k: client)
+    (tmp_path / "zitadel").mkdir()
+    (tmp_path / "backend").mkdir()
+    for f in ("zitadel/admin.pat", "zitadel/login-client.pat", "backend/backend.pat"):
+        (tmp_path / f).write_text("x")
+    monkeypatch.setattr(bootstrap, "STATE", tmp_path)
+    with pytest.raises(SystemExit, match=r"bootstrap: saving state to AWS failed \(ClientError AccessDeniedException\)") as stopped:
+        bootstrap.publish_aws_state()
+    assert "secret-detail" not in str(stopped.value)

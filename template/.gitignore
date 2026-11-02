@@ -10,3 +10,9 @@ __pycache__/
 playwright-report/
 test-results/
 .bootstrap/
+.rehearsal/
+infra/.terraform/
+infra/tfplan
+infra/backend.hcl
+*.tfstate
+*.tfstate.*

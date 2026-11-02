@@ -95,3 +95,40 @@ check:
 e2e:
 	cd e2e && npm ci --no-audit --no-fund && npx playwright install --with-deps chromium && npx playwright test
 	@if [ -n "$$MOCK_PAYMENT" ]; then echo "MOCK PAYMENT run: the Stripe payment test did not run. A mock payment pass is not a Stripe pass."; fi
+
+# AWS. See infra/README.md. Set AWS_PROFILE first.
+.PHONY: infra-init infra-plan infra-apply infra-secrets infra-set-stripe-key infra-release infra-bootstrap infra-doctor infra-destroy rehearse-aws
+
+infra-init:
+	cd scripts && uv run python infra.py init
+
+infra-plan:
+	@echo "Account: $$(aws sts get-caller-identity --query Account --output text)"
+	cd infra && terraform plan -input=false -out=tfplan
+	@echo "Check the plan for 'destroy' and 'replace' before running make infra-apply."
+
+infra-apply:
+	cd infra && terraform apply -input=false tfplan && rm -f tfplan
+	@cd infra && echo "Set the GitHub variables: gh variable set AWS_DEPLOY_ROLE_ARN -b $$(terraform output -raw deploy_role_arn); gh variable set AWS_REGION -b $$(terraform output -raw aws_region)"
+
+infra-secrets:
+	cd scripts && uv run python infra.py secrets
+
+infra-set-stripe-key:
+	cd scripts && uv run python infra.py set-stripe-key
+
+infra-release:
+	cd scripts && uv run python infra.py release
+
+infra-bootstrap:
+	cd scripts && uv run python infra.py bootstrap
+
+infra-doctor:
+	cd scripts && uv run python infra_doctor.py
+
+infra-destroy:
+	cd scripts && uv run python infra.py destroy
+
+# The AWS database setup and routing, locally: no AWS, nothing published, and it removes what it starts.
+rehearse-aws:
+	bash deploy/rehearsal/run.sh

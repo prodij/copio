@@ -4,7 +4,9 @@ Blocks: reading `.env*` (not `.env.example`) or anything under `.bootstrap/` (pa
 tricks, recursive grep over the repo, `docker compose config`); a realistic live Stripe key;
 `git push` to main/master (explicitly, via `--all`/`--mirror`, or a bare push while on main);
 force pushes; and `rm -r`/`rm -rf` of anything outside this repo (or the repo itself, or paths only
-known at run time such as `xargs rm -rf`). Commands are tokenized like a shell would, wrappers
+known at run time such as `xargs rm -rf`); Terraform writes (`apply`, `destroy`, `import`, `state`,
+`taint`, `untaint`, `force-unlock`); `make infra-*` other than `infra-plan` and `infra-doctor`;
+and `aws secretsmanager get-secret-value`. Commands are tokenized like a shell would, wrappers
 (`sudo`, `env`, `xargs`, `bash -c`, subshells, `/bin/rm`) are unwrapped. Input it cannot read is
 blocked too: a guard that fails open guards nothing.
 
@@ -233,6 +235,31 @@ def check_docker(args: list[str]) -> None:
         raise Blocked("`docker compose config` prints every value from .env; read docker-compose.yml instead")
 
 
+TERRAFORM_WRITES = {"apply", "destroy", "import", "state", "taint", "untaint", "force-unlock", "test", "refresh",
+                    "workspace"}
+# Every other `make infra-*` is blocked, so a target added later is blocked by default.
+MAKE_INFRA_ALLOWED = {"infra-plan", "infra-doctor"}
+INFRA_HINT = "a person runs this one; give them the command (see infra/README.md)"
+
+
+def check_terraform(args: list[str]) -> None:
+    words = [a for a in args if not a.startswith("-")]
+    if words and words[0] in TERRAFORM_WRITES:
+        raise Blocked(f"`terraform {words[0]}` changes real infrastructure; {INFRA_HINT}")
+
+
+def check_make(args: list[str]) -> None:
+    for word in args:
+        if word.startswith("infra-") and word not in MAKE_INFRA_ALLOWED:
+            raise Blocked(f"`make {word}` changes real infrastructure; {INFRA_HINT}")
+
+
+def check_aws(args: list[str]) -> None:
+    words = [a for a in args if not a.startswith("-")]
+    if "secretsmanager" in words and {"get-secret-value", "batch-get-secret-value"} & set(words):
+        raise Blocked("reading secret values is not allowed")
+
+
 def check_command(argv: list[str], cwd: Path, depth: int) -> Path:
     """Checks one simple command; returns the working directory after it (for `cd`)."""
     argv = unwrap(argv)
@@ -262,6 +289,12 @@ def check_command(argv: list[str], cwd: Path, depth: int) -> Path:
         check_docker(args)
     elif head == "docker-compose":
         check_docker(["compose", *args])
+    elif head in {"terraform", "tofu"}:
+        check_terraform(args)
+    elif head in {"make", "gmake"}:
+        check_make(args)
+    elif head == "aws":
+        check_aws(args)
     return cwd
 
 
