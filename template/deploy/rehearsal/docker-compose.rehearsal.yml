@@ -1,0 +1,34 @@
+# Layers on docker-compose.aws.yml. `db` stands in for RDS: TLS required on every network connection,
+# and a `dbadmin` that can create roles and databases but isn't a superuser. Publishes no ports.
+services:
+  db:
+    image: getlago/postgres-partman:15.0-alpine
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        command -v openssl >/dev/null || apk add --no-cache openssl >/dev/null
+        openssl req -new -x509 -days 2 -nodes -subj /CN=db -out /tmp/server.crt -keyout /tmp/server.key 2>/dev/null
+        printf 'local all all trust\nhostssl all all all scram-sha-256\n' > /tmp/pg_hba.conf
+        chown postgres /tmp/server.key /tmp/server.crt /tmp/pg_hba.conf; chmod 600 /tmp/server.key
+        exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/server.crt -c ssl_key_file=/tmp/server.key -c hba_file=/tmp/pg_hba.conf
+    environment: {POSTGRES_USER: postgres, POSTGRES_PASSWORD: rehearsal-superuser}
+    tmpfs: [/var/lib/postgresql/data]
+    # Over TCP: the socket also answers during the image's first-start temporary server.
+    healthcheck: {test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"], interval: 2s, retries: 60}
+  caddy:
+    environment:
+      CADDY_GLOBAL_OPTIONS: local_certs
+    ports: !reset []
+  zitadel-api:
+    depends_on: {db: {condition: service_healthy}}
+    # Long form: older Compose can't parse the short form's colons with --no-interpolate.
+    volumes: !override
+      - {type: bind, source: "${REHEARSAL_BOOTSTRAP:?run.sh sets this}", target: /zitadel/bootstrap}
+  zitadel-login:
+    volumes: !override
+      - {type: bind, source: "${REHEARSAL_BOOTSTRAP:?run.sh sets this}", target: /zitadel/bootstrap, read_only: true}
+  lago-migrate:
+    depends_on: {db: {condition: service_healthy}}
+  lago-api:
+    ports: !reset []

@@ -96,6 +96,21 @@ class LagoClient:
             return
         self._check(response)
 
+    def create_mock_payment_subscription(self, external_customer_id: str, plan_code: str, external_id: str) -> None:
+        """Mock payment only: no activation rule, so Lago (v1.55.0 Subscriptions::ActivateService) makes it
+        active at once and sends a signed `subscription.started`. A repeat with the same id changes nothing."""
+        body = {"subscription": {
+            "external_customer_id": external_customer_id,
+            "plan_code": plan_code,
+            "external_id": external_id,
+        }}
+        self._check(self._call("POST", "/api/v1/subscriptions", body))
+
+    def customer_has_payment_provider(self, external_customer_id: str) -> bool:
+        response = self._call("GET", f"/api/v1/customers/{external_customer_id}")
+        self._check(response)
+        return bool(response.json()["customer"].get("billing_configuration", {}).get("payment_provider"))
+
     def has_default_payment_method(self, external_customer_id: str) -> bool:
         response = self._call("GET", f"/api/v1/customers/{external_customer_id}/payment_methods",
                               params={"per_page": 100})

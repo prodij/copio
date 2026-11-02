@@ -1,0 +1,43 @@
+name: deploy-frontend
+on:
+  push:
+    branches: [main]
+    paths: ["frontend/**", ".github/workflows/deploy-frontend.yml"]
+  workflow_dispatch:
+permissions: {contents: read, id-token: write}
+concurrency: {group: deploy-frontend}
+jobs:
+  deploy:
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults: {run: {shell: bash, working-directory: frontend}}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: {node-version: "22.23.1", cache: npm, cache-dependency-path: frontend/package-lock.json}
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Read the public build values
+        run: |
+          slug="$(basename "$AWS_ROLE" -deploy)"
+          aws ssm get-parameter --name "/$slug/frontend" --query Parameter.Value --output text \
+            | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$GITHUB_ENV"
+          config="$(aws ssm get-parameter --name "/$slug/config" --query Parameter.Value --output text)"
+          bucket="$(echo "$config" | jq -er .FRONTEND_BUCKET)"
+          distribution="$(echo "$config" | jq -er .DISTRIBUTION_ID)"
+          echo "BUCKET=$bucket" >> "$GITHUB_ENV"
+          echo "DISTRIBUTION=$distribution" >> "$GITHUB_ENV"
+        env:
+          AWS_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - name: Upload. Hashed assets first, index.html after everything it references
+        run: |
+          aws s3 sync dist/assets "s3://$BUCKET/assets" --cache-control "public,max-age=31536000,immutable"
+          aws s3 sync dist "s3://$BUCKET" --exclude "assets/*" --exclude index.html --cache-control "no-cache"
+          aws s3 cp dist/index.html "s3://$BUCKET/index.html" --cache-control "no-cache"
+          aws s3 sync dist "s3://$BUCKET" --delete --exclude index.html
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" --paths "/index.html"

@@ -2,31 +2,54 @@ _subdirectory: template
 _templates_suffix: .jinja
 _answers_file: .copier-answers.yml
 
-# Runs on copy only (an update must not overwrite a logo the product has since edited, nor fail
-# because the source file moved). logo_path is read from where the user's file is, so a relative
-# path would resolve against the new product folder: pass an absolute path (or ~/...).
-# Tasks need `copier copy --trust`.
+# Files the product generates, or its own logo. An update never touches these, since a template change
+# could only conflict; `make regen` rebuilds the generated ones from the product's own sources.
+_skip_if_exists:
+  - brand/logo.svg
+  - frontend/public/logo.svg
+  - frontend/public/favicon.svg
+  - frontend/src/brand.css
+  - frontend/src/api/schema.d.ts
+  - backend/openapi.json
+
+# Both tasks run on the first copy only. An update must not overwrite a logo the product has since edited, nor
+# fail because the source file moved. logo_path is read from where the user's file is, so a relative path would
+# resolve against the new product folder: pass an absolute path (or ~/...). Tasks need `copier copy --trust`.
 _tasks:
+  # With a logo_path only. It runs under the python3 on PATH, which may be as old as 3.9.
   - command:
       - python3
       - -c
       - |
         import os, shutil, sys
+        sys.path.insert(0, "scripts")
+        from svg_check import svg_problem
         src = os.path.expanduser(sys.argv[1])
-        if src:
-            if not os.path.isfile(src) or b"<svg" not in open(src, "rb").read():
-                sys.exit(f"logo_path {src!r} is not an SVG file (use an absolute path)")
-            shutil.copyfile(src, "brand/logo.svg")
-      - "{% if _copier_operation == 'copy' %}{{ logo_path }}{% endif %}"
+        if not os.path.isfile(src) or not src.lower().endswith(".svg"):
+            sys.exit(f"logo_path {src!r} is not an .svg file (use an absolute path)")
+        problem = svg_problem(open(src, errors="replace").read())
+        if problem:
+            sys.exit(f"logo_path {src!r} {problem}")
+        shutil.copyfile(src, "brand/logo.svg")
+      - "{{ logo_path }}"
+    when: "{{ _copier_operation == 'copy' and logo_path }}"
+  # So the app has the product's colours, logo and title from the first commit, and `make check` passes.
+  - command:
+      - sh
+      - -c
+      - cd scripts && uv run --no-dev --quiet python brand.py --css-only >/dev/null || echo "could not write the brand files; run make regen"
+    when: "{{ _copier_operation == 'copy' }}"
 
 product_name:
   type: str
   help: Human name of the product
+  validator: >-
+    {% if not product_name.strip() or (product_name | regex_search('["\\\\$<>{}`\n\r\t]')) %}cannot be empty or contain a double quote, backslash, dollar sign, angle bracket, curly brace, backtick or line break{% endif %}
 product_slug:
   type: str
-  help: Lowercase slug, used for databases, buckets and Zitadel project
-  default: "{{ product_name | lower | replace(' ', '-') }}"
-  validator: "{% if not (product_slug | regex_search('^[a-z][a-z0-9-]{1,30}$')) %}lowercase letters, digits and dashes{% endif %}"
+  help: Lowercase slug, used for the Compose project and the Zitadel project. Starts with a letter
+  default: "{{ product_name | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '') }}"
+  validator: "{% if not (product_slug | regex_search('^(?!.*--)[a-z][a-z0-9-]{0,29}[a-z0-9]$')) %}2 to 31 lowercase letters, digits and single dashes, starting with a letter and not ending in a dash{% endif %}"
 domain:
   type: str
   help: Local domain of the stack (milestone 1 runs only on your machine)
@@ -42,7 +65,10 @@ brand_accent:
   validator: "{% if not (brand_accent | regex_search('^#[0-9a-fA-F]{6}$')) %}hex colour like #ff7a33{% endif %}"
 brand_font:
   type: str
+  help: Font name. It loads only if installed, or with font_file in brand/brand.yaml; otherwise the app uses Inter
   default: Inter
+  validator: >-
+    {% if not brand_font.strip() or (brand_font | regex_search('["\\\\;{}<>\n\r]')) %}cannot be empty or contain a double quote, backslash, semicolon, angle bracket, curly brace or line break{% endif %}
 starter_plan_price_usd:
   type: int
   default: 29
@@ -54,3 +80,8 @@ logo_path:
   type: str
   help: Optional absolute path to an SVG logo (copied to brand/logo.svg); leave empty to use the template's brand/logo.svg
   default: ""
+  # Used once on copy. Not kept in .copier-answers.yml (a local path with a username), and not asked on update:
+  # an update always overwrites, a first copy doesn't. A question's `when` can't see `_copier_operation`, which
+  # Copier gives only to tasks. `-d logo_path=...` still works either way.
+  secret: true
+  when: "{{ not _copier_conf.overwrite }}"

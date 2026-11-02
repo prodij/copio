@@ -70,6 +70,25 @@ def test_ci_without_a_key_fails_when_stripe_e2e_is_required(path: pathlib.Path, 
     assert code == 1 and "::error::" in out and summary == ""
 
 
+def _env_written_by_ci(path: pathlib.Path, tmp_path: pathlib.Path, key: str) -> str:
+    """Runs the part of the step that writes .env, in a temp dir with a do-nothing `make`."""
+    written = "umask" + _stripe_step(path)["run"].split("umask", 1)[1]
+    (tmp_path / "make").write_text("#!/bin/sh\nexit 0\n")
+    (tmp_path / "make").chmod(0o755)
+    env = {"STRIPE_SECRET_KEY": key, "PATH": f"{tmp_path}:/usr/bin:/bin"}
+    subprocess.run(["/bin/sh", "-e", "-c", written], cwd=tmp_path, env=env, check=True)
+    return (tmp_path / ".env").read_text()
+
+
+@pytest.mark.parametrize("path", E2E_WORKFLOWS)
+def test_ci_turns_on_mock_payment_only_with_no_key_and_says_it_is_not_stripe(path: pathlib.Path,
+                                                                             tmp_path: pathlib.Path) -> None:
+    assert _env_written_by_ci(path, tmp_path, "") == "STRIPE_SECRET_KEY=\nBILLING_MODE=mock\nAPP_ENV=local\n"
+    assert _env_written_by_ci(path, tmp_path, "sk_test_x") == "STRIPE_SECRET_KEY=sk_test_x\n"
+    _, out, summary = _run_stripe_guard(path, tmp_path, "", "")
+    assert "mock payment" in out and "not a Stripe pass" in summary
+
+
 @pytest.mark.parametrize("path", E2E_WORKFLOWS)
 def test_ci_reads_the_switch_from_a_repo_variable(path: pathlib.Path) -> None:
     assert _stripe_step(path)["env"] == {"STRIPE_SECRET_KEY": "${{ secrets.STRIPE_SECRET_KEY }}",
@@ -85,3 +104,43 @@ def test_product_gets_agent_rules_and_the_guard(product_dir: pathlib.Path) -> No
     assert hook["hooks"][0]["command"].endswith('.claude/hooks/guard.py"')
     assert (product_dir / ".claude" / "hooks" / "test_guard.py").exists()
     assert "acme-reports.localhost" in (product_dir / "e2e" / "playwright.config.ts").read_text()
+
+
+DEPLOYS = {"deploy-frontend.yml": "frontend/**", "deploy-backend.yml": "backend/**", "deploy-jobs.yml": "jobs/**"}
+
+
+def test_each_folder_deploys_alone_from_main_only() -> None:
+    for name, path in DEPLOYS.items():
+        workflow = yaml.safe_load((ROOT / "template/.github/workflows" / name).read_text())
+        on = workflow[True]  # YAML reads `on` as True
+        assert on["push"]["branches"] == ["main"]
+        assert path in on["push"]["paths"]
+        for other in set(DEPLOYS.values()) - {path}:
+            assert other not in on["push"]["paths"]
+        assert workflow["permissions"]["id-token"] == "write"
+        job = next(iter(workflow["jobs"].values()))
+        assert job["if"] == "vars.AWS_DEPLOY_ROLE_ARN != ''"
+
+
+def test_deploys_use_no_stored_aws_keys() -> None:
+    for name in DEPLOYS:
+        text = (ROOT / "template/.github/workflows" / name).read_text()
+        assert "AWS_SECRET_ACCESS_KEY" not in text and "secrets." not in text
+
+
+def test_server_deploys_poll_instead_of_using_the_ssm_waiter() -> None:
+    # The waiter gives up after about 100 seconds, and deploy.sh can wait 600 for its lock.
+    for name in ("deploy-backend.yml", "deploy-jobs.yml"):
+        text = (ROOT / "template/.github/workflows" / name).read_text()
+        assert "command-executed" not in text
+        assert "get-command-invocation" in text and "timeout-minutes: 30" in text
+
+
+def test_deploys_fail_on_piped_errors_and_do_not_share_a_concurrency_group() -> None:
+    groups = []
+    for name in DEPLOYS:
+        workflow = yaml.safe_load((ROOT / "template/.github/workflows" / name).read_text())
+        job = next(iter(workflow["jobs"].values()))
+        assert job["defaults"]["run"]["shell"] == "bash"  # -eo pipefail
+        groups.append(workflow["concurrency"]["group"])
+    assert len(set(groups)) == len(groups)

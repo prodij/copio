@@ -1,0 +1,72 @@
+#!/bin/bash
+set -euo pipefail
+dnf install -y docker jq amazon-cloudwatch-agent
+mkdir -p /usr/libexec/docker/cli-plugins
+curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-compose \
+  https://github.com/docker/compose/releases/download/v5.6.1/docker-compose-linux-x86_64
+chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+curl -fsSL https://astral.sh/uv/0.10.2/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'JSON'
+{"log-driver": "json-file", "log-opts": {"max-size": "20m", "max-file": "5"}}
+JSON
+systemctl enable --now docker
+
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'
+{"metrics": {"append_dimensions": {"InstanceId": "$${aws:InstanceId}"},
+  "metrics_collected": {"disk": {"resources": ["/"], "measurement": ["used_percent"]},
+                        "mem": {"measurement": ["used_percent"]}}}}
+JSON
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+
+cat > /etc/app.env <<ENV
+SLUG=${slug}
+AWS_REGION=${region}
+DEPLOY_BUCKET=${bucket}
+ENV
+
+cat > /usr/local/bin/app-start <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+source /etc/app.env
+mkdir -p /opt/app
+# The deploy lock, kept through the exec below. Without it, a retry could rewrite .env from the older SSM
+# tag during a deploy, and the deploy would report success on the old image. first-run.sh runs after this exits.
+exec 9>/opt/app/.deploy.lock
+flock -w 600 9 || { echo "app-start: a deploy has held the lock for 10 minutes; giving up on this try" >&2; exit 1; }
+aws s3 sync --delete --exclude ".env" --exclude ".bootstrap/*" --exclude ".deploy.lock" --exclude "scripts/.venv/*" "s3://$DEPLOY_BUCKET/current/" /opt/app/ --region "$AWS_REGION"
+if [ ! -f /opt/app/deploy/start.sh ]; then
+  echo "app-start: no deploy files yet: run make infra-release" >&2
+  exit 45
+fi
+chmod +x /opt/app/deploy/*.sh
+exec /opt/app/deploy/start.sh
+SCRIPT
+chmod +x /usr/local/bin/app-start
+
+cat > /etc/systemd/system/app.service <<'UNIT'
+[Unit]
+Description=Product stack
+After=docker.service network-online.target
+Wants=network-online.target
+# Never stop retrying: after a long registry outage the server should come back without anyone logging in.
+StartLimitIntervalSec=0
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/app-start
+# oneshot allows on-failure (not always or on-success). Exit 45 means not released yet: nothing to retry.
+Restart=on-failure
+RestartSec=60
+SuccessExitStatus=45
+# 10 minutes' wait for the lock plus a slow start. A hung pull is killed, which frees the lock, and then retried.
+TimeoutStartSec=1800
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable app.service
+# Before the first release there's no bundle yet, and app-start says so. --no-block: systemctl reports
+# failure at the first failed try, while the unit keeps retrying, and that must not fail this script.
+systemctl start --no-block app.service

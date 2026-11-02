@@ -2,7 +2,7 @@
 name: scripts
 on:
   pull_request:
-    paths: ["scripts/**", ".env.example", ".claude/**", ".github/workflows/scripts.yml"]
+    paths: ["scripts/**", "deploy/**", ".env.example", ".claude/**", ".github/workflows/scripts.yml"]
 permissions: {contents: read}
 jobs:
   check:

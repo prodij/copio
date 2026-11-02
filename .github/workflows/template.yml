@@ -1,7 +1,8 @@
 # Template self-test (spec §10): fast tests, then a generated product's `make check`, then (nightly
 # or on demand) the generated product's e2e against the real stack and, when the STRIPE_SECRET_KEY
-# secret is set, Stripe test mode (without it the payment test is reported as skipped, unless the repo
-# variable STRIPE_E2E_REQUIRED is "true", which fails the run).
+# secret is set, Stripe test mode (without it the payment test is reported as skipped and the mock payment
+# test runs, which is not a Stripe pass, unless the repo variable STRIPE_E2E_REQUIRED is "true", which
+# fails the run).
 name: template
 on:
   pull_request:
@@ -38,6 +39,8 @@ jobs:
         with: {version: "0.10.2"}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: {node-version: "22.23.1"}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with: {terraform_version: "1.17.1", terraform_wrapper: false}
       - run: uv sync --locked
       - run: uv run pytest -q -m slow
 
@@ -67,10 +70,12 @@ jobs:
             if [ "$STRIPE_E2E_REQUIRED" = "true" ]; then
               echo "::error::No STRIPE_SECRET_KEY secret, and the repo variable STRIPE_E2E_REQUIRED is true"; exit 1
             fi
-            echo "::notice::No STRIPE_SECRET_KEY secret: the e2e payment test will be skipped"
-            echo "No STRIPE_SECRET_KEY secret: the e2e payment test was skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::No STRIPE_SECRET_KEY secret: the Stripe e2e payment test will be skipped; the mock payment test runs instead"
+            echo "No STRIPE_SECRET_KEY secret: the Stripe e2e payment test is skipped and the mock payment test runs in place of it. A mock payment pass is not a Stripe pass." >> "$GITHUB_STEP_SUMMARY"
           fi
           umask 077 && printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY" > .env
+          # Explicit, and only with no key (the backend refuses both): prove the webhook path with mock payment.
+          if [ -z "$STRIPE_SECRET_KEY" ]; then printf 'BILLING_MODE=mock\nAPP_ENV=local\n' >> .env; fi
           make env
       - run: make up
       - run: make bootstrap

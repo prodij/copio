@@ -3,7 +3,7 @@
 Generated from prodij/copio. Layout: `frontend/` `backend/` `jobs/` `infra/` `brand/` (plus `scripts/` for env, bootstrap and brand, `e2e/` for the Playwright test).
 
 ## Loop
-1. Branch `feat/<topic>`. 2. Change + tests. 3. `make check` (needs Postgres: `make up`, or `TEST_DATABASE_URL`). 4. For UI or billing changes, `make up && make e2e` (after `make bootstrap`; the payment test needs a Stripe test key in `.env` and is skipped without one).
+1. Branch `feat/<topic>`. 2. Change + tests. 3. `make check` (needs Postgres: `make up`, or `TEST_DATABASE_URL`). 4. For UI or billing changes, `make up && make e2e` (after `make bootstrap`; the payment test needs a Stripe test key in `.env` and is skipped without one; with `BILLING_MODE=mock` the mock payment test runs instead, and a mock payment pass is not a Stripe pass).
 5. Commit, push your branch, open a PR. Never push to `main`.
 
 ## Rules
@@ -12,6 +12,12 @@ Generated from prodij/copio. Layout: `frontend/` `backend/` `jobs/` `infra/` `br
 - Every product table has `workspace_id`; jobs use `ScopedDb`. `backend/tests/test_isolation.py` fails if a route skips authentication or reaches another workspace.
 - Missing data shows "Unavailable", never 0.
 - Stripe is optional: with an empty `STRIPE_SECRET_KEY` the app runs, checkout answers 501, and `require_feature` still denies (402). Never add a bypass for it.
+- Mock payment is server config only (`BILLING_MODE=mock`, needs `APP_ENV=local` and no Stripe key; the backend and bootstrap refuse anything else). Never let a request reach it, and never let it grant access: the state changes only through Lago's webhook or `billing_reconcile`. Label it "mock payment" wherever it shows.
 - Never read `.env` or `.bootstrap/`; never use live Stripe keys. The guard hook (`.claude/hooks/guard.py`, tested by `make check`) blocks these, pushes to `main`, force pushes and `rm -rf` outside the repo.
 - The guard reads commands, not intent: a Bash command that merely *mentions* `.env` or `.bootstrap` (an `echo`, a `sed` on the compose file, a glob like `.en*`, `grep -r` over the repo, `docker compose config`) is blocked too. Search with `git grep`/`rg` or the Grep tool, and change files that mention them with the Edit/Write tools, which check only the path.
+- Never hand-edit generated files: `frontend/src/brand.css`, `frontend/public/logo.svg` and `favicon.svg` come from `brand/` (`make brand`); `backend/openapi.json` and `frontend/src/api/schema.d.ts` from the routes (`make regen`). After `copier update`, resolve conflicts, then `make regen` and `make check`.
 - Business logic comes from intent notes in ~/brain; write it fresh, never port code.
+
+## AWS
+
+`infra/` and `deploy/` run this product on AWS (`infra/README.md`). Agents may run `make infra-plan` and `make infra-doctor`; a person runs every other `make infra-*` command. The guard is a seatbelt for honest mistakes, not a full filter: it doesn't catch `python infra.py destroy`, `aws ssm get-parameter --with-decryption` or anything a script runs. Migrations must stay compatible with the previous version, because a rollback doesn't undo them.

@@ -22,9 +22,9 @@ it("sends the bearer token and returns typed data", async () => {
 
 it("turns an error response into an ApiError with status and detail", async () => {
   mockFetch({ "GET /me/access": { status: 503, body: { detail: "lago is unavailable" } } });
-  await expect(new QueryClient().fetchQuery(accessQuery)).rejects.toMatchObject({
+  await expect(new QueryClient().fetchQuery({ ...accessQuery, retry: false })).rejects.toMatchObject({
     status: 503,
     detail: "lago is unavailable",
   });
-  await expect(new QueryClient().fetchQuery(accessQuery)).rejects.toBeInstanceOf(ApiError);
+  await expect(new QueryClient().fetchQuery({ ...accessQuery, retry: false })).rejects.toBeInstanceOf(ApiError);
 });

@@ -1,0 +1,199 @@
+# The product on AWS. deploy/start.sh renders .env from Secrets Manager and SSM.
+# Local development uses docker-compose.yml.
+name: {{ product_slug }}
+
+x-restart: &restart
+  restart: unless-stopped
+
+x-lago-env: &lago-env
+  DATABASE_URL: postgresql://lago:${LAGO_DB_PASSWORD}@${DB_HOST}:5432/lago?sslmode=require
+  REDIS_URL: redis://redis:6379
+  LAGO_REDIS_CACHE_URL: redis://redis:6379
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+  LAGO_RSA_PRIVATE_KEY: ${LAGO_RSA_PRIVATE_KEY}
+  LAGO_ENCRYPTION_PRIMARY_KEY: ${LAGO_ENCRYPTION_PRIMARY_KEY}
+  LAGO_ENCRYPTION_DETERMINISTIC_KEY: ${LAGO_ENCRYPTION_DETERMINISTIC_KEY}
+  LAGO_ENCRYPTION_KEY_DERIVATION_SALT: ${LAGO_ENCRYPTION_KEY_DERIVATION_SALT}
+  LAGO_API_URL: https://lago-api.${DOMAIN}
+  LAGO_FRONT_URL: https://lago.${DOMAIN}
+  LAGO_PDF_URL: http://lago-pdf:3000
+  # No LAGO_DISABLE_SSL: in v1.55.0 Rails assumes https unless it is set, so plain http on the
+  # Compose network isn't redirected and generated URLs stay https.
+  LAGO_WEBHOOK_ALLOW_PRIVATE_URLS: "true"  # Lago calls the backend over the Compose network
+  LAGO_DISABLE_SEGMENT: "true"
+  LAGO_DISABLE_SIGNUP: "true"
+  LAGO_CREATE_ORG: "true"
+  LAGO_ORG_NAME: {{ product_name | tojson }}
+  LAGO_ORG_USER_EMAIL: admin@${DOMAIN}
+  LAGO_ORG_USER_PASSWORD: ${LAGO_ORG_USER_PASSWORD}
+  LAGO_ORG_API_KEY: ${LAGO_API_KEY}
+  # Files go to S3 using the server's role: the LAGO_AWS_S3_*_KEY variables stay unset.
+  LAGO_USE_AWS_S3: "true"
+  LAGO_AWS_S3_REGION: ${AWS_REGION}
+  LAGO_AWS_S3_BUCKET: ${DATA_BUCKET}
+  RAILS_ENV: production
+  RAILS_LOG_TO_STDOUT: "true"
+
+x-zitadel-env: &zitadel-env
+  ZITADEL_MASTERKEY: ${ZITADEL_MASTERKEY}
+  ZITADEL_PORT: 8080
+  ZITADEL_EXTERNALDOMAIN: auth.${DOMAIN}
+  ZITADEL_EXTERNALPORT: 443
+  ZITADEL_EXTERNALSECURE: "true"
+  ZITADEL_TLS_ENABLED: "false"  # Caddy ends TLS; also read by the `zitadel ready` healthcheck
+  ZITADEL_DATABASE_POSTGRES_HOST: ${DB_HOST}
+  ZITADEL_DATABASE_POSTGRES_PORT: 5432
+  ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+  ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
+  ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: ${ZITADEL_DB_PASSWORD}
+  ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: require
+
+services:
+  caddy:
+    <<: *restart
+    image: caddy:2.11-alpine
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+      ADMIN_CIDRS: ${ADMIN_CIDRS:-192.0.2.1/32}  # TEST-NET: matches nobody
+      CADDY_GLOBAL_OPTIONS: ${CADDY_GLOBAL_OPTIONS:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    ports: ["80:80", "443:443"]
+
+  redis:
+    <<: *restart
+    image: redis:7-alpine
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 3s, retries: 30}
+
+  # First deploy only. Creates Zitadel's role, database and schema with the RDS admin login.
+  zitadel-init:
+    image: ghcr.io/zitadel/zitadel:v4.20.0
+    profiles: [setup]
+    command: init
+    environment:
+      <<: *zitadel-env
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: ${DB_ADMIN_USER:-dbadmin}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${DB_ADMIN_PASSWORD:-}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_EXISTINGDATABASE: postgres
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: require
+
+  zitadel-api:
+    <<: *restart
+    image: ghcr.io/zitadel/zitadel:v4.20.0
+    user: "1000:1000"  # start.sh gives .bootstrap to this user
+    command: start-from-setup --masterkeyFromEnv --tlsMode external
+    environment:
+      <<: *zitadel-env
+      ZITADEL_FIRSTINSTANCE_ORG_NAME: {{ product_name | tojson }}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin@${DOMAIN}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASSWORD}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
+      ZITADEL_FIRSTINSTANCE_PATPATH: /zitadel/bootstrap/admin.pat
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: bootstrap-admin
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: Bootstrap admin
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2099-01-01T00:00:00Z"
+      ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /zitadel/bootstrap/login-client.pat
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME: login-client
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME: Login client
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE: "2099-01-01T00:00:00Z"
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "true"
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI: https://auth.${DOMAIN}/ui/v2/login/
+      ZITADEL_OIDC_DEFAULTLOGINURLV2: https://auth.${DOMAIN}/ui/v2/login/login?authRequest=
+      ZITADEL_OIDC_DEFAULTLOGOUTURLV2: https://auth.${DOMAIN}/ui/v2/login/logout?post_logout_redirect=
+      ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_SMTP_HOST: ${SMTP_HOST}
+      ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_SMTP_USER: ${SES_SMTP_USER}
+      ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_SMTP_PASSWORD: ${SES_SMTP_PASSWORD}
+      ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_TLS: "true"
+      ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_FROM: no-reply@${DOMAIN}
+      ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_FROMNAME: {{ product_name | tojson }}
+    volumes: [./.bootstrap/zitadel:/zitadel/bootstrap]
+    healthcheck: {test: ["CMD", "/app/zitadel", "ready"], interval: 5s, retries: 60, start_period: 10s}
+
+  zitadel-login:
+    <<: *restart
+    image: ghcr.io/zitadel/zitadel-login:v4.20.0
+    environment:
+      ZITADEL_API_URL: https://auth.${DOMAIN}
+      ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel/bootstrap/login-client.pat
+      ZITADEL_SESSION_COOKIE_SECRET: ${LOGIN_SESSION_COOKIE_SECRET}
+      CUSTOM_REQUEST_HEADERS: x-zitadel-public-host:auth.${DOMAIN}
+      EMAIL_VERIFICATION: "true"
+    volumes: [./.bootstrap/zitadel:/zitadel/bootstrap:ro]
+    depends_on: {zitadel-api: {condition: service_healthy}}
+
+  lago-migrate:
+    image: getlago/api:v1.55.0
+    # Without structure.sql, Rails runs the migrations on an empty database instead of loading it. The file
+    # drops and recreates pg_partman, which only a superuser can do, and leaves partman.part_config empty.
+    command: ["sh", "-c", "rm -f db/structure.sql && exec ./scripts/migrate.sh"]
+    environment: *lago-env
+    depends_on: {redis: {condition: service_healthy}}
+
+  lago-api:
+    <<: *restart
+    image: getlago/api:v1.55.0
+    command: ["./scripts/start.api.sh"]
+    environment: *lago-env
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: {lago-migrate: {condition: service_completed_successfully}}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:3000/health || exit 1"]
+      interval: 5s
+      retries: 60
+
+  lago-worker:
+    <<: *restart
+    image: getlago/api:v1.55.0
+    command: ["./scripts/start.worker.sh"]
+    environment: *lago-env
+    depends_on: {lago-migrate: {condition: service_completed_successfully}}
+
+  lago-clock:
+    <<: *restart
+    image: getlago/api:v1.55.0
+    command: ["./scripts/start.clock.sh"]
+    environment: *lago-env
+    depends_on: {lago-migrate: {condition: service_completed_successfully}}
+
+  lago-front:
+    <<: *restart
+    image: getlago/front:v1.55.0
+    environment:
+      API_URL: https://lago-api.${DOMAIN}
+      APP_ENV: production
+      LAGO_DISABLE_SIGNUP: "true"
+
+  lago-pdf:
+    <<: *restart
+    image: getlago/lago-gotenberg:7.8.2
+
+  backend:
+    <<: *restart
+    image: ${ECR_REGISTRY}/{{ product_slug }}-backend:${BACKEND_TAG}
+    env_file: [{path: .bootstrap/ids.env, required: false}]
+    environment:
+      DATABASE_URL: postgresql+psycopg://app:${APP_DB_PASSWORD}@${DB_HOST}:5432/app?sslmode=require
+      FRONTEND_URL: https://app.${DOMAIN}
+      ZITADEL_ISSUER: https://auth.${DOMAIN}
+      ZITADEL_API_URL: https://auth.${DOMAIN}
+      ZITADEL_SERVICE_TOKEN_FILE: /run/bootstrap/backend.pat
+      LAGO_API_URL: http://lago-api:3000
+      LAGO_API_KEY: ${LAGO_API_KEY}
+      LAGO_WEBHOOK_ISSUER: https://lago-api.${DOMAIN}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+    volumes: [./.bootstrap/backend:/run/bootstrap:ro]
+    ports: ["127.0.0.1:8000:8000"]
+
+  jobs:
+    <<: *restart
+    image: ${ECR_REGISTRY}/{{ product_slug }}-jobs:${JOBS_TAG}
+    environment:
+      DATABASE_URL: postgresql+psycopg://app:${APP_DB_PASSWORD}@${DB_HOST}:5432/app?sslmode=require
+      LAGO_API_URL: http://lago-api:3000
+      LAGO_API_KEY: ${LAGO_API_KEY}
+      AWS_DEFAULT_REGION: ${AWS_REGION}
+      RAW_BUCKET: ${DATA_BUCKET}
+
+volumes: {caddy-data: {}}

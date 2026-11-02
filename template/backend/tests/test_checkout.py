@@ -243,6 +243,88 @@ def test_checkout_works_once_the_key_is_added(client: TestClient, owner_headers:
     assert r.json() == {"checkout_url": "https://checkout.stripe.test/s"}
 
 
+@pytest.fixture
+def mock_payment(client: TestClient, settings: Settings) -> None:
+    mock = settings.model_copy(update={"stripe_secret_key": "", "billing_mode": "mock", "app_env": "local"})
+    cast(FastAPI, client.app).dependency_overrides[get_settings] = lambda: mock
+
+
+@respx.mock
+def test_mock_payment_creates_a_subscription_with_no_payment_rule_and_grants_nothing(
+    client: TestClient, owner_headers: dict[str, str], owner_workspace: str, mock_payment: None, db_session: Session,
+) -> None:
+    lago = fake_lago_billing(respx.mock, card=False, provider=False)
+    r = client.post("/billing/checkout", json=STARTER, headers=owner_headers)
+    assert (r.status_code, r.json()) == (200, {"checkout_url": None})
+    body = json.loads(lago["sub"].calls.last.request.content)["subscription"]
+    external_id = body.pop("external_id")
+    assert body == {"external_customer_id": owner_workspace, "plan_code": "starter"}
+    sub = subscription(db_session)
+    assert (sub.state, sub.lago_subscription_id) == ("pending", external_id)
+    # No Stripe anywhere: no provider attached, no card looked up, no setup URL.
+    assert not any(lago[name].called for name in ("upsert", "methods", "url"))
+    # Back in the browser, access is still off.
+    assert client.get("/demo/premium-report", headers=owner_headers).status_code == 402
+    access = client.get("/me/access", headers=owner_headers).json()
+    assert (access["mock_payment"], access["state"], access["features"]) == (True, "pending", {})
+
+
+@respx.mock
+def test_mock_payment_creates_the_subscription_once(client: TestClient, owner_headers: dict[str, str],
+                                                    mock_payment: None) -> None:
+    lago = fake_lago_billing(respx.mock, card=False, provider=False)
+    for _ in range(2):
+        assert client.post("/billing/checkout", json=STARTER, headers=owner_headers).json() == {"checkout_url": None}
+    assert lago["sub"].call_count == 1
+
+
+@respx.mock
+def test_mock_payment_is_refused_for_a_customer_with_a_payment_provider(
+    client: TestClient, owner_headers: dict[str, str], mock_payment: None, db_session: Session,
+) -> None:
+    lago = fake_lago_billing(respx.mock, card=False, provider=True)
+    r = client.post("/billing/checkout", json=STARTER, headers=owner_headers)
+    assert r.status_code == 409 and "Mock payment is refused" in r.json()["detail"]
+    assert lago["sub"].call_count == 0 and db_session.scalars(select(Subscription)).first() is None
+
+
+@respx.mock
+def test_mock_payment_keeps_the_owner_check_and_the_plan_check(
+    client: TestClient, owner_workspace: str, auth: AuthHeaders, owner_headers: dict[str, str], mock_payment: None,
+) -> None:
+    member = auth("user-2", {owner_workspace: "member"})
+    assert client.post("/billing/checkout", json=STARTER, headers=member).status_code == 403
+    r = client.post("/billing/checkout", json={"plan_code": "nope"}, headers=owner_headers)
+    assert r.status_code == 422
+
+
+@respx.mock
+@pytest.mark.parametrize("request_args", [
+    {"params": {"billing_mode": "mock", "mock": "true", "mock_payment": "1"}},
+    {"headers": {"X-Billing-Mode": "mock", "Billing-Mode": "mock", "X-Mock-Payment": "1"}},
+    {"body": {"billing_mode": "mock", "mock_payment": True}},
+])
+def test_no_request_can_turn_on_mock_payment(client: TestClient, owner_headers: dict[str, str], db_session: Session,
+                                             no_stripe: None, request_args: dict[str, dict[str, object]]) -> None:
+    lago = fake_lago_billing(respx.mock, card=False)
+    r = client.post("/billing/checkout", json=STARTER | request_args.get("body", {}),
+                    params=request_args.get("params"),
+                    headers=owner_headers | request_args.get("headers", {}))
+    assert r.status_code == 501
+    assert lago["sub"].call_count == 0 and db_session.scalars(select(Subscription)).first() is None
+    assert client.get("/me/access", headers=owner_headers).json()["mock_payment"] is False
+
+
+@respx.mock
+def test_with_a_key_the_request_cannot_drop_the_payment_rule(client: TestClient, owner_headers: dict[str, str]) -> None:
+    lago = fake_lago_billing(respx.mock, card=True)
+    r = client.post("/billing/checkout", json=STARTER | {"billing_mode": "mock"}, params={"billing_mode": "mock"},
+                    headers=owner_headers | {"X-Billing-Mode": "mock"})
+    assert r.json() == {"checkout_url": None}
+    assert json.loads(lago["sub"].calls.last.request.content)["subscription"]["activation_rules"] == [
+        {"type": "payment", "timeout_hours": 48}]
+
+
 def test_without_stripe_a_member_is_still_403_and_a_bad_plan_still_422(
     client: TestClient, owner_workspace: str, auth: AuthHeaders, owner_headers: dict[str, str], no_stripe: None,
 ) -> None:
@@ -267,5 +349,5 @@ def test_checkout_needs_sign_in(client: TestClient) -> None:
 
 def test_list_plans(client: TestClient) -> None:
     plans = client.get("/billing/plans").json()
-    assert plans[0]["code"] == "starter"
-    assert set(plans[0]) == {"code", "name", "amount_cents", "currency", "interval", "features"}
+    starter = next(p for p in plans if p["code"] == "starter")
+    assert set(starter) == {"code", "name", "amount_cents", "currency", "interval", "features"}

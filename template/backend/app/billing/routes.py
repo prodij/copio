@@ -6,7 +6,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from app.billing.checkout import PlanChangeNotSupported, start_checkout
+from app.billing.checkout import (
+    MockPaymentRefused,
+    PlanChangeNotSupported,
+    start_checkout,
+    start_mock_payment_checkout,
+)
 from app.billing.plans import Plan, get_plans
 from app.billing.webhooks import (
     BadSignature,
@@ -26,6 +31,8 @@ router = APIRouter(prefix="/billing")
 
 BILLING_NOT_SET_UP = ("Billing isn't set up: this product has no Stripe key. "
                       "Add a Stripe test key to STRIPE_SECRET_KEY in .env and run `make bootstrap`.")
+MOCK_PAYMENT_REFUSED = ("Mock payment is refused: this workspace has a payment provider in Lago, which could call "
+                        "Stripe. `make reset` deletes all local data and starts clean.")
 
 
 class CheckoutIn(BaseModel):
@@ -68,13 +75,18 @@ def checkout(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown plan {body.plan_code!r}")
     # 501, not 503: nothing is down and retrying can't help until someone adds the key. Checked before
     # start_checkout, so no subscription row is written and a later checkout starts clean.
-    if not settings.stripe_configured:
+    if not settings.billing_configured:
         raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, BILLING_NOT_SET_UP)
     try:
+        if settings.mock_payment:
+            start_mock_payment_checkout(session, current.workspace, plan, lago)
+            return CheckoutOut(checkout_url=None)
         code = settings.lago_stripe_provider_code
         return CheckoutOut(checkout_url=start_checkout(session, current.workspace, plan, lago, code))
     except PlanChangeNotSupported as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, "plan change not supported yet") from exc
+    except MockPaymentRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, MOCK_PAYMENT_REFUSED) from exc
 
 
 def _reject(event_id: str | None, reason: str) -> HTTPException:

@@ -1,4 +1,5 @@
-"""`make bootstrap`: configure the local Zitadel, Lago and S3 storage once. Safe to re-run.
+"""`make bootstrap`: configure Zitadel, Lago and S3 storage once, locally or (DEPLOY_TARGET=aws) on the server.
+Safe to re-run.
 
 Every step looks before it creates, so a failed run is fixed by fixing the cause and running again.
 IDs go to .bootstrap/ids.env and the backend's token to .bootstrap/backend/backend.pat (both
@@ -42,13 +43,19 @@ def env(name: str) -> str:
     return value
 
 
+def on_aws() -> bool:
+    return os.environ.get("DEPLOY_TARGET") == "aws"
+
+
 def public_url(sub: str, port_var: str) -> str:
+    if on_aws():
+        return f"https://{sub}.{env('DOMAIN')}"
     host = f"{sub}.{product.DOMAIN}" if sub else product.DOMAIN
     return f"http://{host}:{env(port_var)}"
 
 
 def app_url() -> str:
-    return public_url("", "APP_PORT")
+    return public_url("app", "APP_PORT") if on_aws() else public_url("", "APP_PORT")
 
 
 def zitadel_url() -> str:
@@ -60,11 +67,17 @@ def lago_api_url() -> str:
 
 
 def local(url: str) -> tuple[str, dict[str, str]]:
-    """Where the host reaches a public URL: 127.0.0.1 plus the Host header the service routes on.
+    """Where this process reaches a public URL.
 
-    Zitadel picks its instance by Host, and not every resolver maps *.localhost to 127.0.0.1.
+    Locally: 127.0.0.1 plus the Host header the service routes on (Zitadel picks its instance by Host,
+    and not every resolver maps *.localhost to 127.0.0.1). On AWS: Zitadel through its public URL, and
+    Lago on loopback, because Caddy keeps its public API closed.
     """
     parts = urlsplit(url)
+    if on_aws():
+        if parts.netloc.startswith("lago-api."):
+            return "http://127.0.0.1:3000", {"Host": parts.netloc, "X-Forwarded-Proto": "https"}
+        return url, {}
     return f"http://127.0.0.1:{parts.port}", {"Host": parts.netloc}
 
 
@@ -182,7 +195,7 @@ def web_app_config(app: str) -> dict[str, Any]:
         "accessTokenType": "OIDC_TOKEN_TYPE_JWT",
         "accessTokenRoleAssertion": True,
         "idTokenRoleAssertion": True,
-        "devMode": True,  # allows http:// redirect URIs
+        "devMode": not on_aws(),  # local redirect URIs are http://
     }
 
 
@@ -256,6 +269,15 @@ def ensure_self_registration(http: httpx.Client) -> None:
     check(http.put("/admin/v1/policies/login", json=body), "Zitadel login policy update")
 
 
+def ensure_login_page(http: httpx.Client) -> None:
+    """Zitadel stores the login page's URL at first start, so a moved ZITADEL_LOGIN_PORT needs this."""
+    base = f"{public_url('auth', 'ZITADEL_LOGIN_PORT')}/ui/v2/login/"
+    feature = check(http.get("/v2/features/instance"), "Zitadel feature read").get("loginV2", {})
+    if feature.get("baseUri") != base:
+        check(http.put("/v2/features/instance", json={"loginV2": {"required": True, "baseUri": base}}),
+              "Zitadel login page update")
+
+
 def bootstrap_zitadel() -> None:
     with zitadel_http() as http:
         org_id = str(check(http.get("/management/v1/orgs/me"), "Zitadel org read")["org"]["id"])
@@ -263,6 +285,7 @@ def bootstrap_zitadel() -> None:
         client_id = ensure_web_app(http, project_id, app_url())
         ensure_backend_machine_user(http)
         ensure_self_registration(http)
+        ensure_login_page(http)
     save_ids(ZITADEL_PROJECT_ID=project_id, ZITADEL_INSTANCE_ORG_ID=org_id, ZITADEL_CLIENT_ID=client_id)
     # The browser sees every ZITADEL_* variable the dev server has, so it gets only these two.
     write_ids(FRONTEND_ENV, {"ZITADEL_CLIENT_ID": client_id, "ZITADEL_PROJECT_ID": project_id})
@@ -325,8 +348,9 @@ def bootstrap_lago() -> None:
     print(f"Lago: organization {org_id}, webhook to the backend, metric {USAGE_METRIC}")
 
 
-STRIPE_PROVIDERS = "query{paymentProviders(type: stripe){collection{... on StripeProvider{id code}}}}"
+STRIPE_PROVIDERS = "query{paymentProviders(type: stripe){collection{... on StripeProvider{id code successRedirectUrl}}}}"
 ADD_STRIPE = "mutation($i: AddStripePaymentProviderInput!){addStripePaymentProvider(input:$i){id}}"
+UPDATE_STRIPE = "mutation($i: UpdateStripePaymentProviderInput!){updateStripePaymentProvider(input:$i){id}}"
 # Lago cannot register a Stripe webhook endpoint for a local URL, so it checks the signing secret
 # of `stripe listen` instead (the CLI's secret is fixed per Stripe account). Adding the provider
 # queues Lago's RegisterWebhookJob, which writes Stripe's own endpoint secret on success, so this
@@ -349,12 +373,21 @@ end
 """
 
 
-def stripe_secret_key() -> str:
-    """The test key, or "" when none is set yet: Stripe is optional, a wrong kind of key is not.
+STRIPE_REJECTED = ("Stripe rejected STRIPE_SECRET_KEY or could not be reached. Nothing was changed. "
+                   "Fix or empty it in .env and run `make bootstrap` again.")
+KEY_NOT_CHECKED = ("could not check STRIPE_SECRET_KEY with Stripe: Stripe may have rejected it or be unreachable, "
+                   "or Docker failed (details below). Nothing was changed. Fix the cause, or empty the key in .env, "
+                   "and run `make bootstrap` again.")
 
-    Make passes .env values as written, so `STRIPE_SECRET_KEY=""` arrives here with its quotes.
-    """
-    key = os.environ.get("STRIPE_SECRET_KEY", "").strip().strip("\"'").strip()
+
+def optional_env(name: str) -> str:
+    """Make passes .env values as written, so `STRIPE_SECRET_KEY=""` arrives here with its quotes."""
+    return os.environ.get(name, "").strip().strip("\"'").strip()
+
+
+def stripe_secret_key() -> str:
+    """The test key, or "" when none is set yet: Stripe is optional, a wrong kind of key is not."""
+    key = optional_env("STRIPE_SECRET_KEY")
     if key and not key.startswith("sk_test_"):
         raise SystemExit(
             "bootstrap: STRIPE_SECRET_KEY must be a Stripe TEST secret key (sk_test_...), or empty to run "
@@ -366,12 +399,58 @@ def stripe_secret_key() -> str:
 
 def stripe_webhook_secret() -> str:
     """The signing secret of `stripe listen`. Asking for it is what tests the key against Stripe."""
-    printed = compose("run", "--rm", "--no-deps", "--entrypoint", "stripe", "stripe-cli",
-                      "listen", "--print-secret", capture=True).splitlines()
+    try:
+        printed = compose("run", "--rm", "--no-deps", "--entrypoint", "stripe", "stripe-cli",
+                          "listen", "--print-secret", capture=True).splitlines()
+    except SystemExit as exc:
+        raise SystemExit(f"bootstrap: {KEY_NOT_CHECKED}\n  {exc}") from None
     secret = printed[-1].strip() if printed else ""
     if not secret.startswith("whsec_"):
-        raise SystemExit("bootstrap: `stripe listen --print-secret` printed no whsec_ secret")
+        raise SystemExit(f"bootstrap: {STRIPE_REJECTED}\n  `stripe listen --print-secret` printed no whsec_ secret")
     return secret
+
+
+def mock_payment() -> bool:
+    """BILLING_MODE=mock: the same refusals as the backend's, before anything changes."""
+    mode = optional_env("BILLING_MODE")
+    if not mode:
+        return False
+    if mode != "mock":
+        raise SystemExit(f"bootstrap: BILLING_MODE must be empty or mock, not {mode!r}. Nothing was changed.")
+    if optional_env("APP_ENV") != "local":
+        raise SystemExit("bootstrap: mock payment is refused: BILLING_MODE=mock needs APP_ENV=local. Nothing was changed.")
+    if stripe_secret_key():
+        raise SystemExit("bootstrap: mock payment is refused: STRIPE_SECRET_KEY is set. Empty it or empty BILLING_MODE "
+                         "in .env. Nothing was changed.")
+    return True
+
+
+def lago_has_subscriptions() -> bool:
+    """Any at all: Lago's list answers only active ones unless asked for each status."""
+    with lago_api() as api:
+        reply = api.get("/api/v1/subscriptions", params={
+            "status[]": ["pending", "active", "terminated", "canceled", "incomplete"], "per_page": 1})
+    return bool(check(reply, "Lago subscription list")["subscriptions"])
+
+
+def check_lago_matches_billing_mode(mock: bool) -> None:
+    """Stops a stack that changed billing mode, before services are recreated or a provider is added.
+
+    Real checkout needs the provider before it can make a subscription, so a subscription with no provider
+    can only have come from mock payment. A normal re-run and adding a first key both pass.
+    """
+    has_provider = bool(lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"])
+    if mock and has_provider:
+        raise SystemExit("bootstrap: mock payment is refused: Lago still has the Stripe provider from an earlier key "
+                         "and could call Stripe. `make reset` deletes all local data; then `make up && make bootstrap`.")
+    if not mock and not has_provider and lago_has_subscriptions():
+        raise SystemExit("bootstrap: Lago's subscriptions are left over from mock payment, and their premium access "
+                         "would look real. `make reset` deletes all local data; then `make up && make bootstrap`.")
+
+
+def print_mock_payment_on() -> None:
+    print("Mock payment: ON (BILLING_MODE=mock, APP_ENV=local). Nothing is charged and Stripe is not called. Real Lago "
+          "and its signed webhook still decide access.\n  A mock payment pass is not a Stripe pass.")
 
 
 def bootstrap_stripe(webhook_secret: str) -> None:
@@ -382,9 +461,16 @@ def bootstrap_stripe(webhook_secret: str) -> None:
               "https://dashboard.stripe.com/test/apikeys) into .env and run `make bootstrap` again.")
         return
     providers = lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"]
-    if not any(p.get("code") == "stripe" for p in providers):
+    provider = next((p for p in providers if p.get("code") == "stripe"), None)
+    return_url = f"{app_url()}/billing/return"
+    if provider is None:
         lago_graphql(ADD_STRIPE, {"i": {"name": "Stripe", "code": "stripe", "secretKey": key,
-                                        "successRedirectUrl": f"{app_url()}/billing/return"}})
+                                        "successRedirectUrl": return_url}})
+    elif provider.get("successRedirectUrl") != return_url:  # APP_PORT moved. Stays in Lago: Stripe isn't called.
+        lago_graphql(UPDATE_STRIPE, {"i": {"id": provider["id"], "successRedirectUrl": return_url}})
+    if on_aws():  # no stripe-cli here: LAGO_API_URL is public, so Lago's RegisterWebhookJob registers its own webhook
+        print("Stripe: Lago connected; Lago registers its own webhook with Stripe")
+        return
     compose("up", "-d", "--force-recreate", "stripe-cli")
     apply_stripe_webhook_secret(webhook_secret)  # last: after any RegisterWebhookJob could have run
     print("Stripe: Lago connected; `stripe listen` forwards test webhooks to Lago")
@@ -402,6 +488,8 @@ def apply_stripe_webhook_secret(secret: str) -> None:
 def ensure_bucket(name: str = "data") -> None:
     """Create the jobs' bucket in SeaweedFS unless `s3.bucket.list` shows it (`weed shell`, which
     talks to the master inside the container, prints its results on stderr)."""
+    if on_aws():
+        return  # Terraform creates the bucket
     shell = "weed shell -master=localhost:9333 2>&1"
     script = (f"echo s3.bucket.list | {shell} | grep -qE '^>? *{name}[[:space:]]' "
               f"|| echo 's3.bucket.create -name {name}' | {shell} | grep -q 'created bucket {name}'")
@@ -425,22 +513,49 @@ def ensure_bucket(name: str = "data") -> None:
         raise SystemExit(f"{exc} Last error: {last_error}" if last_error else str(exc)) from None
 
 
+def publish_aws_state() -> None:
+    import boto3
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    import aws_state
+
+    ids = read_ids()
+    region, slug = env("AWS_REGION"), env("SLUG")
+    values = aws_state.frontend_values(env("DOMAIN"), ids["ZITADEL_CLIENT_ID"], ids["ZITADEL_PROJECT_ID"])
+    try:
+        # Tokens first: Zitadel writes them only once, so an SSM failure must not stop them being saved.
+        aws_state.save_tokens(boto3.client("secretsmanager", region_name=region), slug, STATE)
+        aws_state.publish_frontend(boto3.client("ssm", region_name=region), slug, values)
+    except (BotoCoreError, ClientError) as exc:
+        code = exc.response.get("Error", {}).get("Code", "") if isinstance(exc, ClientError) else ""
+        raise SystemExit(
+            f"bootstrap: saving state to AWS failed ({type(exc).__name__} {code}".rstrip()
+            + "). Check the server role's Secrets Manager and SSM permissions, then run the first-run again."
+        ) from None
+
+
 def backend(*args: str) -> None:
     compose("exec", "-T", "backend", "uv", "run", "--no-dev", *args)
 
 
 def main() -> None:
-    # First: a wrong key, or one Stripe rejects, stops before anything changes. The backend must not
+    # First: a wrong key, or one Stripe rejects, stops before anything changes (on AWS the key is only
+    # checked for its sk_test_ prefix here; Stripe doesn't see it until Lago uses it). The backend must not
     # get a key Lago has no provider for, or new workspaces fail. Saved back so Compose, which prefers
     # this process's environment over .env, gets the cleaned value.
     key = os.environ["STRIPE_SECRET_KEY"] = stripe_secret_key()
-    webhook_secret = stripe_webhook_secret() if key else ""
+    os.environ["BILLING_MODE"], os.environ["APP_ENV"] = optional_env("BILLING_MODE"), optional_env("APP_ENV")
+    mock = mock_payment()
+    webhook_secret = stripe_webhook_secret() if key and not on_aws() else ""
     zitadel, lago = zitadel_url(), lago_api_url()
     wait_for(f"Zitadel at {zitadel}", lambda: http_ok(zitadel, "/debug/ready"))
     wait_for("Zitadel's admin token", ADMIN_PAT.is_file)  # written before Zitadel serves
     wait_for(f"Lago at {lago}", lambda: http_ok(lago, "/health"))
     bootstrap_zitadel()
     bootstrap_lago()
+    if on_aws():  # first: brand needs Lago's S3, the likeliest first-deploy failure, and tokens must survive it
+        publish_aws_state()
+    check_lago_matches_billing_mode(mock)
     ensure_bucket()
     if subprocess.run(["uv", "run", "python", "brand.py"], cwd=ROOT / "scripts", check=False).returncode:  # noqa: S607
         raise SystemExit("bootstrap: `make brand` failed (see above); fix it and run `make bootstrap` again")
@@ -449,17 +564,24 @@ def main() -> None:
     backend("alembic", "upgrade", "head")  # needs only DATABASE_URL
     backend("python", "-m", "app.billing.sync")  # needs only the Lago settings
     compose("up", "-d", "--force-recreate", "jobs")  # its first run needs the migrated tables
-    bootstrap_stripe(webhook_secret)  # the backend already has the key: it was recreated from the same .env
-    # Last: the app gets its client id only once everything behind it is configured.
-    compose("up", "-d", "--force-recreate", "frontend")
+    if mock:  # no provider is added and stripe-cli stays idle, so nothing here can reach Stripe
+        print_mock_payment_on()
+    else:
+        bootstrap_stripe(webhook_secret)  # the backend already has the key: it was recreated from the same .env
+    if not on_aws():  # on AWS the frontend isn't deployed yet
+        # Last: the app gets its client id only once everything behind it is configured.
+        compose("up", "-d", "--force-recreate", "frontend")
+        wait_for(f"the app at {app_url()}", lambda: http_ok(app_url(), "/"))  # it runs `npm ci` first
+    s3_line = "" if on_aws() else f"\n  S3           http://localhost:{env('S3_PORT')} (SeaweedFS, bucket data)"
+    next_step = ("Next: `gh workflow run deploy-frontend` (the frontend isn't deployed yet)" if on_aws()
+                 else f"Open {app_url()}")
     print(f"""
 Ready.
   App          {app_url()}
   API          {public_url("api", "API_PORT")}
   Zitadel      {zitadel}/ui/console
-  Lago         {public_url("lago", "LAGO_FRONT_PORT")}
-  S3           http://localhost:{env("S3_PORT")} (SeaweedFS, bucket data)
-Open {app_url()}""")
+  Lago         {public_url("lago", "LAGO_FRONT_PORT")}{s3_line}
+{next_step}""")
 
 
 if __name__ == "__main__":

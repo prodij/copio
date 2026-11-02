@@ -16,11 +16,13 @@ x-lago-env: &lago-env
   LAGO_API_URL: http://lago-api.{{ domain }}:${LAGO_API_PORT:-3000}
   LAGO_FRONT_URL: http://lago.{{ domain }}:${LAGO_FRONT_PORT:-8088}
   LAGO_PDF_URL: http://lago-pdf:3000
+  # Plain http here: Rails would otherwise send browsers to https:// for Lago's logo and files.
+  LAGO_DISABLE_SSL: "true"
   LAGO_WEBHOOK_ALLOW_PRIVATE_URLS: "true"
   LAGO_DISABLE_SEGMENT: "true"
   LAGO_DISABLE_SIGNUP: "true"
   LAGO_CREATE_ORG: "true"
-  LAGO_ORG_NAME: "{{ product_name }}"
+  LAGO_ORG_NAME: {{ product_name | tojson }}
   LAGO_ORG_USER_EMAIL: ${LAGO_ORG_USER_EMAIL}
   LAGO_ORG_USER_PASSWORD: ${LAGO_ORG_USER_PASSWORD}
   LAGO_ORG_API_KEY: ${LAGO_API_KEY}
@@ -84,7 +86,7 @@ services:
       ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: postgres
       ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: postgres
       ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
-      ZITADEL_FIRSTINSTANCE_ORG_NAME: "{{ product_name }}"
+      ZITADEL_FIRSTINSTANCE_ORG_NAME: {{ product_name | tojson }}
       # The console admin: a plain login name and the generated password from .env, not Zitadel's default.
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin@{{ domain }}
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASSWORD}
@@ -116,6 +118,9 @@ services:
       ZITADEL_API_URL: *zitadel-url
       ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel/bootstrap/login-client.pat
       ZITADEL_SESSION_COOKIE_SECRET: ${LOGIN_SESSION_COOKIE_SECRET}
+      # Zitadel builds logo and font URLs from this host. Without it they point at this login port,
+      # which doesn't serve /assets, and the sign-in page shows a broken logo.
+      CUSTOM_REQUEST_HEADERS: x-zitadel-public-host:auth.{{ domain }}:${ZITADEL_PORT:-8085}
     volumes: [./.bootstrap/zitadel:/zitadel/bootstrap:ro]
     ports: ["127.0.0.1:${ZITADEL_LOGIN_PORT:-3100}:3000"]
     depends_on: {zitadel-api: {condition: service_healthy}}
@@ -188,6 +193,8 @@ services:
       LAGO_API_KEY: ${LAGO_API_KEY}
       LAGO_WEBHOOK_ISSUER: http://lago-api.{{ domain }}:${LAGO_API_PORT:-3000}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}  # optional: empty means billing isn't set up
+      BILLING_MODE: ${BILLING_MODE:-}  # off unless .env says mock (mock payment); needs APP_ENV=local
+      APP_ENV: ${APP_ENV:-}
     volumes: [./.bootstrap/backend:/run/bootstrap:ro]
     ports: ["127.0.0.1:${API_PORT:-8000}:8000"]
     depends_on: {postgres: {condition: service_healthy}}

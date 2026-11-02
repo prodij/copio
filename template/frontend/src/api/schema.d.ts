@@ -168,7 +168,8 @@ export interface components {
          * AccessOut
          * @description `state` is the subscription's own state (including `pending`); `features` holds only what it grants now.
          *
-         *     `billing_configured` false: no Stripe key, so plans can't be bought. It grants nothing by itself.
+         *     `billing_configured` false: no Stripe key and no mock payment, so plans can't be bought. `mock_payment`
+         *     true: payments are faked, so the UI labels them. Neither grants anything by itself.
          */
         AccessOut: {
             /** Billing Configured */
@@ -179,6 +180,8 @@ export interface components {
             features: {
                 [key: string]: boolean | number;
             };
+            /** Mock Payment */
+            mock_payment: boolean;
             /** Plan Code */
             plan_code: string | null;
             /** State */
