@@ -76,7 +76,7 @@ Commit first, because Copier refuses a dirty tree. Then:
   `backend/openapi.json` and `frontend/src/api/schema.d.ts` come from the routes (`make regen`). Don't edit
   `.copier-answers.yml` either: Copier needs its commit to work out what changed.
 - Yours to edit, with the logo kept across updates: `brand/`, `backend/app/billing/plans.yaml`, this README, and
-  your own routes, tables and pages. Editing the template's own code (`scripts/`, `docker-compose.yml`, the billing and
+  your own routes, tables and pages (keep the `starter` plan's code, or update the tests that use it). Editing the template's own code (`scripts/`, `docker-compose.yml`, the billing and
   auth modules) works, but expect conflicts there; send generic fixes back to the template.
 
 ## Commands
