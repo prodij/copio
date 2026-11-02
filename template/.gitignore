@@ -14,3 +14,5 @@ test-results/
 infra/.terraform/
 infra/tfplan
 infra/backend.hcl
+*.tfstate
+*.tfstate.*

@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 
 import pytest
@@ -16,6 +17,8 @@ def stub(bin_dir: pathlib.Path, name: str, body: str) -> None:
 
 @pytest.fixture
 def box(tmp_path: pathlib.Path) -> dict[str, object]:
+    if not shutil.which("jq"):
+        pytest.fail("jq is required (the README lists it): the scripts run for real here, with only the outside calls stubbed")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     app = tmp_path / "app"
@@ -127,8 +130,10 @@ def test_first_run_hands_bootstrap_its_settings_without_printing_them(box: dict[
     (app / "deploy" / "db-init.sql").write_text("select 1;\n")  # type: ignore[operator]
     seen = app.parent / "uv-env"  # type: ignore[attr-defined]
     stub(box["bin"], "uv", f'env > "{seen}"')  # type: ignore[arg-type]
+    psql_env = app.parent / "psql-env"  # type: ignore[attr-defined]
+    stub(box["bin"], "docker", f'case "$*" in *psql*) env > "{psql_env}";; esac; exit 0')  # type: ignore[arg-type]
     app_secret = {"LAGO_API_KEY": "key-s3cret", "LAGO_ORG_USER_PASSWORD": "pw-s3cret",
-                  "DB_ADMIN_SECRET_ARN": "arn:admin", "APP_DB_PASSWORD": "a", "LAGO_DB_PASSWORD": "l"}
+                  "DB_ADMIN_SECRET_ARN": "arn:admin", "APP_DB_PASSWORD": "app-s3cret", "LAGO_DB_PASSWORD": "lago-s3cret"}
     stub(box["bin"], "aws", f"""
 case "$*" in
   *"--secret-id acme/app"*) echo '{json.dumps(app_secret)}';;
@@ -152,8 +157,16 @@ esac""")  # type: ignore[arg-type]
     assert got["LAGO_ORG_USER_EMAIL"] == "admin@x.test"
     assert "DB_ADMIN_PASSWORD" not in got
     assert got["STRIPE_SECRET_KEY"] == ""  # absent from .env, and first-run still goes on
-    for secret in ("key-s3cret", "pw-s3cret", "admin-s3cret"):
+    for secret in ("key-s3cret", "pw-s3cret", "admin-s3cret", "app-s3cret", "lago-s3cret"):
         assert secret not in result.stdout + result.stderr
+        assert secret not in calls(box), "a secret value was in a command's arguments"
+    psql = next(line for line in calls(box).splitlines() if "psql" in line)
+    for name in ("PGPASSWORD", "APP_DB_PASSWORD", "LAGO_DB_PASSWORD"):
+        assert f"-e {name} " in psql
+    given = dict(line.split("=", 1) for line in psql_env.read_text().splitlines() if "=" in line)
+    assert given["PGPASSWORD"] == "admin-s3cret"
+    assert given["APP_DB_PASSWORD"] == "app-s3cret"
+    assert given["LAGO_DB_PASSWORD"] == "lago-s3cret"
     assert "uv run python -u bootstrap.py" in calls(box)
 
 
@@ -274,6 +287,21 @@ def test_bootstrap_secret_that_is_not_json_stops_start_without_printing_it(box: 
 def test_partial_bootstrap_secret_stops_start(box: dict[str, object]) -> None:
     result = run_start(box, json.dumps({"admin_pat": "A"}))
     assert result.returncode != 0
+    assert "up -d" not in calls(box)
+
+
+def test_no_app_secret_yet_says_what_to_run(box: dict[str, object]) -> None:
+    before = env_text(box)
+    stub(box["bin"], "aws", """
+case "$*" in
+  *"--secret-id acme/app"*) echo "An error occurred (ResourceNotFoundException)" >&2; exit 254;;
+  *) echo aaaaaaa;;
+esac""")  # type: ignore[arg-type]
+    result = subprocess.run(["bash", str(DEPLOY / "start.sh")], env=box["env"],  # type: ignore[arg-type]  # noqa: S607
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 44
+    assert "make infra-secrets" in result.stderr
+    assert env_text(box) == before
     assert "up -d" not in calls(box)
 
 

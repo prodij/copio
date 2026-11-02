@@ -7,6 +7,14 @@ auth.{$DOMAIN} {
 	handle /ui/v2/login* {
 		reverse_proxy zitadel-login:3000
 	}
+	# Only the readiness check is public under /debug/. The rest includes Zitadel's metrics.
+	handle /debug/ready {
+		reverse_proxy h2c://zitadel-api:8080
+	}
+	@debug path /debug /debug/*
+	handle @debug {
+		respond 403
+	}
 	handle {
 		reverse_proxy h2c://zitadel-api:8080
 	}

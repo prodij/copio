@@ -16,7 +16,7 @@ Milestone 1 generates a product that runs on one machine. Milestone 2 makes the 
 2. A frontend-only deploy leaves the backend untouched.
 3. Replacing the server loses no data held in RDS, S3 or Secrets Manager.
 4. A database restore from backup has been done once.
-5. `make infra-destroy` removes everything, and nothing billable is left.
+5. `make infra-destroy` removes everything it created, and nothing billable is left beyond the hosted zone a person created (§6).
 6. The measured monthly cost and the time from `copier copy` to live are recorded in the template's README.
 
 Payments aren't part of this. They stay unproven until a real Stripe test key is used.
@@ -97,8 +97,8 @@ The subdomains are `auth.`, `lago.` and `lago-api.`, matching the local stack, r
 | `aws_region` | Default `us-west-2` |
 | `domain` | Parent domain. Milestone 1's `.localhost` Copier value stays for local use |
 | `route53_zone_id` | The hosted zone holding the domain. Creating or registering the domain is a human step |
-| `github_repo` | Which repo may deploy through OIDC |
-| `alert_email` | Alarms and budget alerts |
+| `github_repo` | Which repo may deploy through OIDC. Must look like `org/name`; the template's `owner/` placeholder is refused |
+| `alert_email` | Alarms, budget alerts and the certificate contact. `example.com` and `example.org` addresses are refused |
 | `monthly_budget_usd` | Budget alert threshold |
 | `admin_cidrs` | Who can open Lago's UI. Default empty, which means the UI is unavailable |
 | `instance_type` | Default `t3.large` |
@@ -113,11 +113,11 @@ The AWS profile is passed by the person running the command and is never committ
 | `make infra-plan` | Prints the target account, then saves a plan |
 | `make infra-apply` | Applies exactly the saved plan |
 | `make infra-secrets` | Run after the first apply, because it fills secrets and an IAM user that Terraform creates. Generates app secrets into Secrets Manager and never overwrites an existing one |
-| `make infra-release` | Builds the images and uploads a bundle of the deploy files. The server needs both before it can start |
+| `make infra-release` | Uploads a bundle of the deploy files. The first time, it also builds the images and writes their tags, because the server needs both before it can start. Once tags exist it leaves images and tags alone: they move only through the deploy workflows (§7) |
 | `make infra-bootstrap` | Runs database setup and the existing bootstrap on the server, through Session Manager |
 | `make infra-set-stripe-key` | Stores the Stripe test key you paste in Secrets Manager |
 | `make infra-doctor` | Checks DNS, certificates, service health, Zitadel, Lago and `pg_partman` |
-| `make infra-destroy` | Removes everything. It shows Terraform's plan and asks for confirmation at each stage instead of auto-approving. Deletion protection is switched off by a separate, visible plan first |
+| `make infra-destroy` | Removes everything it created. It shows Terraform's plan and asks for confirmation at each stage instead of auto-approving. Deletion protection is switched off by a separate, visible plan first. It leaves the Route 53 zone and any database restored by hand, which must be deleted first. It warns when this product owns the account's GitHub OIDC provider: destroying it breaks the account's other products until one of them sets `create_github_oidc_provider = true` and applies |
 
 The template's agent guard blocks agents from every `make infra-*` command except `infra-plan` and `infra-doctor`, from Terraform writes (`apply`, `destroy`, `import`, `state`, `taint`, `untaint`, `force-unlock`), and from `aws secretsmanager get-secret-value`.
 
@@ -134,7 +134,7 @@ Each folder deploys on its own, on merge to `main`, when its path changes.
 - **Failures:** if a migration or health check fails, the previous version keeps running or is restarted, and CI goes red.
 - **Rollback:** redeploy an earlier tag. A migration isn't undone, so migrations must stay compatible with the previous version. Going back across a release that added a migration fails safely (the older image can't run `alembic upgrade head` on the newer revision, so the current version keeps running); the fix is to roll forward. This goes in the product's agent instructions.
 - **Downtime:** a few seconds during a backend restart.
-- **Zitadel and Lago:** pinned in `docker-compose.aws.yml`, and changed only by deliberately editing the version.
+- **Zitadel and Lago:** pinned in `docker-compose.aws.yml`, and changed only by deliberately editing the version, then `make infra-release` and a restart of the stack. The backend and jobs keep their tags through that restart. The Zitadel or Lago change itself gets no health check or rollback: `make rehearse-aws` before and `make infra-doctor` after.
 - **CI's permissions:** ECR push, this product's frontend bucket, CloudFront invalidation, and running the one deploy document on this server. No Terraform and no secrets.
 
 ## 8. Secrets
@@ -157,7 +157,7 @@ Each folder deploys on its own, on merge to `main`, when its path changes.
 | What goes wrong | What happens | How you find out |
 |---|---|---|
 | Server hardware fails | CloudWatch auto-recovers it to new hardware | Alarm email |
-| Server lost for good | `make infra-apply` builds a new one; startup restores secrets and services, and Caddy gets new certificates. Queued Redis work can be lost | Alarm email |
+| Server lost for good | `make infra-apply` builds a new one; startup restores secrets and services, retrying until they start, and Caddy gets new certificates. Queued Redis work can be lost | Alarm email when the server stops reporting. A new server sends one too, until its first data arrives |
 | Disk nearly full | Log rotation makes this unlikely | Alarm email |
 | Database lost or corrupted | Restore from backup | Alarm email on RDS health and storage |
 | Bad backend deploy or migration | Previous version keeps running | CI |

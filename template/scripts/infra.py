@@ -20,6 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 INFRA = ROOT / "infra"
 TFVARS = INFRA / "terraform.tfvars"
 PLACEHOLDER_ACCOUNT = "000000000000"
+# The same rules as the validation blocks in infra/variables.tf.
+GITHUB_REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+")
+PLACEHOLDER_EMAIL = re.compile(r"[@.]example\.(com|org)$")
 
 # Secret name -> generator command understood by make_env.generate.
 SECRET_SPECS = {
@@ -51,6 +54,14 @@ def check_account(actual: str, expected: str) -> None:
         raise SystemExit(f"AWS_PROFILE points at account {actual}, but this product is for {expected}")
 
 
+def check_placeholders(tfvars: dict[str, str]) -> None:
+    repo, email = tfvars.get("github_repo", ""), tfvars.get("alert_email", "")
+    if not GITHUB_REPO.fullmatch(repo) or repo.lower().startswith("owner/"):
+        raise SystemExit("set github_repo in infra/terraform.tfvars to this product's real org/name first")
+    if PLACEHOLDER_EMAIL.search(email.lower()):
+        raise SystemExit("set alert_email in infra/terraform.tfvars to a real address first")
+
+
 def fill_secrets(existing: dict[str, str], generate: Callable[[str], str]) -> dict[str, str]:
     """Adds what's missing and never changes a value: a new Zitadel master key would break the product."""
     return {**{k: generate(c) for k, c in SECRET_SPECS.items() if k not in existing}, **existing}
@@ -75,6 +86,7 @@ def session() -> Any:
     import boto3
 
     tfvars = read_tfvars()
+    check_placeholders(tfvars)
     made = boto3.Session(region_name=tfvars["aws_region"])
     check_account(made.client("sts").get_caller_identity()["Account"], tfvars["aws_account_id"])
     return made
@@ -146,28 +158,46 @@ def git_commit() -> str:
 
 
 def check_clean(porcelain: str) -> None:
-    """The image tag is the commit, so uncommitted changes would ship under a tag that doesn't hold them."""
+    """An image tag is a commit and the bundle should match one, so uncommitted changes would ship unrecorded."""
     if porcelain.strip():
-        raise SystemExit("the working tree has uncommitted changes; commit or stash them first, because the image tag is the commit")
+        raise SystemExit("the working tree has uncommitted changes; commit or stash them first, because image tags and the deploy files come from the commit")
 
 
-def release() -> None:
-    check_clean(subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, check=True,  # noqa: S607
-                               capture_output=True, text=True).stdout)
-    tfvars, aws = read_tfvars(), session()
+def services_without_a_tag(ssm: Any, slug: str) -> list[str]:
+    names = [f"/{slug}/tags/{service}" for service in SERVICES]
+    found = {p["Name"] for p in ssm.get_parameters(Names=names)["Parameters"]}
+    return [service for service, name in zip(SERVICES, names, strict=True) if name not in found]
+
+
+def build_and_tag(aws: Any, ssm: Any, tfvars: dict[str, str], services: list[str]) -> str:
     slug, region, account, tag = tfvars["slug"], tfvars["aws_region"], tfvars["aws_account_id"], git_commit()
     registry = f"{account}.dkr.ecr.{region}.amazonaws.com"
     token = base64.b64decode(aws.client("ecr").get_authorization_token()["authorizationData"][0]["authorizationToken"]).decode().split(":", 1)[1]
     subprocess.run(["docker", "login", "--username", "AWS", "--password-stdin", registry],  # noqa: S603, S607
                    input=token, text=True, check=True, capture_output=True)
-    ssm = aws.client("ssm")
-    for service in SERVICES:
+    for service in services:
         image = f"{registry}/{slug}-{service}:{tag}"
         subprocess.run(["docker", "build", "--platform", "linux/amd64", "-t", image, service], cwd=ROOT, check=True)  # noqa: S603, S607
         subprocess.run(["docker", "push", image], check=True)  # noqa: S603, S607
         ssm.put_parameter(Name=f"/{slug}/tags/{service}", Value=tag, Type="String", Overwrite=True)
+    return tag
+
+
+def release() -> None:
+    """The first release builds the images. After that the tags belong to the deploy workflows, which
+    migrate, check health and roll back: moving them here would run this checkout's code without any of that."""
+    check_clean(subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, check=True,  # noqa: S607
+                               capture_output=True, text=True).stdout)
+    tfvars, aws = read_tfvars(), session()
+    slug, account = tfvars["slug"], tfvars["aws_account_id"]
+    ssm = aws.client("ssm")
+    missing = services_without_a_tag(ssm, slug)
+    tag = build_and_tag(aws, ssm, tfvars, missing) if missing else ""
     upload_bundle(aws.client("s3"), f"{slug}-deploy-{account}")
-    print(f"Released {tag}.")
+    if missing:
+        print(f"Released {tag}.")
+    else:
+        print("Image tags already exist, so this uploaded the deploy files only and left images and tags alone. Images move through the deploy workflows.")
 
 
 BUNDLE = ["docker-compose.aws.yml", "deploy", "scripts", "brand"]
@@ -224,9 +254,22 @@ def delete_parameters(ssm: Any, slug: str) -> None:
     ssm.delete_parameters(Names=names)
 
 
+def owns_oidc_provider() -> bool:
+    """The variable defaults to true, and read_tfvars only reads strings."""
+    return not re.search(r"^\s*create_github_oidc_provider\s*=\s*false\b", TFVARS.read_text(), re.M)
+
+
+OIDC_WARNING = """WARNING: this product owns the account's GitHub OIDC provider (create_github_oidc_provider is true).
+Destroying it deletes the provider for every product in this account: their deploys fail at sign-in, and
+their terraform plans fail looking it up. To recover, set create_github_oidc_provider = true on one
+surviving product and run make infra-plan and make infra-apply there."""
+
+
 def destroy() -> None:
     tfvars, aws = read_tfvars(), session()
     slug = tfvars["slug"]
+    if owns_oidc_provider():
+        print(OIDC_WARNING)
     print(f"This deletes {slug}, its database and its backups, in account {tfvars['aws_account_id']}.")
     if input(f"Type {slug} to continue: ") != slug:
         raise SystemExit("Not deleted.")

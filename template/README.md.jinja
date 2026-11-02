@@ -94,7 +94,8 @@ To run this product on AWS (one server and a managed database), follow [infra/RE
 
 - `make e2e` runs the Playwright tests against the running stack (after `make bootstrap`): sign-up to
   `/plans` always, sign-up to premium when `.env` has a Stripe key (reported as skipped without one), and
-  sign-up to premium by mock payment when `.env` has `BILLING_MODE=mock`. `make check` runs lint, types and unit tests (needs Postgres: `make up`).
+  sign-up to premium by mock payment when `.env` has `BILLING_MODE=mock`. `make check` runs lint, types and unit tests (needs Postgres: `make up`, and `jq` on your PATH, which the
+  deploy script tests use).
 - Name, colours, font and logo live in `brand/brand.yaml`; they reach the app, the Zitadel login
   page and Lago when `make brand` runs (`make bootstrap` runs it too). `font` is only a name: to load it
   everywhere, set `font_file` too. Without it the app falls back to the bundled Inter unless that font is installed.

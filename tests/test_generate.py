@@ -303,6 +303,20 @@ def test_apostrophes_and_ampersands_render_correctly_everywhere(tmp_path: pathli
     assert '--brand-font: "Bob\'s & Sans",' in (tmp_path / "p" / "frontend" / "src" / "brand.css").read_text()
 
 
+@pytest.mark.parametrize("bad", ["a--b", "acme-", "-acme", "1acme", "a", "Acme", "a" * 32])
+def test_a_slug_rds_would_refuse_is_refused(tmp_path: pathlib.Path, bad: str) -> None:
+    with pytest.raises(ValueError, match="2 to 31 lowercase"):
+        run_copy(str(ROOT), str(tmp_path / "x"), data={**ORDINARY, "product_slug": bad}, defaults=True,
+                 unsafe=True, vcs_ref="HEAD", quiet=True)
+
+
+@pytest.mark.parametrize("good", ["ab", "a1", "acme-reports", "a-b-c", "a" * 31])
+def test_ordinary_slugs_are_accepted(good: str) -> None:
+    validator = yaml.safe_load((ROOT / "copier.yml").read_text())["product_slug"]["validator"]
+    pattern = re.search(r"regex_search\('(.+?)'\)", validator)[1]
+    assert re.search(pattern, good)
+
+
 def test_a_slug_is_derived_from_a_name_with_punctuation(tmp_path: pathlib.Path) -> None:
     data = {k: v for k, v in ORDINARY.items() if k not in ("product_slug", "domain")}
     run_copy(str(ROOT), str(tmp_path / "p"), data=data, defaults=True, unsafe=True, vcs_ref="HEAD", quiet=True)

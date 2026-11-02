@@ -32,6 +32,10 @@ set -euo pipefail
 source /etc/app.env
 mkdir -p /opt/app
 aws s3 sync --delete --exclude ".env" --exclude ".bootstrap/*" --exclude ".deploy.lock" --exclude "scripts/.venv/*" "s3://$DEPLOY_BUCKET/current/" /opt/app/ --region "$AWS_REGION"
+if [ ! -f /opt/app/deploy/start.sh ]; then
+  echo "app-start: no deploy files yet: run make infra-release" >&2
+  exit 45
+fi
 chmod +x /opt/app/deploy/*.sh
 exec /opt/app/deploy/start.sh
 SCRIPT
@@ -42,14 +46,21 @@ cat > /etc/systemd/system/app.service <<'UNIT'
 Description=Product stack
 After=docker.service network-online.target
 Wants=network-online.target
+# Never stop retrying: after a long registry outage the server should come back without anyone logging in.
+StartLimitIntervalSec=0
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/bin/app-start
+# oneshot allows on-failure (not always or on-success). Exit 45 means not released yet: nothing to retry.
+Restart=on-failure
+RestartSec=60
+SuccessExitStatus=45
 [Install]
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
 systemctl enable app.service
-# Before the first release there's no bundle yet: start.sh isn't there, and this exits harmlessly.
-systemctl start app.service || echo "app not started: run make infra-release"
+# Before the first release there's no bundle yet, and app-start says so. --no-block: systemctl reports
+# failure at the first failed try, while the unit keeps retrying, and that must not fail this script.
+systemctl start --no-block app.service

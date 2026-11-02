@@ -10,6 +10,7 @@ Nothing in this folder has been proven on a real AWS account. `make rehearse-aws
 - A domain with a Route 53 hosted zone in that account.
 - Terraform 1.17, Docker, uv and the AWS CLI.
 - This product pushed to its own GitHub repo.
+- Room in the account's quotas. Each product uses one VPC and one Elastic IP, and AWS allows 5 VPCs and 5 Elastic IPs per region by default. The region's default VPC counts too, so that's about four products per region until you request more under Service Quotas.
 
 ## First deploy
 
@@ -17,13 +18,13 @@ Nothing in this folder has been proven on a real AWS account. `make rehearse-aws
 export AWS_PROFILE=<your profile>
 ```
 
-1. Fill in `infra/terraform.tfvars`. For a second product in the same AWS account, also set `create_github_oidc_provider = false`.
+1. Fill in `infra/terraform.tfvars` and commit it. The make commands and Terraform refuse the placeholder `github_repo` and `example.com` or `example.org` addresses. For a second product in the same AWS account, also set `create_github_oidc_provider = false`. The first product then owns the account's GitHub OIDC provider, and destroying it breaks the others until you set `create_github_oidc_provider = true` on a surviving product and apply (see "Removing a product").
 2. `make infra-init` creates the Terraform state bucket.
 3. `make infra-plan`, and read it. Look for `destroy` and `replace`; on a first deploy, there should be neither.
 4. `make infra-apply`. It waits for DNS and certificates, which can take several minutes. It prints two `gh variable set` commands. Run them.
 5. Confirm the alarm email subscription from your inbox.
 6. `make infra-secrets` generates the app's secrets. Running it again never changes an existing value.
-7. `make infra-release` builds the images and uploads the deploy files.
+7. `make infra-release` builds the images, writes their tags to SSM and uploads the deploy files. This first release is the only time it builds images. `infra/terraform.tfvars` must be committed by now, because it refuses a dirty tree.
 8. `make infra-bootstrap` sets up the databases, Zitadel and Lago, and starts everything.
 9. Deploy the frontend: `gh workflow run deploy-frontend`.
 10. `make infra-doctor` checks the deployment (see "What `make infra-doctor` checks").
@@ -104,7 +105,17 @@ Going back across a release that added a database migration fails, and fails saf
 
 `gh workflow run` can't do this: the deploy role only trusts the `main` branch, so a run from an earlier commit is refused.
 
-To change `docker-compose.aws.yml`, `deploy/`, or Zitadel and Lago versions: edit them, `make infra-release`, then restart with an SSM session: `sudo systemctl restart app`.
+### Changing `docker-compose.aws.yml`, `deploy/`, or the Zitadel and Lago versions
+
+Edit them, merge to `main`, and from an up-to-date `main` run `make infra-release`, because the server gets whatever your checkout holds. Once image tags exist, it uploads the deploy files only, leaves images and tags alone, and says so. The backend and jobs move only through the deploy workflows, which migrate, check health and roll back. Then, in an SSM session: `sudo systemctl restart app`.
+
+The restart fetches the deploy files, rebuilds `.env` from Secrets Manager and SSM, pulls, and runs `docker compose up -d`, which recreates only containers whose image or settings changed. What that means:
+
+- **The backend and jobs stay safe.** They restart on the tags in SSM, so it is the same code on the same schema, with no migration to run.
+- **Everything else gets no health check and no rollback.** This covers a new Zitadel or Lago version, which also run their own migrations as they start. Run `make rehearse-aws` first and `make infra-doctor` after. A migration isn't undone by editing the version back.
+- **Caddy doesn't pick up a changed `Caddyfile` by itself:** Compose doesn't see inside the file. After the restart: `cd /opt/app && COMPOSE_FILE=docker-compose.aws.yml docker compose up -d --force-recreate caddy`.
+- **Don't restart during a deploy:** the restart doesn't take the deploy lock. And if a deploy ended with `deployed but not recorded`, redeploy first, because the restart and every reboot use the tag in SSM.
+- **If the restart reports a failure, it's still retrying.** `systemctl` says the job failed at the first failed try, but the service tries again every minute and never gives up. Read `journalctl -u app`, and use `sudo systemctl stop app` to end the retries. The same retries cover boot, so a registry outage during a server replacement clears by itself.
 
 To change infrastructure: `make infra-plan`, read it, `make infra-apply`. A merge never changes infrastructure.
 
@@ -134,8 +145,8 @@ There's no SSH. Lago's admin screen is closed by default: add your IP to `admin_
 
 ## When something's wrong
 
-- **The server failed:** AWS tries to recover it, and emails you. If it's gone for good: `cd infra && terraform plan -replace=aws_instance.server -out=tfplan`, read the plan, then `make infra-apply`. The Elastic IP moves with the apply, so DNS stays right. Secrets and tokens come back automatically. Queued background work in Redis can be lost. Then run `make infra-doctor`.
-- **Database:** to restore, use the RDS console's "restore to point in time" to create a new instance, then read from it to confirm. Switching production to the restored instance isn't automated in this milestone. Backups are kept for 7 days.
+- **The server failed:** AWS tries to recover it, and emails you. A server that stops reporting at all, such as one that was terminated, triggers the `server-unhealthy` email after about 10 minutes. A new server also sends that email once just after it starts, because it has no data yet; the alarm clears by itself. If it's gone for good: `cd infra && terraform plan -replace=aws_instance.server -out=tfplan`, read the plan, then `make infra-apply`. The Elastic IP moves with the apply, so DNS stays right. Secrets and tokens come back automatically. Queued background work in Redis can be lost. Then run `make infra-doctor`.
+- **Database:** RDS availability, failure, failover and low-storage events are emailed to `alert_email`. To restore, use the RDS console's "restore to point in time" to create a new instance, then read from it to confirm. Switching production to the restored instance isn't automated in this milestone. Backups are kept for 7 days. A restored instance is yours to delete: Terraform doesn't know about it, it's billed until you do, and it can block `make infra-destroy`.
 - **Certificates or DNS:** `make infra-doctor` says which host is wrong.
 
 ## Stripe
@@ -144,4 +155,11 @@ Billing is off until you add a test key: `make infra-set-stripe-key`, then `make
 
 ## Removing a product
 
-`make infra-destroy` asks you to type the product's slug, then runs two Terraform plans (the first turns off deletion protection, the second destroys), and you confirm each one. It deletes everything, including the database, its backups and the state bucket. Check AWS Billing a day later.
+`make infra-destroy` asks you to type the product's slug, then runs two Terraform plans (the first turns off deletion protection, the second destroys), and you confirm each one. It deletes everything it created, including the database, its backups, the image tags in SSM and the state bucket, so deploying the slug again starts fresh. Check AWS Billing a day later.
+
+It leaves two things:
+
+- **The Route 53 hosted zone,** which a person created (about $0.50 a month). Delete it in the console if the domain is finished with.
+- **A database you restored,** which Terraform doesn't know about. If one exists, delete it first: it keeps billing, and if it uses this product's subnet group, it makes `terraform destroy` fail.
+
+**If other products share this account:** when `create_github_oidc_provider` is true, as on the first product, destroying this product deletes the account's GitHub OIDC provider, and `make infra-destroy` warns you. Every other product's deploys then fail at the AWS sign-in step, and their `terraform plan` fails looking up the provider. To recover, after the destroy finishes, set `create_github_oidc_provider = true` in one surviving product's `infra/terraform.tfvars`, then run `make infra-plan` and `make infra-apply` there. The provider's ARN is the same, so the other products need no change.

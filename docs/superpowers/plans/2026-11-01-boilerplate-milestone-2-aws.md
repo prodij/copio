@@ -42,7 +42,7 @@ These came out of reading the code, and Task 1 edits the spec to match:
 1. **`use_staging_certificates` is removed.** Containers call `https://auth.<domain>`, so they need a trusted certificate. Let's Encrypt allows 5 duplicate certificates a week, which is enough for the rebuild test.
 2. **Empty `admin_cidrs` means Lago's UI is unavailable**, not reachable by port forward. The UI's browser code calls the public `lago-api.` host, so a tunnel doesn't help. To use it, add your IP and apply.
 3. **`make infra-secrets` runs after the first apply**, because it fills secrets and an IAM user that Terraform creates.
-4. **New command `make infra-release`** builds images and uploads a bundle of the deploy files. The server needs both before it can start.
+4. **New command `make infra-release`** builds images and uploads a bundle of the deploy files. The server needs both before it can start. (Final review, 2026-11-02: once tags exist it uploads the bundle only. See Task 9's amendments.)
 5. **Zitadel gets the RDS admin login only once**, in a one-shot `zitadel-init` service.
 6. **Containers can use the server's role**, so the instance metadata hop limit is 2.
 
@@ -90,6 +90,7 @@ tests/test_infra_template.py template-level checks on a generated product
 - Spec edits also: set the Status line to approved; in §3 replace "so it needs upgrading first" wording only if it reads as a blocker (agents use a pinned binary; James upgrades for Task 13); in §6 say `make infra-plan` prints the account, and that `make infra-destroy` shows Terraform's plan and asks for confirmation at each stage instead of auto-approving; in §14 say this work is stacked on PRs #7 to #9.
 - `run` is the helper's real name in `test_guard.py`. `.dev/acme` comes from root `make dev`.
 - Guard fix round 1: `check_aws` blocks `secretsmanager` with `get-secret-value` or `batch-get-secret-value` anywhere in the non-dash words (global option values like `--profile p` bypassed the positional check); `TERRAFORM_WRITES` also has `test`, `refresh`, `workspace`; `gmake` is treated as `make`.
+- Final review, 2026-11-02: `check_make` blocks any `infra-*` word except `infra-plan` and `infra-doctor`, replacing the `MAKE_WRITES` list, so `infra-init` and any new target are blocked. `rehearse-aws` stays allowed.
 
 **Files:**
 - Modify: `template/.claude/hooks/guard.py`, `template/.claude/hooks/test_guard.py`, `docs/superpowers/specs/2026-11-01-boilerplate-milestone-2-aws-design.md`
@@ -195,6 +196,7 @@ git commit -m "feat(infra): guard blocks agents from infrastructure writes; spec
 - `test_tfvars_has_the_slug_and_no_secrets`: the file is aligned by `terraform fmt`, so match with `re.search(r'^slug\s*=\s*"acme-reports"', text, re.M)`.
 - `NOT_RESOURCE_NAMES` must also hold `"Managed-CachingOptimized"`, `"/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"` and `"deploy"` (the SSM document's step name). These appear in Tasks 4 and 5. Add them now.
 - `test_terraform_is_valid` passes at this task but fails during Tasks 3 and 4 by design, until Task 5 adds the resources they reference.
+- Final review, 2026-11-02: `github_repo` must look like `org/name` and refuses `owner/`; `alert_email` refuses `example.com` and `example.org`, subdomains included. `terraform validate` doesn't evaluate these values, so a slow test proves them with `terraform test` on mocked providers. `copier.yml`'s `product_slug` validator refuses `--` and a trailing `-`. `.gitignore` adds `*.tfstate` and `*.tfstate.*`.
 
 **Files:**
 - Create: `template/infra/versions.tf`, `variables.tf`, `network.tf`, `outputs.tf`, `terraform.tfvars.jinja`, `tests/test_infra_template.py`
@@ -653,6 +655,7 @@ git commit -m "feat(infra): RDS, S3, ECR, secret containers and SES"
 
 - In `user_data.sh.tftpl`, `aws s3 sync` also gets `--exclude "scripts/.venv/*"`, or every boot deletes and rebuilds the scripts' environment.
 - `ami = data.aws_ssm_parameter.al2023.insecure_value`: `.value` is sensitive, which hides the AMI in the plan a person has to read.
+- Final review, 2026-11-02: `monitoring.tf` adds `aws_db_event_subscription.database` (availability, failover, failure, low storage) and `aws_sns_topic_policy.alerts` (SNS's default statement plus CloudWatch and `events.rds.amazonaws.com`; the budget emails directly and isn't on the topic). `server_unhealthy` sets `treat_missing_data = "breaching"`, so a new server emails once before its first data; `server_recover` stays explicitly on `missing`, so a gap can't recover a healthy server. `app.service` gets `Restart=on-failure`, `RestartSec=60` and `StartLimitIntervalSec=0`, which is allowed for `Type=oneshot`. `app-start` exits 45 with a message when there's no bundle yet, and `SuccessExitStatus=45` means that isn't retried. `user_data` starts the unit with `--no-block`.
 
 **Files:**
 - Create: `template/infra/server.tf`, `user_data.sh.tftpl`, `monitoring.tf`, `dns.tf`
@@ -1288,6 +1291,7 @@ git commit -m "feat(infra): CloudFront frontend, GitHub OIDC deploy role and dep
 - `zitadel-login` also gets `CUSTOM_REQUEST_HEADERS: x-zitadel-public-host:auth.${DOMAIN}`, which PR #9 added locally so logo and font URLs point at the right host.
 - Do not add `LAGO_DISABLE_SSL`. Checked in `getlago/api:v1.55.0` `config/environments/production.rb`: `assume_ssl` is on unless that's set and `force_ssl` is false, so plain http on the Compose network isn't redirected and generated URLs stay https. Say so in a one-line comment in the file.
 - Spec §10 requires `docker compose config` on this file on every PR. Add a fast test: `docker compose -f docker-compose.aws.yml --profile setup config --quiet --no-interpolate` in `product_dir`, returning 0.
+- Final review, 2026-11-02: Caddy allows only `/debug/ready` under `/debug/` on `auth.`, and answers 403 for the rest. The doctor and bootstrap call only `/debug/ready`.
 
 **Files:**
 - Create: `template/docker-compose.aws.yml.jinja`, `template/deploy/Caddyfile`, `template/deploy/db-init.sql`
@@ -1637,6 +1641,7 @@ git commit -m "feat(infra): AWS Compose file, Caddy routing and database setup"
 - `template/scripts/tests/test_deploy_scripts.py` must pass `make check`'s `ruff check .`: tests don't have an S607 exemption, so add `# noqa: S607` where `bash` is called.
 - Commit the three scripts with the executable bit.
 - Fix round 1 (review): `deploy.sh` checks `up -d` (a failed start goes to rollback; a failed rollback restart prints "the service may be down"), retries `put-parameter` 3 times then exits 1 "deployed but not recorded", refuses with exit 1 when the previous tag is empty, needs 5 consecutive running polls for `jobs`, takes `flock -w 600` on `$APP_DIR/.deploy.lock` when `flock` exists (the sync in `user_data.sh.tftpl` excludes it), and exits 1 if `/etc/app.env` cannot be sourced. `start.sh` reads secrets and tags into variables before writing `.env`, treats only `ResourceNotFoundException` on the bootstrap secret as "no tokens yet" (other errors and non-JSON content exit non-zero), and uses `jq -er` per token. `first-run.sh` uses `jq -er .password` and splits `export` from assignment (SC2155).
+- Final review, 2026-11-02: `first-run.sh` hands the admin and service passwords to `docker run` by name (`-e PGPASSWORD -e APP_DB_PASSWORD -e LAGO_DB_PASSWORD`), and `db-init.sql` reads the service passwords with psql's `\getenv` instead of `-v`. `start.sh` prints a message before exit 44 when `<slug>/app` has no value.
 
 **Files:**
 - Create: `template/deploy/start.sh`, `template/deploy/first-run.sh`, `template/deploy/deploy.sh`, `template/scripts/tests/test_deploy_scripts.py`
@@ -2208,6 +2213,7 @@ git commit -m "feat(infra): bootstrap runs on AWS and saves tokens and frontend 
 - `infra-plan` first prints the account (spec §6): `@echo "Account: $$(aws sts get-caller-identity --query Account --output text)"`.
 - Fix round 1: `problems()` reports status 0 as the DNS/certificate message for every host first; Lago allows only 403 without an admin list, and with one `lago.` allows {200, 403} and `lago-api.` {401, 403}. `admin_cidrs_set` is true only for a non-empty list. The doctor's server command also lists running services against `EXPECTED_SERVICES`; `main` runs the outside checks first and reports a failed server command as a problem. `bootstrap` and the doctor command start with `export HOME=... PATH=...;` and bootstrap is `app-start && first-run.sh`. `release` refuses a dirty tree; `upload_bundle` skips `.env`, `.env.*` and `.DS_Store`; `init` applies versioning and the public-access block every run.
 - Implementation notes (Task 9 run): `read_secret` and `run_on_server` wrap their `Any` results (`value: dict[str, str]`, `str(...)`) for strict mypy; `# noqa: S603, S607` on Terraform/docker calls; `rehearse-aws` was dropped from the new `.PHONY` line because no such target exists yet; `delete_parameters` uses the fixed names `/<slug>/tags/{backend,jobs}` and `/<slug>/frontend`.
+- Final review, 2026-11-02: `release` builds and writes a tag only for a service with no tag in SSM. Once both exist it uploads the bundle only, without touching ECR or tags, and says so. The dirty-tree check stays for both paths. `session` calls a new `check_placeholders`, matching Terraform's rules. `destroy` warns when `create_github_oidc_provider` isn't false. Changes spec §6.
 
 **Files:**
 - Create: `template/scripts/infra.py`, `template/scripts/infra_doctor.py`, `template/scripts/tests/test_infra.py`, `template/scripts/tests/test_infra_doctor.py`
@@ -2875,6 +2881,7 @@ git commit -m "feat(infra): per-folder deploy workflows over OIDC"
 - Fix round 1: `infra_doctor.py` checks that `partman.part_config` has a row for `enriched_events`, not only that the extension exists, because an empty `part_config` is the state loading `structure.sql` leaves. When `lago-api` is down it still reports the service as not running and also this problem, as before.
 
 This is the only test of the database setup and routing before real money is spent. It stands in for RDS with a Postgres that requires TLS, and an admin that isn't a superuser.
+- Final review, 2026-11-02: the rehearsal runs `zitadel-init` a second time with Zitadel running, as the non-superuser admin, and fails if it fails. It also checks `/debug/metrics` and `/debug/healthz` answer 403, and passes `db-init.sql`'s passwords through the environment as `first-run.sh` does.
 
 **Files:**
 - Create: `template/deploy/rehearsal/docker-compose.rehearsal.yml`, `template/deploy/rehearsal/run.sh`, `template/deploy/rehearsal/.env.rehearsal`
@@ -3043,6 +3050,7 @@ git commit -m "feat(infra): local rehearsal of the AWS database setup and routin
 - "The server failed": `cd infra && terraform plan -replace=aws_instance.server -out=tfplan`, then `make infra-apply`. Drop "point DNS again": the Elastic IP moves with the apply.
 - "Database": say plainly that switching production to a restored instance isn't automated in this milestone. Restoring and reading from it is what's documented and tested.
 - "Removing a product": Terraform shows two plans, and you confirm each one.
+- Final review, 2026-11-02: the runbook's day-2 section is rewritten for bundle-only releases, including what `systemctl restart app` does and doesn't cover and that a changed Caddyfile needs `--force-recreate caddy`. It says `terraform.tfvars` must be committed before `make infra-release`, gives the VPC and Elastic IP quotas, what `make infra-destroy` leaves, and the OIDC recovery in both places. The README lists `jq` for `make check`, which fails with a clear message without it. `CLAUDE.md` says what the guard doesn't catch.
 
 **Files:**
 - Create: `template/infra/README.md` (replacing the stub)

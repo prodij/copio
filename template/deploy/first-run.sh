@@ -16,9 +16,10 @@ DB_ADMIN_PASSWORD="$(aws secretsmanager get-secret-value --secret-id "$(val DB_A
 export DB_ADMIN_PASSWORD
 
 echo "== databases"
-docker run --rm -i -e PGPASSWORD="$DB_ADMIN_PASSWORD" -e PGSSLMODE=require postgres:15-alpine \
-  psql -v ON_ERROR_STOP=1 -h "$(val DB_HOST)" -U dbadmin -d postgres \
-  -v app_password="$(val APP_DB_PASSWORD)" -v lago_password="$(val LAGO_DB_PASSWORD)" < deploy/db-init.sql
+# Names only on the command line: the values come from the environment, so they never show in `ps`.
+PGPASSWORD="$DB_ADMIN_PASSWORD" APP_DB_PASSWORD="$(val APP_DB_PASSWORD)" LAGO_DB_PASSWORD="$(val LAGO_DB_PASSWORD)" \
+  docker run --rm -i -e PGPASSWORD -e APP_DB_PASSWORD -e LAGO_DB_PASSWORD -e PGSSLMODE=require postgres:15-alpine \
+  psql -v ON_ERROR_STOP=1 -h "$(val DB_HOST)" -U dbadmin -d postgres < deploy/db-init.sql
 
 echo "== Zitadel's database"
 docker compose --profile setup run --rm zitadel-init

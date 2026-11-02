@@ -211,6 +211,11 @@ def test_unreadable_input_is_blocked() -> None:
         "make infra-set-stripe-key",
         "make infra-release",
         "make infra-bootstrap",
+        "make infra-init",
+        "make infra-something-new",
+        "make -C . infra-init",
+        "make infra-plan infra-apply",
+        "cd infra && AWS_REGION=x make infra-release",
         "aws secretsmanager get-secret-value --secret-id x",
         "aws --profile p secretsmanager get-secret-value --secret-id x",
         "aws --region r secretsmanager get-secret-value --secret-id x",
@@ -228,7 +233,7 @@ def test_infrastructure_writes_are_blocked(command: str) -> None:
 @pytest.mark.parametrize(
     "command",
     ["terraform plan -out=tfplan", "terraform -chdir=infra validate", "terraform fmt -check",
-     "make infra-plan", "make infra-doctor", "cat infra/README.md"],
+     "make infra-plan", "make infra-doctor", "make rehearse-aws", "make -C . infra-doctor", "make check", "cat infra/README.md"],
 )
 def test_infrastructure_reads_are_allowed(command: str) -> None:
     assert run("Bash", {"command": command}).returncode == 0

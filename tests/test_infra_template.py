@@ -7,6 +7,8 @@ import subprocess
 import pytest
 import yaml
 
+from conftest import ROOT
+
 # Attribute values that aren't AWS resource names.
 NOT_RESOURCE_NAMES = {
     "image-id",
@@ -143,7 +145,10 @@ def test_only_the_setup_service_gets_the_database_admin_password(product_dir: pa
 def test_caddy_keeps_lago_private_except_webhooks(product_dir: pathlib.Path) -> None:
     text = (product_dir / "deploy" / "Caddyfile").read_text()
     assert "@webhooks path /webhooks/*" in text
-    assert text.count("respond 403") == 2
+    assert text.count("respond 403") == 3
+    # Under /debug/, only what make infra-doctor and bootstrap call is public.
+    assert "handle /debug/ready {" in text
+    assert "@debug path /debug /debug/*" in text
 
 
 def test_aws_compose_config_is_valid(product_dir: pathlib.Path) -> None:
@@ -246,3 +251,160 @@ def test_runbook_commands_exist(product_dir: pathlib.Path) -> None:
     ci = (product_dir / "infra" / "ci.tf").read_text()
     for param in ["service", "tag"]:
         assert re.search(rf"^\s*{param}\s*=\s*\{{ type", ci, re.M), param
+
+
+def resource_block(text: str, kind: str, name: str) -> str:
+    return re.search(rf'resource "{kind}" "{name}" \{{.*?^\}}', text, re.S | re.M)[0]
+
+
+def test_alarms_cover_a_lost_server_without_recovering_a_healthy_one(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "monitoring.tf").read_text()
+    assert 'treat_missing_data  = "breaching"' in resource_block(text, "aws_cloudwatch_metric_alarm", "server_unhealthy")
+    assert 'treat_missing_data  = "missing"' in resource_block(text, "aws_cloudwatch_metric_alarm", "server_recover")
+
+
+def test_database_events_reach_the_topic(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "monitoring.tf").read_text()
+    subscription = resource_block(text, "aws_db_event_subscription", "database")
+    assert "sns_topic        = aws_sns_topic.alerts.arn" in subscription
+    assert "aws_db_instance.main.identifier" in subscription
+    for category in ["availability", "failover", "failure", "low storage"]:
+        assert f'"{category}"' in subscription
+    policy = resource_block(text, "aws_sns_topic_policy", "alerts")
+    for principal in ["events.rds.amazonaws.com", "cloudwatch.amazonaws.com", "AWS:SourceOwner"]:
+        assert principal in policy
+    assert text.count("aws_sns_topic_policy") == 2  # the policy, and the subscription waiting for it
+
+
+def test_budget_emails_directly(product_dir: pathlib.Path) -> None:
+    # So the topic's policy has no statement for budgets. Point the budget at the topic and it needs one.
+    text = (product_dir / "infra" / "monitoring.tf").read_text()
+    budget = resource_block(text, "aws_budgets_budget", "monthly")
+    assert "subscriber_email_addresses" in budget and "subscriber_sns_topic_arns" not in budget
+
+
+# Targets that use both variables: Terraform only checks a variable that the plan's graph reaches.
+VALIDATION_TESTS = """
+mock_provider "aws" {}
+mock_provider "aws" {
+  alias = "us_east_1"
+}
+
+variables {
+  aws_account_id = "123456789012"
+  domain         = "acme.io"
+  github_repo    = "prodij/acme"
+  alert_email    = "alerts@acme.io"
+}
+
+run "real_values_pass" {
+  command = plan
+  plan_options {
+    target = [aws_iam_role.deploy, aws_sns_topic_subscription.email]
+  }
+}
+
+run "owner_placeholder" {
+  command = plan
+  plan_options {
+    target = [aws_iam_role.deploy, aws_sns_topic_subscription.email]
+  }
+  variables {
+    github_repo = "owner/acme"
+  }
+  expect_failures = [var.github_repo]
+}
+
+run "not_org_and_name" {
+  command = plan
+  plan_options {
+    target = [aws_iam_role.deploy, aws_sns_topic_subscription.email]
+  }
+  variables {
+    github_repo = "acme"
+  }
+  expect_failures = [var.github_repo]
+}
+
+run "example_com" {
+  command = plan
+  plan_options {
+    target = [aws_iam_role.deploy, aws_sns_topic_subscription.email]
+  }
+  variables {
+    alert_email = "you@example.com"
+  }
+  expect_failures = [var.alert_email]
+}
+
+run "example_org" {
+  command = plan
+  plan_options {
+    target = [aws_iam_role.deploy, aws_sns_topic_subscription.email]
+  }
+  variables {
+    alert_email = "you@example.org"
+  }
+  expect_failures = [var.alert_email]
+}
+"""
+
+
+@pytest.mark.slow
+def test_terraform_refuses_placeholders(product_dir: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    # Mocked providers: no credentials and no AWS. `validate` alone never evaluates these values.
+    assert shutil.which("terraform"), "terraform is required for this test"
+    infra = tmp_path / "infra"
+    shutil.copytree(product_dir / "infra", infra)
+    (infra / "placeholders.tftest.hcl").write_text(VALIDATION_TESTS)
+    subprocess.run(["terraform", "init", "-backend=false", "-input=false"], cwd=infra, check=True, capture_output=True)
+    result = subprocess.run(["terraform", "test"], cwd=infra, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_generated_tfvars_still_holds_the_placeholders_terraform_refuses(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "terraform.tfvars").read_text()
+    assert re.search(r'^github_repo\s*=\s*"owner/acme-reports"', text, re.M)
+    assert re.search(r'^alert_email\s*=\s*"you@example\.com"', text, re.M)
+
+
+def test_app_service_retries_and_a_failed_first_try_does_not_fail_user_data(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "user_data.sh.tftpl").read_text()
+    for needed in ["Type=oneshot", "Restart=on-failure", "RestartSec=60", "StartLimitIntervalSec=0",
+                   "SuccessExitStatus=45", "exit 45", "systemctl start --no-block app.service"]:
+        assert needed in text, needed
+
+
+def test_tfstate_is_ignored_and_nothing_committed_matches(product_dir: pathlib.Path) -> None:
+    lines = (product_dir / ".gitignore").read_text().splitlines()
+    assert "*.tfstate" in lines and "*.tfstate.*" in lines
+    tracked = subprocess.run(["git", "ls-files", "template"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    assert not re.search(r"\.tfstate(\.|$)", tracked, re.M)
+
+
+def test_db_init_passwords_never_reach_psql_arguments(product_dir: pathlib.Path) -> None:
+    first_run = (product_dir / "deploy" / "first-run.sh").read_text()
+    assert "app_password" not in first_run and "lago_password" not in first_run
+    assert "\\getenv app_password APP_DB_PASSWORD" in (product_dir / "deploy" / "db-init.sql").read_text()
+
+
+def test_no_false_eventbridge_claim(product_dir: pathlib.Path) -> None:
+    assert "EventBridge" not in (product_dir / "jobs" / "schedules.yaml").read_text()
+
+
+def test_agent_instructions_say_what_the_guard_misses(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "CLAUDE.md").read_text()
+    assert "seatbelt" in text and "python infra.py destroy" in text
+    assert "the guard enforces this" not in text
+
+
+def test_product_ci_runs_when_deploy_changes(product_dir: pathlib.Path) -> None:
+    assert '"deploy/**"' in (product_dir / ".github" / "workflows" / "scripts.yml").read_text()
+
+
+def test_runbook_covers_day_two_limits(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "infra" / "README.md").read_text()
+    for needed in ["uploads the deploy files only", "must be committed", "5 Elastic IPs", "hosted zone",
+                   "delete it first", "surviving product", "--force-recreate caddy", "no health check"]:
+        assert needed in text, needed
+    assert text.count("create_github_oidc_provider = true") >= 2

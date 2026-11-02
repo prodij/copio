@@ -32,7 +32,14 @@ param() { aws ssm get-parameter --name "$1" --query Parameter.Value --output tex
 as_env() { jq -r 'to_entries[] | "\(.key)=\(.value)"'; }
 
 # Read everything before writing anything, so a failure leaves the last good .env alone.
-app_secret="$(secret "$SLUG/app")"
+status=0
+app_secret="$(secret "$SLUG/app")" || status=$?
+if [ "$status" = 44 ]; then
+  echo "start: $SLUG/app has no values yet: run make infra-secrets first" >&2
+  exit 44
+elif [ "$status" != 0 ]; then
+  exit "$status"
+fi
 config="$(param "/$SLUG/config")"
 backend_tag="$(param "/$SLUG/tags/backend")"
 jobs_tag="$(param "/$SLUG/tags/jobs")"

@@ -20,4 +20,4 @@ Generated from prodij/copio. Layout: `frontend/` `backend/` `jobs/` `infra/` `br
 
 ## AWS
 
-`infra/` and `deploy/` run this product on AWS (`infra/README.md`). Agents may run `make infra-plan` and `make infra-doctor`; a person runs every other `make infra-*` command, and the guard enforces this. Migrations must stay compatible with the previous version, because a rollback doesn't undo them.
+`infra/` and `deploy/` run this product on AWS (`infra/README.md`). Agents may run `make infra-plan` and `make infra-doctor`; a person runs every other `make infra-*` command. The guard is a seatbelt for honest mistakes, not a full filter: it doesn't catch `python infra.py destroy`, `aws ssm get-parameter --with-decryption` or anything a script runs. Migrations must stay compatible with the previous version, because a rollback doesn't undo them.

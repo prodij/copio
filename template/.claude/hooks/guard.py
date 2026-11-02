@@ -237,8 +237,8 @@ def check_docker(args: list[str]) -> None:
 
 TERRAFORM_WRITES = {"apply", "destroy", "import", "state", "taint", "untaint", "force-unlock", "test", "refresh",
                     "workspace"}
-MAKE_WRITES = {"infra-apply", "infra-destroy", "infra-secrets", "infra-set-stripe-key",
-               "infra-release", "infra-bootstrap"}
+# Every other `make infra-*` is blocked, so a target added later is blocked by default.
+MAKE_INFRA_ALLOWED = {"infra-plan", "infra-doctor"}
 INFRA_HINT = "a person runs this one; give them the command (see infra/README.md)"
 
 
@@ -250,7 +250,7 @@ def check_terraform(args: list[str]) -> None:
 
 def check_make(args: list[str]) -> None:
     for word in args:
-        if word in MAKE_WRITES:
+        if word.startswith("infra-") and word not in MAKE_INFRA_ALLOWED:
             raise Blocked(f"`make {word}` changes real infrastructure; {INFRA_HINT}")
 
 

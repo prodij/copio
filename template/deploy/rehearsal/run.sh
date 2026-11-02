@@ -50,7 +50,9 @@ remove_stack || fail "couldn't clear an earlier run"  # one that was killed outr
 compose up -d --wait db redis || fail "the stand-in database or Redis didn't start"
 
 psql_as() {
-  compose exec -T -e PGPASSWORD="$2" -e PGSSLMODE=require db psql -q -v ON_ERROR_STOP=1 -h db -U "$1" "${@:3}"
+  # The passwords db-init.sql reads, the way first-run.sh hands them over (it uses names only: these are throwaway).
+  compose exec -T -e PGPASSWORD="$2" -e PGSSLMODE=require \
+    -e APP_DB_PASSWORD=rehearsal-app -e LAGO_DB_PASSWORD=rehearsal-lago db psql -q -v ON_ERROR_STOP=1 -h db -U "$1" "${@:3}"
 }
 
 echo "== stand-in for the RDS admin, and TLS is required"
@@ -62,13 +64,11 @@ if compose exec -T -e PGPASSWORD=rehearsal-superuser -e PGSSLMODE=disable db \
 fi
 
 echo "== db-init.sql: roles and databases as the non-superuser admin"
-sed '/^\\connect lago/,$d' deploy/db-init.sql | psql_as dbadmin rehearsal-admin -d postgres \
-  -v app_password=rehearsal-app -v lago_password=rehearsal-lago
+sed '/^\\connect lago/,$d' deploy/db-init.sql | psql_as dbadmin rehearsal-admin -d postgres
 
 echo "== db-init.sql, all of it, twice (LIMIT: as the stand-in superuser, because pg_partman isn't a trusted extension here; on RDS dbadmin runs it as rds_superuser)"
 for _ in 1 2; do
-  psql_as postgres rehearsal-superuser -d postgres \
-    -v app_password=rehearsal-app -v lago_password=rehearsal-lago < deploy/db-init.sql
+  psql_as postgres rehearsal-superuser -d postgres < deploy/db-init.sql
 done
 
 echo "== Zitadel init as the non-superuser admin"
@@ -80,6 +80,10 @@ compose up -d --wait --wait-timeout 300 zitadel-api || fail "Zitadel didn't beco
 for pat in admin.pat login-client.pat; do
   [ -s "$REHEARSAL_BOOTSTRAP/$pat" ] || fail "Zitadel didn't write $pat"
 done
+
+echo "== Zitadel init again, as every make infra-bootstrap does (the Stripe path too), with Zitadel running"
+DB_ADMIN_PASSWORD=rehearsal-admin compose --profile setup run --rm zitadel-init \
+  || fail "a second zitadel-init as the non-superuser admin failed: make infra-bootstrap can't be re-run"
 
 echo "== start Lago, the login and Caddy"
 compose up -d --wait --wait-timeout 300 lago-api lago-pdf || fail "Lago didn't become healthy"
@@ -126,6 +130,8 @@ check "lago.$d" / 403
 check "lago-api.$d" /api/v1/plans 403
 check "lago-api.$d" /webhooks/stripe/none 404  # Lago's own answer: Caddy gives 403 if blocked, 502 if it can't reach Lago
 check "auth.$d" /debug/ready 200
+check "auth.$d" /debug/metrics 403
+check "auth.$d" /debug/healthz 403
 check "auth.$d" /ui/v2/login/healthy 200
 
 echo "== routing for addresses on the admin list"
