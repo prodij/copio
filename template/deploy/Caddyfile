@@ -1,0 +1,42 @@
+{
+	email {$ACME_EMAIL}
+	{$CADDY_GLOBAL_OPTIONS}
+}
+
+auth.{$DOMAIN} {
+	handle /ui/v2/login* {
+		reverse_proxy zitadel-login:3000
+	}
+	handle {
+		reverse_proxy h2c://zitadel-api:8080
+	}
+}
+
+api.{$DOMAIN} {
+	reverse_proxy backend:8000
+}
+
+# Stripe must reach the webhooks. Everything else in Lago is for people on the admin list.
+lago-api.{$DOMAIN} {
+	@webhooks path /webhooks/*
+	handle @webhooks {
+		reverse_proxy lago-api:3000
+	}
+	@admin remote_ip {$ADMIN_CIDRS}
+	handle @admin {
+		reverse_proxy lago-api:3000
+	}
+	handle {
+		respond 403
+	}
+}
+
+lago.{$DOMAIN} {
+	@admin remote_ip {$ADMIN_CIDRS}
+	handle @admin {
+		reverse_proxy lago-front:80
+	}
+	handle {
+		respond 403
+	}
+}

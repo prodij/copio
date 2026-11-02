@@ -4,6 +4,7 @@ import shutil
 import subprocess
 
 import pytest
+import yaml
 
 # Attribute values that aren't AWS resource names.
 NOT_RESOURCE_NAMES = {
@@ -102,3 +103,52 @@ def test_second_product_can_skip_the_oidc_provider(product_dir: pathlib.Path) ->
     text = (product_dir / "infra" / "ci.tf").read_text()
     assert re.search(r"count\s*=\s*var\.create_github_oidc_provider \? 1 : 0", text)
     assert 'data "aws_iam_openid_connect_provider" "github"' in text
+
+
+def aws_compose(product_dir: pathlib.Path) -> dict:
+    return yaml.safe_load((product_dir / "docker-compose.aws.yml").read_text())
+
+
+def test_aws_compose_has_no_local_stand_ins_or_payment_shortcuts(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "docker-compose.aws.yml").read_text().lower()
+    services = aws_compose(product_dir)["services"]
+    for name in ["stripe-cli", "postgres", "s3", "frontend"]:
+        assert name not in services, name
+    assert "mock" not in text
+
+
+def test_only_caddy_is_public(product_dir: pathlib.Path) -> None:
+    for name, service in aws_compose(product_dir)["services"].items():
+        for port in service.get("ports", []):
+            if name != "caddy":
+                assert str(port).startswith("127.0.0.1:"), f"{name}: {port}"
+
+
+def test_database_connections_require_tls(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "docker-compose.aws.yml").read_text()
+    assert text.count("sslmode=require") >= 3
+    assert "SSL_MODE: require" in text
+    assert "SSL_MODE: disable" not in text
+
+
+def test_only_the_setup_service_gets_the_database_admin_password(product_dir: pathlib.Path) -> None:
+    services = aws_compose(product_dir)["services"]
+    for name, service in services.items():
+        if "DB_ADMIN_PASSWORD" in str(service.get("environment", "")):
+            assert name == "zitadel-init"
+    assert services["zitadel-init"]["profiles"] == ["setup"]
+
+
+def test_caddy_keeps_lago_private_except_webhooks(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "deploy" / "Caddyfile").read_text()
+    assert "@webhooks path /webhooks/*" in text
+    assert text.count("respond 403") == 2
+
+
+def test_aws_compose_config_is_valid(product_dir: pathlib.Path) -> None:
+    assert shutil.which("docker"), "docker is required for this test"
+    result = subprocess.run(
+        ["docker", "compose", "-f", "docker-compose.aws.yml", "--profile", "setup", "config", "--quiet", "--no-interpolate"],
+        cwd=product_dir, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
