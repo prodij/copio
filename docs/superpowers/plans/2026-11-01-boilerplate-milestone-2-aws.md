@@ -2699,6 +2699,7 @@ git commit -m "feat(infra): make infra-* commands and infra-doctor"
 ### Task 10: Deploy workflows
 
 **Amendments, 2026-11-01:** `deploy-backend.yml` and `deploy-jobs.yml` both use `concurrency: {group: deploy-server}`, so one merge touching both folders doesn't run two deploys on one server at once (found in Task 7's review; `deploy.sh` also takes a lock).
+- `deploy-backend.yml` and `deploy-jobs.yml` poll `get-command-invocation` every 10 seconds for up to 15 minutes instead of `aws ssm wait command-executed` (about 100 seconds, which gave false reds while `deploy.sh` waits up to 600 for its lock), and the job has `timeout-minutes: 30`.
 
 **Files:**
 - Create: `template/.github/workflows/deploy-frontend.yml`, `deploy-backend.yml`, `deploy-jobs.yml`

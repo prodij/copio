@@ -9,6 +9,7 @@ concurrency: {group: deploy-server}
 jobs:
   deploy:
     if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     env:
       SERVICE: jobs
@@ -34,8 +35,15 @@ jobs:
           instance="$(aws ssm get-parameter --name "/$SLUG/config" --query Parameter.Value --output text | jq -r .INSTANCE_ID)"
           command_id="$(aws ssm send-command --instance-ids "$instance" --document-name "$SLUG-deploy" \
             --parameters "service=$SERVICE,tag=$TAG" --query Command.CommandId --output text)"
-          sleep 5
-          aws ssm wait command-executed --command-id "$command_id" --instance-id "$instance" || true
+          # Poll for up to 15 minutes: the waiter gives up after about 100 seconds, and deploy.sh can wait 600 for its lock.
+          for _ in $(seq 90); do
+            if out="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance" --query Status --output text 2>&1)"; then
+              case "$out" in Pending|InProgress|Delayed) ;; *) break ;; esac
+            elif [[ "$out" != *InvocationDoesNotExist* ]]; then
+              echo "$out"; exit 1
+            fi
+            sleep 10
+          done
           aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance" \
             --query '[Status,StandardOutputContent,StandardErrorContent]' --output text
           status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance" --query Status --output text)"

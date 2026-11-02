@@ -126,3 +126,11 @@ def test_deploys_use_no_stored_aws_keys() -> None:
     for name in DEPLOYS:
         text = (ROOT / "template/.github/workflows" / name).read_text()
         assert "AWS_SECRET_ACCESS_KEY" not in text and "secrets." not in text
+
+
+def test_server_deploys_poll_instead_of_using_the_ssm_waiter() -> None:
+    # The waiter gives up after about 100 seconds, and deploy.sh can wait 600 for its lock.
+    for name in ("deploy-backend.yml", "deploy-jobs.yml"):
+        text = (ROOT / "template/.github/workflows" / name).read_text()
+        assert "command-executed" not in text
+        assert "get-command-invocation" in text and "timeout-minutes: 30" in text
