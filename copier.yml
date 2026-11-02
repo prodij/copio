@@ -2,6 +2,16 @@ _subdirectory: template
 _templates_suffix: .jinja
 _answers_file: .copier-answers.yml
 
+# Files the product generates, or its own logo. An update never touches these, since a template change
+# could only conflict; `make regen` rebuilds the generated ones from the product's own sources.
+_skip_if_exists:
+  - brand/logo.svg
+  - frontend/public/logo.svg
+  - frontend/public/favicon.svg
+  - frontend/src/brand.css
+  - frontend/src/api/schema.d.ts
+  - backend/openapi.json
+
 # Runs on copy only (an update must not overwrite a logo the product has since edited, nor fail
 # because the source file moved). logo_path is read from where the user's file is, so a relative
 # path would resolve against the new product folder: pass an absolute path (or ~/...).

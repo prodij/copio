@@ -58,6 +58,29 @@ commands in each. Nothing else needs setting:
   `make down` in that product, empty the `*_PORT=` values in its `.env`, then `make env && make up && make bootstrap`.
   Moving a port later works the same way, and `make bootstrap` is what brings Zitadel's redirect URIs along.
 
+## Updating from the template
+
+Commit first, because Copier refuses a dirty tree. Then:
+
+    uvx copier update --trust --defaults
+    git status                 # UU means conflict markers to resolve; nothing is dropped silently
+    make regen                 # rebuilds lock files, the brand CSS and the API contract
+    make check
+
+- `.env`, `.bootstrap/` and your own files are never touched. Your edits merge with the template's. Where both
+  changed the same lines you get `<<<<<<< before updating` (yours) and `>>>>>>> after updating` (the template's).
+- A lock file with conflict markers: `git checkout HEAD -- <lock file>`, resolve `pyproject.toml` or
+  `package.json`, then `make regen`, which adds what the template wanted.
+- Never edit these by hand, and an update leaves them alone: `frontend/src/brand.css`, `frontend/public/logo.svg`,
+  `frontend/public/favicon.svg` and the title in `frontend/index.html` come from `brand/` (`make brand`);
+  `backend/openapi.json` and `frontend/src/api/schema.d.ts` come from the routes (`make regen`). Don't edit
+  `.copier-answers.yml` either: Copier needs its commit to work out what changed.
+- Yours to edit, with the logo kept across updates: `brand/`, `backend/app/billing/plans.yaml`, this README, and
+  your own routes, tables and pages. Editing the template's own code (`scripts/`, `docker-compose.yml`, the billing and
+  auth modules) works, but expect conflicts there; send generic fixes back to the template.
+
+## Commands
+
 - `make e2e` runs the Playwright tests against the running stack (after `make bootstrap`): sign-up to
   `/plans` always, sign-up to premium when `.env` has a Stripe key (reported as skipped without one), and
   sign-up to premium by mock payment when `.env` has `BILLING_MODE=mock`. `make check` runs lint, types and unit tests (needs Postgres: `make up`).

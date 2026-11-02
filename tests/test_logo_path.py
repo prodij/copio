@@ -70,6 +70,47 @@ def test_update_keeps_a_logo_edited_in_the_product(tmp_path: pathlib.Path) -> No
     assert (dest / "brand" / "logo.svg").read_text() == edited
 
 
+GENERATED = ["frontend/src/brand.css", "frontend/public/logo.svg", "frontend/public/favicon.svg",
+             "frontend/src/api/schema.d.ts", "backend/openapi.json", "brand/logo.svg"]
+
+
+def test_update_leaves_generated_files_alone_and_merges_the_rest(tmp_path: pathlib.Path) -> None:
+    template = tagged_template(tmp_path)
+    logo = tmp_path / "mine.svg"
+    logo.write_text(CUSTOM)
+    dest = tmp_path / "product"
+    generate_and_commit(template, logo, dest)
+    for name in GENERATED:
+        (dest / name).write_text(f"product's {name}\n")
+    (dest / "frontend" / "src" / "pages" / "Plans.tsx").write_text(
+        (dest / "frontend" / "src" / "pages" / "Plans.tsx").read_text() + "// product edit\n")
+    (dest / "backend" / "app" / "notes.py").write_text("# the product's own file\n")
+    (dest / "backend" / "app" / "billing" / "plans.yaml").write_text("plans: []\n")
+    (dest / ".env").write_text("KEEP=1\n")
+    git(dest, "add", "-A")  # .env stays ignored
+    git(dest, "commit", "-q", "-m", "product")
+
+    for name in GENERATED:
+        (template / "template" / name).write_text(f"template's {name}\n")
+    (template / "template" / "frontend" / "src" / "lib" / "added.ts").write_text("export const added = 1;\n")
+    plans = template / "template" / "backend" / "app" / "billing" / "plans.yaml.jinja"
+    plans.write_text(plans.read_text().replace("seats: 5", "seats: 6"))
+    git(template, "add", "-A")
+    git(template, "commit", "-q", "-m", "v2")
+    git(template, "tag", "v1.1.0")
+    run_update(str(dest), defaults=True, unsafe=True, overwrite=True, quiet=True)
+
+    for name in GENERATED:
+        assert (dest / name).read_text() == f"product's {name}\n", name
+    assert (dest / "frontend" / "src" / "pages" / "Plans.tsx").read_text().endswith("// product edit\n")
+    assert (dest / "backend" / "app" / "notes.py").exists()
+    assert (dest / "frontend" / "src" / "lib" / "added.ts").exists()
+    assert (dest / ".env").read_text() == "KEEP=1\n"
+    # Both changed the plan file: a conflict the product sees, not a silent loss on either side.
+    merged = (dest / "backend" / "app" / "billing" / "plans.yaml").read_text()
+    assert "<<<<<<<" in merged and "plans: []" in merged and "seats: 6" in merged
+
+
 def test_update_works_when_the_logo_source_is_gone(tmp_path: pathlib.Path) -> None:
     template = tagged_template(tmp_path)
     logo = tmp_path / "mine.svg"

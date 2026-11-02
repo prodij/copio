@@ -26,7 +26,7 @@ export HOST_GID := $(shell id -g)
 POSTGRES_PORT ?= 5432
 TEST_DATABASE_URL ?= postgresql+psycopg://app:app@127.0.0.1:$(POSTGRES_PORT)/app_test
 
-.PHONY: env up down reset logs bootstrap brand sync-plans migrate doctor check e2e
+.PHONY: env up down reset logs bootstrap brand sync-plans migrate doctor check e2e regen
 
 env:
 	cd scripts && uv run python make_env.py
@@ -61,6 +61,14 @@ migrate:
 
 doctor:
 	cd scripts && uv run python doctor.py
+
+# After `copier update`, once conflicts are resolved: rebuilds what comes from other files.
+regen:
+	cd scripts && uv run python brand.py --css-only && uv lock
+	cd backend && uv lock && uv run python -m app.export_openapi
+	cd jobs && uv lock
+	cd frontend && npm install --package-lock-only --no-audit --no-fund && npm ci --no-audit --no-fund && npm run gen:api
+	cd e2e && npm install --package-lock-only --no-audit --no-fund
 
 check:
 	cd backend && uv run ruff check . && uv run mypy && TEST_DATABASE_URL=$(TEST_DATABASE_URL) uv run pytest -q
