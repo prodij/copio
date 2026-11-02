@@ -256,6 +256,15 @@ def ensure_self_registration(http: httpx.Client) -> None:
     check(http.put("/admin/v1/policies/login", json=body), "Zitadel login policy update")
 
 
+def ensure_login_page(http: httpx.Client) -> None:
+    """Zitadel stores the login page's URL at first start, so a moved ZITADEL_LOGIN_PORT needs this."""
+    base = f"{public_url('auth', 'ZITADEL_LOGIN_PORT')}/ui/v2/login/"
+    feature = check(http.get("/v2/features/instance"), "Zitadel feature read").get("loginV2", {})
+    if feature.get("baseUri") != base:
+        check(http.put("/v2/features/instance", json={"loginV2": {"required": True, "baseUri": base}}),
+              "Zitadel login page update")
+
+
 def bootstrap_zitadel() -> None:
     with zitadel_http() as http:
         org_id = str(check(http.get("/management/v1/orgs/me"), "Zitadel org read")["org"]["id"])
@@ -263,6 +272,7 @@ def bootstrap_zitadel() -> None:
         client_id = ensure_web_app(http, project_id, app_url())
         ensure_backend_machine_user(http)
         ensure_self_registration(http)
+        ensure_login_page(http)
     save_ids(ZITADEL_PROJECT_ID=project_id, ZITADEL_INSTANCE_ORG_ID=org_id, ZITADEL_CLIENT_ID=client_id)
     # The browser sees every ZITADEL_* variable the dev server has, so it gets only these two.
     write_ids(FRONTEND_ENV, {"ZITADEL_CLIENT_ID": client_id, "ZITADEL_PROJECT_ID": project_id})

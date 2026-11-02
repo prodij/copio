@@ -11,6 +11,7 @@ import bootstrap
 import product
 from bootstrap import (
     ensure_backend_machine_user,
+    ensure_login_page,
     ensure_project,
     ensure_self_registration,
     ensure_web_app,
@@ -179,6 +180,29 @@ def test_self_registration_already_allowed_is_left_alone() -> None:
     put = respx.put(f"{Z}/admin/v1/policies/login")
     with httpx.Client(base_url=Z) as http:
         ensure_self_registration(http)
+    assert put.call_count == 0
+
+
+@respx.mock
+def test_login_page_follows_a_moved_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ZITADEL_LOGIN_PORT", "3120")
+    wanted = f"http://auth.{bootstrap.product.DOMAIN}:3120/ui/v2/login/"
+    respx.get(f"{Z}/v2/features/instance").respond(200, json={"loginV2": {
+        "required": True, "baseUri": wanted.replace("3120", "3110")}})
+    put = respx.put(f"{Z}/v2/features/instance").respond(200, json={})
+    with httpx.Client(base_url=Z) as http:
+        ensure_login_page(http)
+    assert body(put) == {"loginV2": {"required": True, "baseUri": wanted}}
+
+
+@respx.mock
+def test_login_page_already_right_is_left_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ZITADEL_LOGIN_PORT", "3100")
+    respx.get(f"{Z}/v2/features/instance").respond(200, json={"loginV2": {
+        "baseUri": f"http://auth.{bootstrap.product.DOMAIN}:3100/ui/v2/login/"}})
+    put = respx.put(f"{Z}/v2/features/instance")
+    with httpx.Client(base_url=Z) as http:
+        ensure_login_page(http)
     assert put.call_count == 0
 
 
