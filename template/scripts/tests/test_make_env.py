@@ -1,4 +1,5 @@
 import base64
+import errno
 import pathlib
 import re
 import socket
@@ -130,6 +131,48 @@ def test_port_free_sees_a_real_listener(monkeypatch: pytest.MonkeyPatch) -> None
         port = taken.getsockname()[1]
         assert make_env.port_free(port) is False
     assert make_env.port_free(port) is True
+
+
+def test_port_free_sees_an_ipv6_only_listener(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.undo()
+    if not socket.has_ipv6:
+        pytest.skip("no IPv6 on this host")
+    with socket.socket(socket.AF_INET6) as taken:
+        taken.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        try:
+            taken.bind(("::1", 0))
+        except OSError:
+            pytest.skip("no ::1 on this host")
+        taken.listen()
+        port = taken.getsockname()[1]
+        assert make_env.port_free(port) is False
+    assert make_env.port_free(port) is True
+
+
+@pytest.mark.parametrize("code", [errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL])
+def test_port_free_tolerates_a_host_without_ipv6(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+    monkeypatch.undo()
+    real = socket.socket
+
+    def no_ipv6(family: int = socket.AF_INET, *args: object) -> socket.socket:
+        if family == socket.AF_INET6:
+            raise OSError(code, "no IPv6")
+        return real(family)
+
+    monkeypatch.setattr(socket, "socket", no_ipv6)
+    with real() as finder:
+        finder.bind(("127.0.0.1", 0))
+        port = finder.getsockname()[1]
+    assert make_env.port_free(port) is True
+
+
+def test_a_new_port_never_lands_on_a_kept_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 3000 to 3090 are held, and the login port is kept at 3100: Lago's API must skip it too.
+    monkeypatch.setattr(make_env, "port_free", lambda port: not 3000 <= port <= 3090)
+    example = "# Default: 3100\nZITADEL_LOGIN_PORT=\n# Default: 3000\nLAGO_API_PORT=\n"
+    text, _ = make_env.render(example, {"ZITADEL_LOGIN_PORT": "3100"})
+    assert "ZITADEL_LOGIN_PORT=3100\n" in text
+    assert "LAGO_API_PORT=3110\n" in text
 
 
 def test_no_free_block_says_what_to_do(monkeypatch: pytest.MonkeyPatch) -> None:

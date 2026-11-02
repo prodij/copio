@@ -10,6 +10,7 @@ this machine (say by a second product), all move up by the same step so the next
 """
 
 import base64
+import errno
 import re
 import secrets
 import socket
@@ -83,19 +84,28 @@ def read_env(path: Path) -> dict[str, str]:
 
 
 def port_free(port: int) -> bool:
-    """True when nothing listens on this port. It sees only what is running now, not a stopped stack."""
-    with socket.socket() as probe:
-        try:
+    """True when nothing listens on this port, on IPv4 or IPv6 loopback. Docker publishes on 127.0.0.1 even
+    if something holds ::1, and a browser may then reach that other thing with no error. It sees only what
+    is running now, not a stopped stack."""
+    try:
+        with socket.socket() as probe:
             probe.bind(("127.0.0.1", port))
-        except OSError:
-            return False
+    except OSError:
+        return False
+    try:
+        with socket.socket(socket.AF_INET6) as probe:
+            probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            probe.bind(("::1", port))
+    except OSError as exc:  # a host with no IPv6 answers with some other error, and nothing can be there
+        return exc.errno not in (errno.EADDRINUSE, errno.EACCES)
     return True
 
 
-def port_shift(ports: list[int]) -> int:
-    """The smallest step up that makes every port free, so one product's ports stay together."""
+def port_shift(ports: list[int], kept: set[int]) -> int:
+    """The smallest step up that makes every port free, so one product's ports stay together. A port kept
+    in .env counts as taken even when its service is down."""
     for shift in range(0, PORT_STEP * PORT_TRIES, PORT_STEP):
-        if all(port_free(port + shift) for port in ports):
+        if all(port + shift not in kept and port_free(port + shift) for port in ports):
             return shift
     raise SystemExit(f"make env: no free block of ports near {ports}; set the *_PORT values in .env by hand")
 
@@ -103,7 +113,8 @@ def port_shift(ports: list[int]) -> int:
 def render(example: str, current: dict[str, str]) -> tuple[str, list[str]]:
     """The .env text (example layout, current values kept, blanks filled) and the keys still empty."""
     ports = {name: int(default) for default, name in PORT_DEFAULT.findall(example) if not current.get(name)}
-    shift = port_shift(list(ports.values())) if ports else 0
+    kept = {int(value) for name, value in current.items() if name.endswith("_PORT") and value.isdigit()}
+    shift = port_shift(list(ports.values()), kept) if ports else 0
     if shift:
         moved = ", ".join(f"{name}={port + shift}" for name, port in ports.items())
         print(f"default ports are taken on this machine, so these moved up by {shift}: {moved}")
