@@ -7,10 +7,18 @@ from urllib.parse import urlsplit
 
 import httpx
 
-PARTMAN_CHECK = (
-    "cd /opt/app && COMPOSE_FILE=docker-compose.aws.yml docker compose exec -T lago-api bin/rails runner "
-    "\"puts ActiveRecord::Base.connection.select_value(\\\"select count(*) from pg_extension where extname='pg_partman'\\\")\""
+SERVER_PREFIX = 'export HOME="${HOME:-/root}" PATH="$PATH:/usr/local/bin"; '
+SERVER_CHECK = (
+    SERVER_PREFIX  # noqa: S608
+    + "cd /opt/app && export COMPOSE_FILE=docker-compose.aws.yml; "
+    + "echo \"RUNNING:$(docker compose ps --status running --services | tr '\\n' ' ')\"; "
+    + "echo \"PARTMAN:$(docker compose exec -T lago-api bin/rails runner "
+    + "\"puts ActiveRecord::Base.connection.select_value(\\\"select count(*) from pg_extension where extname='pg_partman'\\\")\" "
+    + "2>/dev/null | tail -n 1)\""
 )
+EXPECTED_SERVICES = ["caddy", "redis", "zitadel-api", "zitadel-login", "lago-api", "lago-worker",
+                     "lago-clock", "lago-front", "lago-pdf", "backend", "jobs"]
+CERT_HINT = "no HTTPS answer. Usually the certificate isn't issued yet because DNS isn't pointing at the server"
 
 
 def problems(results: dict[str, Any]) -> list[str]:
@@ -21,20 +29,41 @@ def problems(results: dict[str, Any]) -> list[str]:
     admin_set = results.get("admin_cidrs_set", False)
     for url, status in results["http"].items():
         host = urlsplit(url).netloc
-        if host.startswith("lago"):
-            if status != 403 and not admin_set:
-                found.append(f"{host} looks public (HTTP {status}); only its webhooks should be")
-        elif status == 0:
-            found.append(f"{host}: no HTTPS answer. Usually the certificate isn't issued yet because DNS isn't pointing at the server")
+        if status == 0:
+            found.append(f"{host}: {CERT_HINT}")
+        elif host.startswith("lago-api."):
+            if status not in ({401, 403} if admin_set else {403}):
+                found.append(f"{host} looks public or is failing (HTTP {status}); only its webhooks should be public")
+        elif host.startswith("lago."):
+            if status not in ({200, 403} if admin_set else {403}):
+                found.append(f"{host} looks public or is failing (HTTP {status}); only its webhooks should be public")
         elif status != 200:
             found.append(f"{url} answered HTTP {status}")
-    if results["partman"] != "1":
+    running = results.get("running")
+    if running is not None:
+        missing = [s for s in EXPECTED_SERVICES if s not in running]
+        if missing:
+            found.append(f"not running on the server: {', '.join(missing)}. Caddy answers 403 for Lago even when it is down")
+    partman = results.get("partman")
+    if partman is not None and partman != "1":
         found.append("pg_partman isn't installed in Lago's database, and Lago skips its setup silently. Re-run make infra-bootstrap")
     return found
 
 
 def admin_cidrs_set(tfvars_text: str) -> bool:
-    return not re.search(r"^\s*admin_cidrs\s*=\s*\[\s*\]", tfvars_text, re.M)
+    """True only when admin_cidrs lists at least one address (empty, missing or commented out is False)."""
+    return bool(re.search(r'^\s*admin_cidrs\s*=\s*\[\s*"', tfvars_text, re.M))
+
+
+def parse_server_output(output: str) -> tuple[list[str], str]:
+    running: list[str] = []
+    partman = "0"
+    for line in output.splitlines():
+        if line.startswith("RUNNING:"):
+            running = line.removeprefix("RUNNING:").split()
+        elif line.startswith("PARTMAN:"):
+            partman = line.removeprefix("PARTMAN:").strip() or "0"
+    return running, partman
 
 
 def status_of(url: str) -> int:
@@ -56,18 +85,21 @@ def main() -> None:
 
     tfvars, aws = infra.read_tfvars(), infra.session()
     domain, server_ip = tfvars["domain"], infra.terraform_output("server_ip")
-    admin_set = admin_cidrs_set(infra.TFVARS.read_text())
-    output = infra.run_on_server(aws, infra.terraform_output("server_instance_id"), PARTMAN_CHECK, timeout_s=120)
-    results = {
+    results: dict[str, Any] = {
         "dns": {h: resolve(h) for h in [f"{s}.{domain}" for s in ["auth", "api", "lago", "lago-api"]]},
         "server_ip": server_ip,
-        "admin_cidrs_set": admin_set,
+        "admin_cidrs_set": admin_cidrs_set(infra.TFVARS.read_text()),
         "http": {u: status_of(u) for u in [
             f"https://auth.{domain}/debug/ready", f"https://api.{domain}/health", f"https://app.{domain}/",
             f"https://lago-api.{domain}/api/v1/plans", f"https://lago.{domain}/"]},
-        "partman": output.strip().splitlines()[-1] if output.strip() else "0",
     }
     found = problems(results)
+    try:
+        output = infra.run_on_server(aws, infra.terraform_output("server_instance_id"), SERVER_CHECK, timeout_s=120)
+        results["running"], results["partman"] = parse_server_output(output)
+        found = problems(results)
+    except SystemExit as exc:
+        found.append(f"could not check the server: {exc}")
     for problem in found:
         print(f"PROBLEM: {problem}")
     if found:

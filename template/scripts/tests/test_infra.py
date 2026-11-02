@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import infra
+import make_env
 
 
 def test_read_tfvars(tmp_path: pathlib.Path) -> None:
@@ -74,3 +75,47 @@ def test_bundle_skips_caches_and_virtualenvs(tmp_path: pathlib.Path, monkeypatch
     infra.upload_bundle(s3, "bucket")
     keys = sorted(call.args[2] for call in s3.upload_file.call_args_list)
     assert keys == ["current/docker-compose.aws.yml", "current/scripts/a.py"]
+
+
+def test_bundle_skips_env_files_and_ds_store(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "deploy").mkdir()
+    for name in ["Caddyfile", ".env", ".env.local", ".DS_Store", ".envrc-not"]:
+        (tmp_path / "deploy" / name).write_text("")
+    monkeypatch.setattr(infra, "ROOT", tmp_path)
+    s3 = MagicMock()
+    infra.upload_bundle(s3, "bucket")
+    keys = sorted(call.args[2] for call in s3.upload_file.call_args_list)
+    assert keys == ["current/deploy/.envrc-not", "current/deploy/Caddyfile"]
+
+
+def test_release_refuses_a_dirty_tree() -> None:
+    infra.check_clean("")
+    infra.check_clean("\n")
+    with pytest.raises(SystemExit, match="uncommitted"):
+        infra.check_clean(" M backend/app/main.py\n")
+
+
+def test_bootstrap_command_is_pinned() -> None:
+    assert infra.BOOTSTRAP_COMMAND == (
+        'export HOME="${HOME:-/root}" PATH="$PATH:/usr/local/bin"; app-start && /opt/app/deploy/first-run.sh')
+
+
+@pytest.mark.parametrize("name", [n for n, c in infra.SECRET_SPECS.items() if "genrsa" not in c])
+def test_every_secret_command_is_understood_by_make_env(name: str) -> None:
+    assert make_env.generate(infra.SECRET_SPECS[name])
+
+
+def test_init_finishes_an_existing_bucket(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    tfvars = {"slug": "acme", "aws_account_id": "123", "aws_region": "us-west-2"}
+    s3 = MagicMock()
+    s3.list_buckets.return_value = {"Buckets": [{"Name": "acme-tfstate-123"}]}
+    aws = MagicMock()
+    aws.client.return_value = s3
+    monkeypatch.setattr(infra, "read_tfvars", lambda *a: tfvars)
+    monkeypatch.setattr(infra, "session", lambda: aws)
+    monkeypatch.setattr(infra, "INFRA", tmp_path)
+    monkeypatch.setattr(infra.subprocess, "run", MagicMock())
+    infra.init()
+    s3.create_bucket.assert_not_called()
+    s3.put_bucket_versioning.assert_called_once()
+    s3.put_public_access_block.assert_called_once()

@@ -95,9 +95,10 @@ def init() -> None:
     if bucket not in [b["Name"] for b in s3.list_buckets()["Buckets"]]:
         config = {} if region == "us-east-1" else {"CreateBucketConfiguration": {"LocationConstraint": region}}
         s3.create_bucket(Bucket=bucket, **config)
-        s3.put_bucket_versioning(Bucket=bucket, VersioningConfiguration={"Status": "Enabled"})
-        s3.put_public_access_block(Bucket=bucket, PublicAccessBlockConfiguration={
-            "BlockPublicAcls": True, "IgnorePublicAcls": True, "BlockPublicPolicy": True, "RestrictPublicBuckets": True})
+    # Every run, so a bucket that an earlier run left half set up is finished.
+    s3.put_bucket_versioning(Bucket=bucket, VersioningConfiguration={"Status": "Enabled"})
+    s3.put_public_access_block(Bucket=bucket, PublicAccessBlockConfiguration={
+        "BlockPublicAcls": True, "IgnorePublicAcls": True, "BlockPublicPolicy": True, "RestrictPublicBuckets": True})
     (INFRA / "backend.hcl").write_text(
         f'bucket = "{bucket}"\nkey = "terraform.tfstate"\nregion = "{region}"\nencrypt = true\nuse_lockfile = true\n')
     subprocess.run(["terraform", "init", "-backend-config=backend.hcl", "-input=false"], cwd=INFRA, check=True)  # noqa: S607
@@ -144,7 +145,15 @@ def git_commit() -> str:
                           capture_output=True, text=True).stdout.strip()
 
 
+def check_clean(porcelain: str) -> None:
+    """The image tag is the commit, so uncommitted changes would ship under a tag that doesn't hold them."""
+    if porcelain.strip():
+        raise SystemExit("the working tree has uncommitted changes; commit or stash them first, because the image tag is the commit")
+
+
 def release() -> None:
+    check_clean(subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, check=True,  # noqa: S607
+                               capture_output=True, text=True).stdout)
     tfvars, aws = read_tfvars(), session()
     slug, region, account, tag = tfvars["slug"], tfvars["aws_region"], tfvars["aws_account_id"], git_commit()
     registry = f"{account}.dkr.ecr.{region}.amazonaws.com"
@@ -166,12 +175,16 @@ SKIPPED_DIRS = {".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_c
 SERVICES = ["backend", "jobs"]
 
 
+def is_bundled(path: Path) -> bool:
+    name = path.name
+    return not (SKIPPED_DIRS.intersection(path.relative_to(ROOT).parts) or name == ".DS_Store" or name == ".env" or name.startswith(".env."))
+
+
 def upload_bundle(s3: Any, bucket: str) -> None:
     """Deploy files as plain objects under current/, for `aws s3 sync` on the server."""
     for name in BUNDLE:
         path = ROOT / name
-        files = [path] if path.is_file() else [p for p in path.rglob("*") if p.is_file()
-                                               and not SKIPPED_DIRS.intersection(p.parts)]
+        files = [path] if path.is_file() else [p for p in path.rglob("*") if p.is_file() and is_bundled(p)]
         for file in files:
             s3.upload_file(str(file), bucket, f"current/{file.relative_to(ROOT).as_posix()}")
 
@@ -197,9 +210,12 @@ def run_on_server(aws: Any, instance_id: str, command: str, timeout_s: int = 180
     raise SystemExit("on the server: gave up waiting")
 
 
+BOOTSTRAP_COMMAND = 'export HOME="${HOME:-/root}" PATH="$PATH:/usr/local/bin"; app-start && /opt/app/deploy/first-run.sh'
+
+
 def bootstrap() -> None:
     aws = session()
-    run_on_server(aws, terraform_output("server_instance_id"), "app-start || true; /opt/app/deploy/first-run.sh")
+    run_on_server(aws, terraform_output("server_instance_id"), BOOTSTRAP_COMMAND)
 
 
 def delete_parameters(ssm: Any, slug: str) -> None:
