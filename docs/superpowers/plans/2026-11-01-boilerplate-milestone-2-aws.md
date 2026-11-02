@@ -1636,6 +1636,7 @@ git commit -m "feat(infra): AWS Compose file, Caddy routing and database setup"
 - SSM Run Command gives no reliable `HOME` or `PATH`. All three scripts start with `export HOME="${HOME:-/root}"` and `PATH="$PATH:/usr/local/bin"`. Append to `PATH`, so test stubs still win.
 - `template/scripts/tests/test_deploy_scripts.py` must pass `make check`'s `ruff check .`: tests don't have an S607 exemption, so add `# noqa: S607` where `bash` is called.
 - Commit the three scripts with the executable bit.
+- Fix round 1 (review): `deploy.sh` checks `up -d` (a failed start goes to rollback; a failed rollback restart prints "the service may be down"), retries `put-parameter` 3 times then exits 1 "deployed but not recorded", refuses with exit 1 when the previous tag is empty, needs 5 consecutive running polls for `jobs`, takes `flock -w 600` on `$APP_DIR/.deploy.lock` when `flock` exists (the sync in `user_data.sh.tftpl` excludes it), and exits 1 if `/etc/app.env` cannot be sourced. `start.sh` reads secrets and tags into variables before writing `.env`, treats only `ResourceNotFoundException` on the bootstrap secret as "no tokens yet" (other errors and non-JSON content exit non-zero), and uses `jq -er` per token. `first-run.sh` uses `jq -er .password` and splits `export` from assignment (SC2155).
 
 **Files:**
 - Create: `template/deploy/start.sh`, `template/deploy/first-run.sh`, `template/deploy/deploy.sh`, `template/scripts/tests/test_deploy_scripts.py`
