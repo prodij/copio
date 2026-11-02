@@ -97,7 +97,7 @@ e2e:
 	@if [ -n "$$MOCK_PAYMENT" ]; then echo "MOCK PAYMENT run: the Stripe payment test did not run. A mock payment pass is not a Stripe pass."; fi
 
 # AWS. See infra/README.md. Set AWS_PROFILE first.
-.PHONY: infra-init infra-plan infra-apply infra-secrets infra-set-stripe-key infra-release infra-bootstrap infra-doctor infra-destroy
+.PHONY: infra-init infra-plan infra-apply infra-secrets infra-set-stripe-key infra-release infra-bootstrap infra-doctor infra-destroy rehearse-aws
 
 infra-init:
 	cd scripts && uv run python infra.py init
@@ -128,3 +128,7 @@ infra-doctor:
 
 infra-destroy:
 	cd scripts && uv run python infra.py destroy
+
+# The AWS database setup and routing, locally: no AWS, nothing published, and it removes what it starts.
+rehearse-aws:
+	bash deploy/rehearsal/run.sh

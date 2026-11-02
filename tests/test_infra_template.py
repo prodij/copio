@@ -1,3 +1,4 @@
+import json
 import pathlib
 import re
 import shutil
@@ -159,3 +160,53 @@ def test_make_has_every_infra_command(product_dir: pathlib.Path) -> None:
     for target in ["infra-init", "infra-plan", "infra-apply", "infra-secrets", "infra-set-stripe-key",
                    "infra-release", "infra-bootstrap", "infra-doctor", "infra-destroy"]:
         assert f"\n{target}:" in makefile, target
+
+
+def rehearsal_compose(product_dir: pathlib.Path) -> dict:
+    """The AWS file with the rehearsal's override applied, as Compose itself merges them."""
+    result = subprocess.run(
+        ["docker", "compose", "-f", "docker-compose.aws.yml", "-f", "deploy/rehearsal/docker-compose.rehearsal.yml",
+         "--profile", "setup", "config", "--no-interpolate", "--format", "json"],
+        cwd=product_dir, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def test_rehearsal_files_exist_and_are_not_ignored(product_dir: pathlib.Path) -> None:
+    for rel in ["rehearsal.env", "docker-compose.rehearsal.yml", "run.sh"]:
+        assert (product_dir / "deploy" / "rehearsal" / rel).is_file(), rel
+    assert ".rehearsal/" in (product_dir / ".gitignore").read_text().splitlines()
+    makefile = (product_dir / "Makefile").read_text()
+    assert "\nrehearse-aws:" in makefile
+    assert re.search(r"^\.PHONY:.*\brehearse-aws\b", makefile, re.M)
+
+
+def test_rehearsal_publishes_no_ports(product_dir: pathlib.Path) -> None:
+    assert shutil.which("docker"), "docker is required for this test"
+    services = rehearsal_compose(product_dir)["services"]
+    assert "db" in services and "caddy" in services and "lago-api" in services
+    for name, service in services.items():
+        if name == "backend":  # never started: it has no image here, and run.sh names what it starts
+            continue
+        assert not service.get("ports"), f"{name}: {service.get('ports')}"
+
+
+def test_rehearsal_never_mounts_the_products_bootstrap_folder(product_dir: pathlib.Path) -> None:
+    services = rehearsal_compose(product_dir)["services"]
+    for name in ["zitadel-api", "zitadel-login"]:
+        sources = [volume["source"] for volume in services[name]["volumes"]]
+        assert not any(".bootstrap" in source for source in sources), f"{name}: {sources}"
+
+
+def test_rehearsal_env_has_no_key_and_covers_what_compose_needs(product_dir: pathlib.Path) -> None:
+    text = (product_dir / "deploy" / "rehearsal" / "rehearsal.env").read_text()
+    assert "PRIVATE KEY" not in text and "LAGO_RSA_PRIVATE_KEY" not in text  # run.sh generates it
+    # Zitadel's setup refuses a first-instance SMTP host without a port, and AWS always gives it one.
+    assert re.search(r"^SMTP_HOST=\S+:\d+$", text, re.M)
+
+
+def test_lago_migrations_run_instead_of_loading_structure_sql(product_dir: pathlib.Path) -> None:
+    # Loading it drops and recreates pg_partman, which Lago's non-superuser role can't do.
+    command = aws_compose(product_dir)["services"]["lago-migrate"]["command"]
+    assert "rm -f db/structure.sql" in " ".join(command)

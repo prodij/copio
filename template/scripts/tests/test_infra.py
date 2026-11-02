@@ -119,3 +119,15 @@ def test_init_finishes_an_existing_bucket(monkeypatch: pytest.MonkeyPatch, tmp_p
     s3.create_bucket.assert_not_called()
     s3.put_bucket_versioning.assert_called_once()
     s3.put_public_access_block.assert_called_once()
+
+
+def test_bundle_skips_the_local_rehearsal(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "deploy" / "rehearsal").mkdir(parents=True)
+    (tmp_path / "deploy" / "start.sh").write_text("x")
+    (tmp_path / "deploy" / "rehearsal" / "rehearsal.env").write_text("x")
+    monkeypatch.setattr(infra, "ROOT", tmp_path)
+    monkeypatch.setattr(infra, "BUNDLE", ["deploy"])
+    s3 = MagicMock()
+    infra.upload_bundle(s3, "bucket")
+    keys = [call.args[2] for call in s3.upload_file.call_args_list]
+    assert keys == ["current/deploy/start.sh"]

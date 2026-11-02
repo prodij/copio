@@ -171,7 +171,7 @@ def release() -> None:
 
 
 BUNDLE = ["docker-compose.aws.yml", "deploy", "scripts", "brand"]
-SKIPPED_DIRS = {".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+SKIPPED_DIRS = {".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "rehearsal"}
 SERVICES = ["backend", "jobs"]
 
 

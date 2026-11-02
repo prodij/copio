@@ -125,7 +125,9 @@ services:
 
   lago-migrate:
     image: getlago/api:v1.55.0
-    command: ["./scripts/migrate.sh"]
+    # Without structure.sql, Rails runs the migrations on an empty database instead of loading it. The file
+    # drops and recreates pg_partman, which only a superuser can do, and leaves partman.part_config empty.
+    command: ["sh", "-c", "rm -f db/structure.sql && exec ./scripts/migrate.sh"]
     environment: *lago-env
     depends_on: {redis: {condition: service_healthy}}
 
