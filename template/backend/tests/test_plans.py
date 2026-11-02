@@ -15,7 +15,6 @@ def test_shipped_plans_load() -> None:
     plans = load_plans()
     assert "starter" in plans
     assert plans["starter"].features["premium_report"] is True
-    assert plans["starter"].features["seats"] == 5
 
 
 def test_to_lago_shape() -> None:

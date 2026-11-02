@@ -2,6 +2,7 @@ import { act, screen } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mockFetch, renderWithQuery } from "@/test/utils";
+import { MockPaymentBanner } from "@/components/MockPaymentBanner";
 import { CheckoutReturn } from "./CheckoutReturn";
 
 beforeEach(() => window.sessionStorage.clear());
@@ -112,4 +113,27 @@ it("after the cap says it is still confirming and never goes back to Stripe", as
   expect(calls(spy)).toHaveLength(n);
   expect(calls(spy)).not.toContain("GET /me/access");
   expect(assign).not.toHaveBeenCalled();
+});
+
+it("with mock payment says so once it stops waiting for the webhook", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  mockFetch({ "GET /me/access": { status: 200, body: { mock_payment: true, plan_code: "starter", state: "pending", features: {} } } });
+  renderWithQuery(<CheckoutReturn />);
+  await act(() => vi.advanceTimersByTimeAsync(61_000));
+  expect(await screen.findByText(/Mock payment: Lago's webhook hasn't arrived yet/)).toBeInTheDocument();
+  expect(screen.queryByText(/Payment is not confirmed yet/)).not.toBeInTheDocument();
+});
+
+it("with mock payment never talks about a saved card while the checkout call is slow", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  window.sessionStorage.setItem("checkout_plan", "starter");
+  const access = { mock_payment: true, plan_code: null, state: null, features: {} };
+  vi.stubGlobal("fetch", vi.fn(async (input: Request) =>
+    input.method === "POST"
+      ? new Promise<Response>(() => {}) // the checkout call never answers
+      : new Response(JSON.stringify(access), { status: 200, headers: { "Content-Type": "application/json" } })));
+  renderWithQuery(<><MockPaymentBanner /><CheckoutReturn /></>); // the banner fills the shared access query
+  await act(() => vi.advanceTimersByTimeAsync(61_000));
+  expect(await screen.findByText(/Mock payment: still creating the Lago subscription/)).toBeInTheDocument();
+  expect(screen.queryByText(/card is saved/)).not.toBeInTheDocument();
 });

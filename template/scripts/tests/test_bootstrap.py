@@ -11,6 +11,7 @@ import bootstrap
 import product
 from bootstrap import (
     ensure_backend_machine_user,
+    ensure_login_page,
     ensure_project,
     ensure_self_registration,
     ensure_web_app,
@@ -179,6 +180,29 @@ def test_self_registration_already_allowed_is_left_alone() -> None:
     put = respx.put(f"{Z}/admin/v1/policies/login")
     with httpx.Client(base_url=Z) as http:
         ensure_self_registration(http)
+    assert put.call_count == 0
+
+
+@respx.mock
+def test_login_page_follows_a_moved_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ZITADEL_LOGIN_PORT", "3120")
+    wanted = f"http://auth.{bootstrap.product.DOMAIN}:3120/ui/v2/login/"
+    respx.get(f"{Z}/v2/features/instance").respond(200, json={"loginV2": {
+        "required": True, "baseUri": wanted.replace("3120", "3110")}})
+    put = respx.put(f"{Z}/v2/features/instance").respond(200, json={})
+    with httpx.Client(base_url=Z) as http:
+        ensure_login_page(http)
+    assert body(put) == {"loginV2": {"required": True, "baseUri": wanted}}
+
+
+@respx.mock
+def test_login_page_already_right_is_left_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ZITADEL_LOGIN_PORT", "3100")
+    respx.get(f"{Z}/v2/features/instance").respond(200, json={"loginV2": {
+        "baseUri": f"http://auth.{bootstrap.product.DOMAIN}:3100/ui/v2/login/"}})
+    put = respx.put(f"{Z}/v2/features/instance")
+    with httpx.Client(base_url=Z) as http:
+        ensure_login_page(http)
     assert put.call_count == 0
 
 
@@ -398,6 +422,7 @@ def stubbed_main(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> Non
         monkeypatch.setenv(port, "1234")
     for name in ("http_ok", "bootstrap_zitadel", "bootstrap_lago", "ensure_bucket", "backend"):
         monkeypatch.setattr(bootstrap, name, lambda *_a, **_k: True)
+    monkeypatch.setattr(bootstrap, "lago_has_subscriptions", lambda: False)
     pat = tmp_path / "admin.pat"
     pat.write_text("x")
     monkeypatch.setattr(bootstrap, "ADMIN_PAT", pat)
@@ -424,8 +449,10 @@ def test_main_tests_the_key_first_and_applies_the_webhook_secret_last(
 def test_a_key_stripe_rejects_changes_nothing(monkeypatch: pytest.MonkeyPatch, stubbed_main: None, printed: str) -> None:
     fake = FakeStripeSetup(monkeypatch, [], printed)
     monkeypatch.setattr(bootstrap, "wait_for", lambda *_a, **_k: pytest.fail("a service was waited on"))
-    with pytest.raises(SystemExit, match="printed no whsec_ secret"):
+    with pytest.raises(SystemExit, match="Stripe rejected STRIPE_SECRET_KEY or could not be reached") as stopped:
         bootstrap.main()
+    assert "Nothing was changed. Fix or empty it in .env and run `make bootstrap` again." in str(stopped.value)
+    assert "printed no whsec_ secret" in str(stopped.value)
     assert len(fake.events) == 1 and "--print-secret" in fake.events[0]
 
 
@@ -437,8 +464,11 @@ def test_a_failed_print_secret_changes_nothing(monkeypatch: pytest.MonkeyPatch, 
 
     monkeypatch.setattr(bootstrap, "compose", rejected)
     monkeypatch.setattr(bootstrap, "wait_for", lambda *_a, **_k: pytest.fail("a service was waited on"))
-    with pytest.raises(SystemExit, match="failed"):
+    with pytest.raises(SystemExit, match="could not check STRIPE_SECRET_KEY with Stripe") as stopped:
         bootstrap.main()
+    assert "or Docker failed" in str(stopped.value) and "Nothing was changed" in str(stopped.value)
+    assert "failed (exit 1)" in str(stopped.value)
+    assert "Stripe rejected" not in str(stopped.value)
     assert fake.graphql == []
 
 
@@ -454,6 +484,111 @@ def test_main_finishes_without_a_key_and_recreates_the_frontend_last(
     out = capsys.readouterr().out
     assert out.index("SKIPPED") < out.index("Ready.")
     assert os.environ["STRIPE_SECRET_KEY"] == ""  # what Compose gets: it would keep Make's literal quotes
+
+
+def test_mock_payment_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BILLING_MODE", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    assert bootstrap.mock_payment() is False
+
+
+@pytest.mark.parametrize(("env", "message"), [
+    ({"BILLING_MODE": "fake"}, "must be empty or mock"),
+    ({"BILLING_MODE": "mock", "APP_ENV": ""}, "needs APP_ENV=local"),
+    ({"BILLING_MODE": "mock", "APP_ENV": "production"}, "needs APP_ENV=local"),
+    ({"BILLING_MODE": "mock", "APP_ENV": "local", "STRIPE_SECRET_KEY": "sk_test_x"}, "STRIPE_SECRET_KEY is set"),
+])
+def test_main_refuses_unsafe_mock_payment_before_touching_anything(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str], message: str
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "")
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(bootstrap, "wait_for", lambda *_a, **_k: pytest.fail("a service was waited on"))
+    with pytest.raises(SystemExit, match=message) as stopped:
+        bootstrap.main()
+    assert "Nothing was changed" in str(stopped.value)
+    assert fake.compose_calls == [] and fake.graphql == []
+
+
+@pytest.mark.parametrize("quote", ["", '"', "'"])
+def test_main_with_mock_payment_leaves_stripe_alone_and_says_so(
+    monkeypatch: pytest.MonkeyPatch, stubbed_main: None, capsys: pytest.CaptureFixture[str], quote: str
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "")
+    monkeypatch.setenv("BILLING_MODE", f"{quote}mock{quote}")
+    monkeypatch.setenv("APP_ENV", f"{quote}local{quote}")
+    bootstrap.main()
+    assert not any("stripe-cli" in call for call in fake.compose_calls)  # no print-secret, no recreate
+    assert all(query != bootstrap.ADD_STRIPE for query, _ in fake.graphql)
+    assert fake.compose_calls[-1] == ("up", "-d", "--force-recreate", "frontend")
+    out = capsys.readouterr().out
+    assert "Mock payment: ON" in out and "not a Stripe pass" in out and "SKIPPED" not in out
+    assert (os.environ["BILLING_MODE"], os.environ["APP_ENV"]) == ("mock", "local")  # what Compose gets, unquoted
+
+
+def test_mock_payment_stops_on_a_stripe_provider_before_services_are_recreated(
+    monkeypatch: pytest.MonkeyPatch, stubbed_main: None
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], "whsec_abc")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "")
+    monkeypatch.setenv("BILLING_MODE", "mock")
+    monkeypatch.setenv("APP_ENV", "local")
+    with pytest.raises(SystemExit, match="Lago still has the Stripe provider"):
+        bootstrap.main()
+    assert fake.compose_calls == []
+
+
+def test_leaving_mock_payment_stops_before_the_provider_is_added(
+    monkeypatch: pytest.MonkeyPatch, stubbed_main: None
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
+    monkeypatch.setenv("BILLING_MODE", "")
+    monkeypatch.setattr(bootstrap, "lago_has_subscriptions", lambda: True)
+    with pytest.raises(SystemExit, match=r"left over from mock payment.*`make reset`"):
+        bootstrap.main()
+    assert all(query != bootstrap.ADD_STRIPE for query, _ in fake.graphql)
+    assert not any("--force-recreate" in call for call in fake.compose_calls)
+
+
+def test_leaving_mock_payment_with_no_key_stops_too(monkeypatch: pytest.MonkeyPatch, stubbed_main: None) -> None:
+    FakeStripeSetup(monkeypatch, [], "")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "")
+    monkeypatch.setenv("BILLING_MODE", "")
+    monkeypatch.setattr(bootstrap, "lago_has_subscriptions", lambda: True)
+    with pytest.raises(SystemExit, match="left over from mock payment"):
+        bootstrap.main()
+
+
+def test_adding_a_first_key_is_not_taken_for_a_leftover(monkeypatch: pytest.MonkeyPatch, stubbed_main: None) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")  # no provider, no subscriptions
+    monkeypatch.setenv("BILLING_MODE", "")
+    bootstrap.main()
+    assert any(query == bootstrap.ADD_STRIPE for query, _ in fake.graphql)
+
+
+def test_a_rerun_with_a_provider_and_subscriptions_is_not_taken_for_a_leftover(
+    monkeypatch: pytest.MonkeyPatch, stubbed_main: None
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], "whsec_abc")
+    monkeypatch.setenv("BILLING_MODE", "")
+    monkeypatch.setattr(bootstrap, "lago_has_subscriptions", lambda: pytest.fail("not needed with a provider"))
+    bootstrap.main()
+    assert fake.compose_calls[-1] == ("up", "-d", "--force-recreate", "frontend")
+
+
+@respx.mock
+def test_lago_subscriptions_are_asked_for_in_every_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LAGO_API_KEY", "k")
+    monkeypatch.setenv("LAGO_API_PORT", "3000")
+    route = respx.get("http://127.0.0.1:3000/api/v1/subscriptions").respond(200, json={"subscriptions": []})
+    assert bootstrap.lago_has_subscriptions() is False
+    assert route.calls.last.request.url.params.get_list("status[]") == [
+        "pending", "active", "terminated", "canceled", "incomplete"]
+    route.respond(200, json={"subscriptions": [{"external_id": "x"}]})
+    assert bootstrap.lago_has_subscriptions() is True
 
 
 def test_bootstrap_stripe_adds_the_provider_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -483,15 +618,24 @@ def test_bootstrap_stripe_sets_the_webhook_secret_last(monkeypatch: pytest.Monke
 
 
 def test_bootstrap_stripe_keeps_an_existing_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], "whsec_abc")
+    current = f"http://{product.DOMAIN}:5173/billing/return"
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe", "successRedirectUrl": current}], "whsec_abc")
     bootstrap.bootstrap_stripe("whsec_abc")
-    assert all(q != bootstrap.ADD_STRIPE for q, _ in fake.graphql)
+    assert [q for q, _ in fake.graphql] == [bootstrap.STRIPE_PROVIDERS]
+
+
+def test_bootstrap_stripe_follows_a_moved_app_port_without_sending_the_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    stale = f"http://{product.DOMAIN}:5163/billing/return"
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe", "successRedirectUrl": stale}], "whsec_abc")
+    bootstrap.bootstrap_stripe("whsec_abc")
+    assert [v for q, v in fake.graphql if q == bootstrap.UPDATE_STRIPE] == [
+        {"i": {"id": "p1", "successRedirectUrl": f"http://{product.DOMAIN}:5173/billing/return"}}]
 
 
 @pytest.mark.parametrize("printed", ["", "\n", "Getting ready...\nnot a secret"])
 def test_stripe_webhook_secret_must_be_a_whsec_secret(monkeypatch: pytest.MonkeyPatch, printed: str) -> None:
     fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], printed)
-    with pytest.raises(SystemExit, match="printed no whsec_ secret"):
+    with pytest.raises(SystemExit, match="Stripe rejected STRIPE_SECRET_KEY"):
         bootstrap.stripe_webhook_secret()
     assert not any("runner" in c for c in fake.compose_calls)
 

@@ -15,7 +15,13 @@ async function unwrap<T>(p: Promise<{ data?: T; error?: unknown; response: Respo
 }
 
 export const meQuery = queryOptions({ queryKey: ["me"], queryFn: () => unwrap(api.GET("/me")) });
-export const accessQuery = queryOptions({ queryKey: ["access"], queryFn: () => unwrap(api.GET("/me/access")) });
+// 403 means no workspace yet: asking again can't help, and the mock payment banner asks on every page.
+export const retryAccess = (failures: number, error: Error) => (error as ApiError).status !== 403 && failures < 3;
+export const accessQuery = queryOptions({
+  queryKey: ["access"],
+  queryFn: () => unwrap(api.GET("/me/access")),
+  retry: retryAccess,
+});
 export const plansQuery = queryOptions({ queryKey: ["plans"], queryFn: () => unwrap(api.GET("/billing/plans")) });
 export const premiumReportQuery = queryOptions({
   queryKey: ["premium-report"],

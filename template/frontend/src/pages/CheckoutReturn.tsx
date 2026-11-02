@@ -4,19 +4,11 @@ import { Link } from "react-router";
 import { accessQuery, startCheckout } from "@/api/queries";
 import type { ApiError } from "@/api/errors";
 import { ErrorState } from "@/components/ErrorState";
-import { PLAN_KEY } from "./Plans";
+import { PLAN_KEY, readPlan } from "./Plans";
 
 const POLL_MS = 2_000;
 const RETRY_MS = 2_000;
 const GIVE_UP_MS = 60_000;
-
-function readPlan(): string | null {
-  try {
-    return window.sessionStorage.getItem(PLAN_KEY);
-  } catch {
-    return null;
-  }
-}
 
 // Option A: coming back from Stripe only means a card was saved. A second checkout call creates
 // the payment-gated subscription; access switches on only when /me/access says "active".
@@ -80,12 +72,20 @@ export function CheckoutReturn() {
   if (timedOut && !secondDone) {
     return (
       <p className="text-sm text-muted-foreground">
-        Your card is saved and we are still confirming it — we&apos;ll finish this shortly. Check Billing in a few minutes.
+        {data?.mock_payment
+          ? "Mock payment: still creating the Lago subscription. No card is involved. Check Billing in a few minutes."
+          : "Your card is saved and we are still confirming it — we'll finish this shortly. Check Billing in a few minutes."}
       </p>
     );
   }
   if (timedOut) {
-    return <p className="text-sm text-muted-foreground">Payment is not confirmed yet. Reload this page in a moment.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        {data?.mock_payment
+          ? "Mock payment: Lago's webhook hasn't arrived yet. Reload this page in a moment."
+          : "Payment is not confirmed yet. Reload this page in a moment."}
+      </p>
+    );
   }
   return <p className="text-sm text-muted-foreground">Waiting for payment confirmation…</p>;
 }

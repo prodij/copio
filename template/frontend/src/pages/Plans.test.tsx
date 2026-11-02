@@ -1,8 +1,12 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { Route, Routes } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
-import { mockFetch, renderWithQuery } from "@/test/utils";
+import { mockFetch as mockRoutes, renderWithQuery } from "@/test/utils";
 import { Plans } from "./Plans";
+
+// The page also asks /me/access; a 403 (no workspace) answers at once, without accessQuery's retries.
+const mockFetch: typeof mockRoutes = (routes) =>
+  mockRoutes({ "GET /me/access": { status: 403, body: { detail: "No workspace for this user" } }, ...routes });
 
 afterEach(() => {
   vi.useRealTimers();
@@ -101,4 +105,21 @@ it("goes on once the Stripe customer exists", async () => {
   await vi.waitFor(() => expect(assign).toHaveBeenCalledWith("https://checkout.stripe.test/s"));
   expect(calls).toBe(3);
   expect(screen.queryByText("Stripe customer is unavailable")).not.toBeInTheDocument();
+});
+
+it("with mock payment goes to the mock payment page and starts no checkout yet", async () => {
+  const spy = mockFetch({
+    "GET /billing/plans": { status: 200, body: [plan] },
+    "GET /me/access": { status: 200, body: { billing_configured: true, mock_payment: true, plan_code: null, state: null, features: {}, current_period_end: null } },
+  });
+  renderWithQuery(
+    <Routes>
+      <Route path="/" element={<Plans />} />
+      <Route path="/billing/mock-payment" element={<p>mock payment page</p>} />
+    </Routes>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Choose Starter" }));
+  expect(await screen.findByText("mock payment page")).toBeInTheDocument();
+  expect(window.sessionStorage.getItem("checkout_plan")).toBe("starter");
+  expect(checkoutCalls(spy)).toBe(0);
 });

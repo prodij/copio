@@ -256,6 +256,15 @@ def ensure_self_registration(http: httpx.Client) -> None:
     check(http.put("/admin/v1/policies/login", json=body), "Zitadel login policy update")
 
 
+def ensure_login_page(http: httpx.Client) -> None:
+    """Zitadel stores the login page's URL at first start, so a moved ZITADEL_LOGIN_PORT needs this."""
+    base = f"{public_url('auth', 'ZITADEL_LOGIN_PORT')}/ui/v2/login/"
+    feature = check(http.get("/v2/features/instance"), "Zitadel feature read").get("loginV2", {})
+    if feature.get("baseUri") != base:
+        check(http.put("/v2/features/instance", json={"loginV2": {"required": True, "baseUri": base}}),
+              "Zitadel login page update")
+
+
 def bootstrap_zitadel() -> None:
     with zitadel_http() as http:
         org_id = str(check(http.get("/management/v1/orgs/me"), "Zitadel org read")["org"]["id"])
@@ -263,6 +272,7 @@ def bootstrap_zitadel() -> None:
         client_id = ensure_web_app(http, project_id, app_url())
         ensure_backend_machine_user(http)
         ensure_self_registration(http)
+        ensure_login_page(http)
     save_ids(ZITADEL_PROJECT_ID=project_id, ZITADEL_INSTANCE_ORG_ID=org_id, ZITADEL_CLIENT_ID=client_id)
     # The browser sees every ZITADEL_* variable the dev server has, so it gets only these two.
     write_ids(FRONTEND_ENV, {"ZITADEL_CLIENT_ID": client_id, "ZITADEL_PROJECT_ID": project_id})
@@ -325,8 +335,9 @@ def bootstrap_lago() -> None:
     print(f"Lago: organization {org_id}, webhook to the backend, metric {USAGE_METRIC}")
 
 
-STRIPE_PROVIDERS = "query{paymentProviders(type: stripe){collection{... on StripeProvider{id code}}}}"
+STRIPE_PROVIDERS = "query{paymentProviders(type: stripe){collection{... on StripeProvider{id code successRedirectUrl}}}}"
 ADD_STRIPE = "mutation($i: AddStripePaymentProviderInput!){addStripePaymentProvider(input:$i){id}}"
+UPDATE_STRIPE = "mutation($i: UpdateStripePaymentProviderInput!){updateStripePaymentProvider(input:$i){id}}"
 # Lago cannot register a Stripe webhook endpoint for a local URL, so it checks the signing secret
 # of `stripe listen` instead (the CLI's secret is fixed per Stripe account). Adding the provider
 # queues Lago's RegisterWebhookJob, which writes Stripe's own endpoint secret on success, so this
@@ -349,12 +360,21 @@ end
 """
 
 
-def stripe_secret_key() -> str:
-    """The test key, or "" when none is set yet: Stripe is optional, a wrong kind of key is not.
+STRIPE_REJECTED = ("Stripe rejected STRIPE_SECRET_KEY or could not be reached. Nothing was changed. "
+                   "Fix or empty it in .env and run `make bootstrap` again.")
+KEY_NOT_CHECKED = ("could not check STRIPE_SECRET_KEY with Stripe: Stripe may have rejected it or be unreachable, "
+                   "or Docker failed (details below). Nothing was changed. Fix the cause, or empty the key in .env, "
+                   "and run `make bootstrap` again.")
 
-    Make passes .env values as written, so `STRIPE_SECRET_KEY=""` arrives here with its quotes.
-    """
-    key = os.environ.get("STRIPE_SECRET_KEY", "").strip().strip("\"'").strip()
+
+def optional_env(name: str) -> str:
+    """Make passes .env values as written, so `STRIPE_SECRET_KEY=""` arrives here with its quotes."""
+    return os.environ.get(name, "").strip().strip("\"'").strip()
+
+
+def stripe_secret_key() -> str:
+    """The test key, or "" when none is set yet: Stripe is optional, a wrong kind of key is not."""
+    key = optional_env("STRIPE_SECRET_KEY")
     if key and not key.startswith("sk_test_"):
         raise SystemExit(
             "bootstrap: STRIPE_SECRET_KEY must be a Stripe TEST secret key (sk_test_...), or empty to run "
@@ -366,12 +386,58 @@ def stripe_secret_key() -> str:
 
 def stripe_webhook_secret() -> str:
     """The signing secret of `stripe listen`. Asking for it is what tests the key against Stripe."""
-    printed = compose("run", "--rm", "--no-deps", "--entrypoint", "stripe", "stripe-cli",
-                      "listen", "--print-secret", capture=True).splitlines()
+    try:
+        printed = compose("run", "--rm", "--no-deps", "--entrypoint", "stripe", "stripe-cli",
+                          "listen", "--print-secret", capture=True).splitlines()
+    except SystemExit as exc:
+        raise SystemExit(f"bootstrap: {KEY_NOT_CHECKED}\n  {exc}") from None
     secret = printed[-1].strip() if printed else ""
     if not secret.startswith("whsec_"):
-        raise SystemExit("bootstrap: `stripe listen --print-secret` printed no whsec_ secret")
+        raise SystemExit(f"bootstrap: {STRIPE_REJECTED}\n  `stripe listen --print-secret` printed no whsec_ secret")
     return secret
+
+
+def mock_payment() -> bool:
+    """BILLING_MODE=mock: the same refusals as the backend's, before anything changes."""
+    mode = optional_env("BILLING_MODE")
+    if not mode:
+        return False
+    if mode != "mock":
+        raise SystemExit(f"bootstrap: BILLING_MODE must be empty or mock, not {mode!r}. Nothing was changed.")
+    if optional_env("APP_ENV") != "local":
+        raise SystemExit("bootstrap: mock payment is refused: BILLING_MODE=mock needs APP_ENV=local. Nothing was changed.")
+    if stripe_secret_key():
+        raise SystemExit("bootstrap: mock payment is refused: STRIPE_SECRET_KEY is set. Empty it or empty BILLING_MODE "
+                         "in .env. Nothing was changed.")
+    return True
+
+
+def lago_has_subscriptions() -> bool:
+    """Any at all: Lago's list answers only active ones unless asked for each status."""
+    with lago_api() as api:
+        reply = api.get("/api/v1/subscriptions", params={
+            "status[]": ["pending", "active", "terminated", "canceled", "incomplete"], "per_page": 1})
+    return bool(check(reply, "Lago subscription list")["subscriptions"])
+
+
+def check_lago_matches_billing_mode(mock: bool) -> None:
+    """Stops a stack that changed billing mode, before services are recreated or a provider is added.
+
+    Real checkout needs the provider before it can make a subscription, so a subscription with no provider
+    can only have come from mock payment. A normal re-run and adding a first key both pass.
+    """
+    has_provider = bool(lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"])
+    if mock and has_provider:
+        raise SystemExit("bootstrap: mock payment is refused: Lago still has the Stripe provider from an earlier key "
+                         "and could call Stripe. `make reset` deletes all local data; then `make up && make bootstrap`.")
+    if not mock and not has_provider and lago_has_subscriptions():
+        raise SystemExit("bootstrap: Lago's subscriptions are left over from mock payment, and their premium access "
+                         "would look real. `make reset` deletes all local data; then `make up && make bootstrap`.")
+
+
+def print_mock_payment_on() -> None:
+    print("Mock payment: ON (BILLING_MODE=mock, APP_ENV=local). Nothing is charged and Stripe is not called. Real Lago "
+          "and its signed webhook still decide access.\n  A mock payment pass is not a Stripe pass.")
 
 
 def bootstrap_stripe(webhook_secret: str) -> None:
@@ -382,9 +448,13 @@ def bootstrap_stripe(webhook_secret: str) -> None:
               "https://dashboard.stripe.com/test/apikeys) into .env and run `make bootstrap` again.")
         return
     providers = lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"]
-    if not any(p.get("code") == "stripe" for p in providers):
+    provider = next((p for p in providers if p.get("code") == "stripe"), None)
+    return_url = f"{app_url()}/billing/return"
+    if provider is None:
         lago_graphql(ADD_STRIPE, {"i": {"name": "Stripe", "code": "stripe", "secretKey": key,
-                                        "successRedirectUrl": f"{app_url()}/billing/return"}})
+                                        "successRedirectUrl": return_url}})
+    elif provider.get("successRedirectUrl") != return_url:  # APP_PORT moved. Stays in Lago: Stripe isn't called.
+        lago_graphql(UPDATE_STRIPE, {"i": {"id": provider["id"], "successRedirectUrl": return_url}})
     compose("up", "-d", "--force-recreate", "stripe-cli")
     apply_stripe_webhook_secret(webhook_secret)  # last: after any RegisterWebhookJob could have run
     print("Stripe: Lago connected; `stripe listen` forwards test webhooks to Lago")
@@ -434,6 +504,8 @@ def main() -> None:
     # get a key Lago has no provider for, or new workspaces fail. Saved back so Compose, which prefers
     # this process's environment over .env, gets the cleaned value.
     key = os.environ["STRIPE_SECRET_KEY"] = stripe_secret_key()
+    os.environ["BILLING_MODE"], os.environ["APP_ENV"] = optional_env("BILLING_MODE"), optional_env("APP_ENV")
+    mock = mock_payment()
     webhook_secret = stripe_webhook_secret() if key else ""
     zitadel, lago = zitadel_url(), lago_api_url()
     wait_for(f"Zitadel at {zitadel}", lambda: http_ok(zitadel, "/debug/ready"))
@@ -441,6 +513,7 @@ def main() -> None:
     wait_for(f"Lago at {lago}", lambda: http_ok(lago, "/health"))
     bootstrap_zitadel()
     bootstrap_lago()
+    check_lago_matches_billing_mode(mock)
     ensure_bucket()
     if subprocess.run(["uv", "run", "python", "brand.py"], cwd=ROOT / "scripts", check=False).returncode:  # noqa: S607
         raise SystemExit("bootstrap: `make brand` failed (see above); fix it and run `make bootstrap` again")
@@ -449,9 +522,13 @@ def main() -> None:
     backend("alembic", "upgrade", "head")  # needs only DATABASE_URL
     backend("python", "-m", "app.billing.sync")  # needs only the Lago settings
     compose("up", "-d", "--force-recreate", "jobs")  # its first run needs the migrated tables
-    bootstrap_stripe(webhook_secret)  # the backend already has the key: it was recreated from the same .env
+    if mock:  # no provider is added and stripe-cli stays idle, so nothing here can reach Stripe
+        print_mock_payment_on()
+    else:
+        bootstrap_stripe(webhook_secret)  # the backend already has the key: it was recreated from the same .env
     # Last: the app gets its client id only once everything behind it is configured.
     compose("up", "-d", "--force-recreate", "frontend")
+    wait_for(f"the app at {app_url()}", lambda: http_ok(app_url(), "/"))  # it runs `npm ci` first
     print(f"""
 Ready.
   App          {app_url()}
