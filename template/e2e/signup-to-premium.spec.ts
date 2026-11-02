@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { execFileSync } from "node:child_process";
+import { compose, restoreStack } from "./mock-payment-stack";
 
 // Milestone 1's definition of done (spec §1): sign up through Zitadel, create a workspace, save
 // Stripe's test card on Stripe's hosted page, and see premium_report switch on because Lago's
@@ -18,14 +18,11 @@ const PASSWORD = "Correct-horse-battery-9";
 const WORKSPACE = "E2E Co";
 const STRIPE_CONFIGURED = !!process.env.STRIPE_CONFIGURED;
 const NOT_SET_UP = /billing isn't set up/i;
-const NO_KEY = "STRIPE_SECRET_KEY is empty: add a Stripe test key to .env and run make bootstrap";
 const MOCK_PAYMENT = !!process.env.MOCK_PAYMENT;
+const NO_KEY = MOCK_PAYMENT
+  ? "this is a mock payment run, which has no Stripe key"
+  : "STRIPE_SECRET_KEY is empty: add a Stripe test key to .env and run make bootstrap";
 const NOT_A_STRIPE_PASS = "A mock payment pass is not a Stripe pass.";
-
-// `make e2e` runs from e2e/, so Compose finds the product's docker-compose.yml and .env one level up.
-function compose(...args: string[]): string {
-  return execFileSync("docker", ["compose", ...args], { cwd: "..", encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-}
 
 const sql = (database: string, query: string) =>
   compose("exec", "-T", "postgres", "psql", "-U", "postgres", "-d", database, "-Atc", query);
@@ -146,7 +143,7 @@ test("mock payment: sign up → workspace → mock payment → premium report fr
     sql("app", `select s.state, s.lago_external_id, s.lago_subscription_id from subscriptions s join workspaces w ` +
                `on w.id = s.workspace_id where w.name = '${workspace}'`).split("|");
 
-  let held = false;
+  let passed = false;
   compose("stop", "jobs");
   try {
     await signUpToPlans(page, app, workspace);
@@ -158,7 +155,6 @@ test("mock payment: sign up → workspace → mock payment → premium report fr
     await expect(banner).toContainText("not real billing");
 
     compose("pause", "lago-worker");
-    held = true;
     const created = page.waitForResponse(
       async (r) =>
         r.url().endsWith("/billing/checkout") && r.request().method() === "POST" && r.status() === 200 &&
@@ -187,7 +183,6 @@ test("mock payment: sign up → workspace → mock payment → premium report fr
     expect(row()[0]).toBe("pending");
 
     compose("unpause", "lago-worker");
-    held = false;
     await expect(async () => {
       await page.goto("/premium");
       await expect(page.getByText(`Generated for ${workspace}`)).toBeVisible({ timeout: 5_000 });
@@ -203,8 +198,9 @@ test("mock payment: sign up → workspace → mock payment → premium report fr
     expect(sql("lago", "select count(*) from payment_providers where deleted_at is null")).toBe("0");
     expect(compose("logs", "--no-log-prefix", "stripe-cli")).toContain("idle");
     console.log(`MOCK PAYMENT passed. The Stripe payment test did not run. ${NOT_A_STRIPE_PASS}`);
+    passed = true;
   } finally {
-    if (held) compose("unpause", "lago-worker");
-    compose("start", "jobs");
+    const errors = restoreStack(); // always tries both; a failed body keeps its own error
+    if (passed && errors.length) throw errors[0];
   }
 });

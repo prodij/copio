@@ -12,6 +12,9 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   forbidOnly: !!process.env.CI,
+  // Mock payment holds lago-worker and jobs back; a run that was killed must not leave them so for the next.
+  globalSetup: process.env.MOCK_PAYMENT ? "./mock-payment-stack.ts" : undefined,
+  globalTeardown: process.env.MOCK_PAYMENT ? "./mock-payment-stack.ts" : undefined,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL: APP_URL,

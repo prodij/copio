@@ -253,7 +253,7 @@ def mock_payment(client: TestClient, settings: Settings) -> None:
 def test_mock_payment_creates_a_subscription_with_no_payment_rule_and_grants_nothing(
     client: TestClient, owner_headers: dict[str, str], owner_workspace: str, mock_payment: None, db_session: Session,
 ) -> None:
-    lago = fake_lago_billing(respx.mock, card=False)
+    lago = fake_lago_billing(respx.mock, card=False, provider=False)
     r = client.post("/billing/checkout", json=STARTER, headers=owner_headers)
     assert (r.status_code, r.json()) == (200, {"checkout_url": None})
     body = json.loads(lago["sub"].calls.last.request.content)["subscription"]
@@ -262,7 +262,7 @@ def test_mock_payment_creates_a_subscription_with_no_payment_rule_and_grants_not
     sub = subscription(db_session)
     assert (sub.state, sub.lago_subscription_id) == ("pending", external_id)
     # No Stripe anywhere: no provider attached, no card looked up, no setup URL.
-    assert not any(lago[name].called for name in ("customer", "upsert", "methods", "url"))
+    assert not any(lago[name].called for name in ("upsert", "methods", "url"))
     # Back in the browser, access is still off.
     assert client.get("/demo/premium-report", headers=owner_headers).status_code == 402
     access = client.get("/me/access", headers=owner_headers).json()
@@ -272,10 +272,20 @@ def test_mock_payment_creates_a_subscription_with_no_payment_rule_and_grants_not
 @respx.mock
 def test_mock_payment_creates_the_subscription_once(client: TestClient, owner_headers: dict[str, str],
                                                     mock_payment: None) -> None:
-    lago = fake_lago_billing(respx.mock, card=False)
+    lago = fake_lago_billing(respx.mock, card=False, provider=False)
     for _ in range(2):
         assert client.post("/billing/checkout", json=STARTER, headers=owner_headers).json() == {"checkout_url": None}
     assert lago["sub"].call_count == 1
+
+
+@respx.mock
+def test_mock_payment_is_refused_for_a_customer_with_a_payment_provider(
+    client: TestClient, owner_headers: dict[str, str], mock_payment: None, db_session: Session,
+) -> None:
+    lago = fake_lago_billing(respx.mock, card=False, provider=True)
+    r = client.post("/billing/checkout", json=STARTER, headers=owner_headers)
+    assert r.status_code == 409 and "Mock payment is refused" in r.json()["detail"]
+    assert lago["sub"].call_count == 0 and db_session.scalars(select(Subscription)).first() is None
 
 
 @respx.mock

@@ -207,6 +207,13 @@ def test_make_keeps_mock_payment_settings_from_other_host_tools(product_dir: pat
     assert seen.read_text() == ""
 
 
+def test_mock_payment_e2e_repairs_the_stack_around_a_run(product_dir: pathlib.Path) -> None:
+    config = (product_dir / "e2e" / "playwright.config.ts").read_text()
+    for hook in ("globalSetup", "globalTeardown"):
+        assert f'{hook}: process.env.MOCK_PAYMENT ? "./mock-payment-stack.ts" : undefined' in config
+    assert "export default" in (product_dir / "e2e" / "mock-payment-stack.ts").read_text()
+
+
 def test_stripe_key_is_optional_in_compose(product_dir: pathlib.Path) -> None:
     compose = yaml.safe_load((product_dir / "docker-compose.yml").read_text())
     assert compose["services"]["backend"]["environment"]["STRIPE_SECRET_KEY"] == "${STRIPE_SECRET_KEY:-}"

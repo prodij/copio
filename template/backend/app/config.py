@@ -10,6 +10,8 @@ class BillingModeSettings(BaseSettings):
     when the process starts, so an unsafe mix stops the backend instead of faking payments."""
 
     # Hide inputs: pydantic's message otherwise prints them, and the logs would get part of the Stripe key.
+    # This covers only str(error): ValidationError.errors() and .json() still hold the input, so no error
+    # reporter may log them.
     model_config = SettingsConfigDict(extra="ignore", hide_input_in_errors=True)
 
     # Empty is real billing. `mock` is mock payment: only with APP_ENV=local and no Stripe key.

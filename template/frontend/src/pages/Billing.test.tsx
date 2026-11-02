@@ -1,9 +1,12 @@
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { mockFetch, renderWithQuery } from "@/test/utils";
 import { Billing } from "./Billing";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 it("shows no plan yet", async () => {
   mockFetch({ "GET /me/access": { status: 200, body: { billing_configured: true, plan_code: null, state: null, features: {}, current_period_end: null } } });
@@ -29,8 +32,10 @@ it("shows Unavailable for a missing period end, not zero", async () => {
 });
 
 it("shows status and message on failure", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true }); // accessQuery retries a 503, 1 s, 2 s and 4 s apart
   mockFetch({ "GET /me/access": { status: 503, body: { detail: "db is unavailable" } } });
   renderWithQuery(<Billing />);
+  await act(() => vi.advanceTimersByTimeAsync(8_000));
   expect(await screen.findByText("db is unavailable")).toBeInTheDocument();
   expect(screen.getByText("503")).toBeInTheDocument();
 });

@@ -5,6 +5,7 @@ import type { ApiError } from "@/api/errors";
 import { ErrorState } from "@/components/ErrorState";
 import { PageSkeleton } from "@/components/PageSkeleton";
 import { Button } from "@/components/ui/button";
+import { readPlan } from "./Plans";
 
 // Stands where Stripe's hosted page stands in the real flow, and like it leads to /billing/return.
 // Confirming changes nothing here: the return page creates the Lago subscription and access follows
@@ -18,6 +19,15 @@ export function MockPayment() {
     return (
       <div className="space-y-2">
         <p>Mock payment is off.</p>
+        <Link to="/plans" className="text-primary underline">See plans</Link>
+      </div>
+    );
+  }
+  // The return page makes the checkout call for the remembered plan; without one it would only wait.
+  if (readPlan() === null) {
+    return (
+      <div className="space-y-2">
+        <p>Choose a plan first.</p>
         <Link to="/plans" className="text-primary underline">See plans</Link>
       </div>
     );

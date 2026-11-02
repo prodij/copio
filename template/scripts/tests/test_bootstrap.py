@@ -398,6 +398,7 @@ def stubbed_main(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> Non
         monkeypatch.setenv(port, "1234")
     for name in ("http_ok", "bootstrap_zitadel", "bootstrap_lago", "ensure_bucket", "backend"):
         monkeypatch.setattr(bootstrap, name, lambda *_a, **_k: True)
+    monkeypatch.setattr(bootstrap, "lago_has_subscriptions", lambda: False)
     pat = tmp_path / "admin.pat"
     pat.write_text("x")
     monkeypatch.setattr(bootstrap, "ADMIN_PAT", pat)
@@ -439,10 +440,11 @@ def test_a_failed_print_secret_changes_nothing(monkeypatch: pytest.MonkeyPatch, 
 
     monkeypatch.setattr(bootstrap, "compose", rejected)
     monkeypatch.setattr(bootstrap, "wait_for", lambda *_a, **_k: pytest.fail("a service was waited on"))
-    with pytest.raises(SystemExit, match="Stripe rejected STRIPE_SECRET_KEY or could not be reached") as stopped:
+    with pytest.raises(SystemExit, match="could not check STRIPE_SECRET_KEY with Stripe") as stopped:
         bootstrap.main()
-    assert "Nothing was changed. Fix or empty it in .env and run `make bootstrap` again." in str(stopped.value)
+    assert "or Docker failed" in str(stopped.value) and "Nothing was changed" in str(stopped.value)
     assert "failed (exit 1)" in str(stopped.value)
+    assert "Stripe rejected" not in str(stopped.value)
     assert fake.graphql == []
 
 
@@ -503,10 +505,66 @@ def test_main_with_mock_payment_leaves_stripe_alone_and_says_so(
     assert (os.environ["BILLING_MODE"], os.environ["APP_ENV"]) == ("mock", "local")  # what Compose gets, unquoted
 
 
-def test_mock_payment_is_refused_while_lago_has_a_stripe_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], "whsec_abc")
-    with pytest.raises(SystemExit, match="make reset"):
-        bootstrap.bootstrap_mock_payment()
+def test_mock_payment_stops_on_a_stripe_provider_before_services_are_recreated(
+    monkeypatch: pytest.MonkeyPatch, stubbed_main: None
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], "whsec_abc")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "")
+    monkeypatch.setenv("BILLING_MODE", "mock")
+    monkeypatch.setenv("APP_ENV", "local")
+    with pytest.raises(SystemExit, match="Lago still has the Stripe provider"):
+        bootstrap.main()
+    assert fake.compose_calls == []
+
+
+def test_leaving_mock_payment_stops_before_the_provider_is_added(
+    monkeypatch: pytest.MonkeyPatch, stubbed_main: None
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
+    monkeypatch.setenv("BILLING_MODE", "")
+    monkeypatch.setattr(bootstrap, "lago_has_subscriptions", lambda: True)
+    with pytest.raises(SystemExit, match=r"left over from mock payment.*`make reset`"):
+        bootstrap.main()
+    assert all(query != bootstrap.ADD_STRIPE for query, _ in fake.graphql)
+    assert not any("--force-recreate" in call for call in fake.compose_calls)
+
+
+def test_leaving_mock_payment_with_no_key_stops_too(monkeypatch: pytest.MonkeyPatch, stubbed_main: None) -> None:
+    FakeStripeSetup(monkeypatch, [], "")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "")
+    monkeypatch.setenv("BILLING_MODE", "")
+    monkeypatch.setattr(bootstrap, "lago_has_subscriptions", lambda: True)
+    with pytest.raises(SystemExit, match="left over from mock payment"):
+        bootstrap.main()
+
+
+def test_adding_a_first_key_is_not_taken_for_a_leftover(monkeypatch: pytest.MonkeyPatch, stubbed_main: None) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")  # no provider, no subscriptions
+    monkeypatch.setenv("BILLING_MODE", "")
+    bootstrap.main()
+    assert any(query == bootstrap.ADD_STRIPE for query, _ in fake.graphql)
+
+
+def test_a_rerun_with_a_provider_and_subscriptions_is_not_taken_for_a_leftover(
+    monkeypatch: pytest.MonkeyPatch, stubbed_main: None
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [{"id": "p1", "code": "stripe"}], "whsec_abc")
+    monkeypatch.setenv("BILLING_MODE", "")
+    monkeypatch.setattr(bootstrap, "lago_has_subscriptions", lambda: pytest.fail("not needed with a provider"))
+    bootstrap.main()
+    assert fake.compose_calls[-1] == ("up", "-d", "--force-recreate", "frontend")
+
+
+@respx.mock
+def test_lago_subscriptions_are_asked_for_in_every_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LAGO_API_KEY", "k")
+    monkeypatch.setenv("LAGO_API_PORT", "3000")
+    route = respx.get("http://127.0.0.1:3000/api/v1/subscriptions").respond(200, json={"subscriptions": []})
+    assert bootstrap.lago_has_subscriptions() is False
+    assert route.calls.last.request.url.params.get_list("status[]") == [
+        "pending", "active", "terminated", "canceled", "incomplete"]
+    route.respond(200, json={"subscriptions": [{"external_id": "x"}]})
+    assert bootstrap.lago_has_subscriptions() is True
 
 
 def test_bootstrap_stripe_adds_the_provider_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:

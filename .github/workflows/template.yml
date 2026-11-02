@@ -69,7 +69,7 @@ jobs:
               echo "::error::No STRIPE_SECRET_KEY secret, and the repo variable STRIPE_E2E_REQUIRED is true"; exit 1
             fi
             echo "::notice::No STRIPE_SECRET_KEY secret: the Stripe e2e payment test will be skipped; the mock payment test runs instead"
-            echo "No STRIPE_SECRET_KEY secret: the Stripe e2e payment test was skipped and the mock payment test ran. A mock payment pass is not a Stripe pass." >> "$GITHUB_STEP_SUMMARY"
+            echo "No STRIPE_SECRET_KEY secret: the Stripe e2e payment test is skipped and the mock payment test runs in place of it. A mock payment pass is not a Stripe pass." >> "$GITHUB_STEP_SUMMARY"
           fi
           umask 077 && printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY" > .env
           # Explicit, and only with no key (the backend refuses both): prove the webhook path with mock payment.

@@ -4639,3 +4639,11 @@ No real Stripe key is coming for now, so `make e2e` can prove sign-up → worksp
 - **CI:** with no `STRIPE_SECRET_KEY` secret, both e2e workflows write `BILLING_MODE=mock` and `APP_ENV=local` to `.env` and say in the step summary that this is not a Stripe pass. With a key, nothing changes.
 - **`stripe_webhook_secret()`** failures now say Stripe rejected the key or could not be reached, that nothing changed, and to fix or empty it.
 - **Not verified:** everything Stripe. A mock payment pass is not a Stripe pass; the payment test still hasn't run against real Stripe.
+
+Review round on mock payment (2026-11-01):
+
+- **`billing_reconcile` stays as it is, not mode-aware** (ruling). It activates mock subscriptions too; the README and its docstring say so.
+- **Changing billing mode stops bootstrap,** right after `bootstrap_lago()` and before services are recreated. Mock payment with a Stripe provider in Lago stops. Real or no-key mode with no provider and any subscription stops as "left over from mock payment; `make reset`", because real checkout can't make a subscription before the provider exists, so a first key and a normal re-run pass.
+- **Mock checkout refuses a customer with a `payment_provider`** (409, nothing written). Lago would charge its invoice through Stripe.
+- **The e2e repairs the stack:** Playwright globalSetup and globalTeardown, only with `MOCK_PAYMENT`, unpause `lago-worker` and start `jobs`, so a killed run can't break the next one. The test's own cleanup tries both steps and keeps the body's error.
+- **`accessQuery` retries everything but 403** itself, so pages no longer change the shared query's retries. A failed `stripe listen --print-secret` no longer blames Stripe alone ("could not check"); a run that printed no secret still does.

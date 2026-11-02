@@ -2,7 +2,8 @@
 
 Webhooks make changes fast; this keeps them correct. It also finishes a checkout whose owner saved
 a card but never came back (Lago sends no webhook for a saved card). It never grants access by
-itself beyond what Lago reports: a subscription is `active` in Lago only once its first invoice is paid.
+itself beyond what Lago reports: a subscription is `active` in Lago only once its first invoice is paid
+(except mock payment, local only, where Lago makes it active at once, so this job activates it too).
 """
 
 import logging

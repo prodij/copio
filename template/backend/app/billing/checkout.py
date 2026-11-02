@@ -14,6 +14,10 @@ class PlanChangeNotSupported(Exception):
     """The workspace already has a Lago subscription on another plan."""
 
 
+class MockPaymentRefused(Exception):
+    """The Lago customer has a payment provider, so its invoice could reach Stripe."""
+
+
 def new_external_id(ws: Workspace, plan: Plan) -> str:
     """A fresh Lago external id per checkout attempt: late webhooks for an earlier attempt match nothing."""
     return f"{ws.id}:{plan.code}:{secrets.token_hex(4)}"
@@ -69,7 +73,13 @@ def start_checkout(session: Session, ws: Workspace, plan: Plan, lago: LagoClient
 
 def start_mock_payment_checkout(session: Session, ws: Workspace, plan: Plan, lago: LagoClient) -> None:
     """Mock payment: the same row and Lago subscription as a real checkout, with no card and no payment
-    rule. This grants nothing: the state stays `pending` until Lago's signed webhook arrives."""
+    rule. This grants nothing: the state stays `pending` until Lago's signed webhook arrives.
+
+    A workspace from before mock payment may have a Stripe customer in Lago, and Lago would charge its
+    invoice through Stripe, so it is refused before anything is written.
+    """
+    if lago.customer_has_payment_provider(str(ws.id)):
+        raise MockPaymentRefused
     sub = _record_checkout(session, ws, plan)
     if sub.lago_subscription_id is not None:
         return

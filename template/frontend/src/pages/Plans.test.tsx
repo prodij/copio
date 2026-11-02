@@ -1,8 +1,12 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { Route, Routes } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
-import { mockFetch, renderWithQuery } from "@/test/utils";
+import { mockFetch as mockRoutes, renderWithQuery } from "@/test/utils";
 import { Plans } from "./Plans";
+
+// The page also asks /me/access; a 403 (no workspace) answers at once, without accessQuery's retries.
+const mockFetch: typeof mockRoutes = (routes) =>
+  mockRoutes({ "GET /me/access": { status: 403, body: { detail: "No workspace for this user" } }, ...routes });
 
 afterEach(() => {
   vi.useRealTimers();

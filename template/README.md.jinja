@@ -21,17 +21,22 @@ Mock payment fakes only the payment step, so `make e2e` can prove sign-up to pre
 It is off by default. To turn it on, keep `STRIPE_SECRET_KEY` empty, set `BILLING_MODE=mock` and
 `APP_ENV=local` in `.env`, then `make up && make bootstrap && make e2e`.
 
-- The backend won't start, and `make bootstrap` stops, with `BILLING_MODE=mock` and any other `APP_ENV`, with a
-  Stripe key set, or (bootstrap) while Lago still has a Stripe provider. No request can turn it on.
+- The backend won't start, and `make bootstrap` stops, with `BILLING_MODE=mock` and any other `APP_ENV`, or with a
+  Stripe key set. No request can turn it on.
 - Real Zitadel, real Lago and Lago's real signed webhook stay in the path. Lago gets a subscription with no
   payment rule and no provider, makes it active and sends `subscription.started`. Coming back to the app grants
   nothing: `require_feature` answers 402 until that webhook lands. Stripe is never called and `stripe-cli` stays idle.
 - The app shows a "Mock payment" banner on every page. Lago's invoice stays unpaid, because nothing pays it.
 - **A mock payment pass is not a Stripe pass.** The Stripe payment test is reported as skipped. The mock run does
   not prove Stripe's page, saved cards, Lago's payment-gated subscription, or what happens when a payment fails.
-- `billing_reconcile` still asks Lago every 15 minutes, and Lago says active, so a lost webhook is repaired
-  there as usual. That is why the test stops the job while it checks that only the webhook grants access.
-- Leaving mock payment: `make reset`. A subscription it made stays active otherwise, and Lago still has it.
+- `billing_reconcile` also activates mock subscriptions: it asks Lago every 15 minutes and when the scheduler
+  starts, and Lago says active with nothing paid. So without the webhook, premium stays off only until its next
+  run. That is why the test stops the job while it checks that only the webhook grants access.
+- The test pauses `lago-worker` and stops `jobs`, and puts them back afterwards. The next mock payment `make e2e`
+  repairs a killed run too; to do it by hand: `docker compose unpause lago-worker && docker compose start jobs`.
+- Leaving mock payment: `make reset`. `make bootstrap` stops until you do, since the subscriptions it made would
+  look real. It also stops when turning mock payment on while Lago has a Stripe provider, and checkout refuses a
+  workspace whose Lago customer has one, because those can reach Stripe.
 
 Host ports are set in `.env` (defaults: app 5173, API 8000, Zitadel 8085, its login page 3100,
 Lago API 3000 and UI 8088, Postgres 5432, S3 (SeaweedFS) 8333). Change any that clash with another

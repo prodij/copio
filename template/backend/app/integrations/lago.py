@@ -106,6 +106,11 @@ class LagoClient:
         }}
         self._check(self._call("POST", "/api/v1/subscriptions", body))
 
+    def customer_has_payment_provider(self, external_customer_id: str) -> bool:
+        response = self._call("GET", f"/api/v1/customers/{external_customer_id}")
+        self._check(response)
+        return bool(response.json()["customer"].get("billing_configuration", {}).get("payment_provider"))
+
     def has_default_payment_method(self, external_customer_id: str) -> bool:
         response = self._call("GET", f"/api/v1/customers/{external_customer_id}/payment_methods",
                               params={"per_page": 100})

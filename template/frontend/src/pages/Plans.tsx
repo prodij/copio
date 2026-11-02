@@ -22,13 +22,21 @@ function rememberPlan(code: string) {
   }
 }
 
+export function readPlan(): string | null {
+  try {
+    return window.sessionStorage.getItem(PLAN_KEY);
+  } catch {
+    return null;
+  }
+}
+
 const money = (cents: number, currency: string) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency }).format(cents / 100);
 
 export function Plans() {
   const navigate = useNavigate();
   const plans = useQuery(plansQuery);
-  const access = useQuery({ ...accessQuery, retry: false });
+  const access = useQuery(accessQuery);
   const choose = (code: string) => {
     if (!access.data?.mock_payment) return checkout.mutate(code);
     rememberPlan(code);

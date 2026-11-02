@@ -351,6 +351,9 @@ end
 
 STRIPE_REJECTED = ("Stripe rejected STRIPE_SECRET_KEY or could not be reached. Nothing was changed. "
                    "Fix or empty it in .env and run `make bootstrap` again.")
+KEY_NOT_CHECKED = ("could not check STRIPE_SECRET_KEY with Stripe: Stripe may have rejected it or be unreachable, "
+                   "or Docker failed (details below). Nothing was changed. Fix the cause, or empty the key in .env, "
+                   "and run `make bootstrap` again.")
 
 
 def optional_env(name: str) -> str:
@@ -376,7 +379,7 @@ def stripe_webhook_secret() -> str:
         printed = compose("run", "--rm", "--no-deps", "--entrypoint", "stripe", "stripe-cli",
                           "listen", "--print-secret", capture=True).splitlines()
     except SystemExit as exc:
-        raise SystemExit(f"bootstrap: {STRIPE_REJECTED}\n  {exc}") from None
+        raise SystemExit(f"bootstrap: {KEY_NOT_CHECKED}\n  {exc}") from None
     secret = printed[-1].strip() if printed else ""
     if not secret.startswith("whsec_"):
         raise SystemExit(f"bootstrap: {STRIPE_REJECTED}\n  `stripe listen --print-secret` printed no whsec_ secret")
@@ -398,11 +401,30 @@ def mock_payment() -> bool:
     return True
 
 
-def bootstrap_mock_payment() -> None:
-    """No provider is added and stripe-cli stays idle, so nothing here can reach Stripe."""
-    if lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"]:
+def lago_has_subscriptions() -> bool:
+    """Any at all: Lago's list answers only active ones unless asked for each status."""
+    with lago_api() as api:
+        reply = api.get("/api/v1/subscriptions", params={
+            "status[]": ["pending", "active", "terminated", "canceled", "incomplete"], "per_page": 1})
+    return bool(check(reply, "Lago subscription list")["subscriptions"])
+
+
+def check_lago_matches_billing_mode(mock: bool) -> None:
+    """Stops a stack that changed billing mode, before services are recreated or a provider is added.
+
+    Real checkout needs the provider before it can make a subscription, so a subscription with no provider
+    can only have come from mock payment. A normal re-run and adding a first key both pass.
+    """
+    has_provider = bool(lago_graphql(STRIPE_PROVIDERS, {})["paymentProviders"]["collection"])
+    if mock and has_provider:
         raise SystemExit("bootstrap: mock payment is refused: Lago still has the Stripe provider from an earlier key "
                          "and could call Stripe. `make reset` deletes all local data; then `make up && make bootstrap`.")
+    if not mock and not has_provider and lago_has_subscriptions():
+        raise SystemExit("bootstrap: Lago's subscriptions are left over from mock payment, and their premium access "
+                         "would look real. `make reset` deletes all local data; then `make up && make bootstrap`.")
+
+
+def print_mock_payment_on() -> None:
     print("Mock payment: ON (BILLING_MODE=mock, APP_ENV=local). Nothing is charged and Stripe is not called. Real Lago "
           "and its signed webhook still decide access.\n  A mock payment pass is not a Stripe pass.")
 
@@ -476,6 +498,7 @@ def main() -> None:
     wait_for(f"Lago at {lago}", lambda: http_ok(lago, "/health"))
     bootstrap_zitadel()
     bootstrap_lago()
+    check_lago_matches_billing_mode(mock)
     ensure_bucket()
     if subprocess.run(["uv", "run", "python", "brand.py"], cwd=ROOT / "scripts", check=False).returncode:  # noqa: S607
         raise SystemExit("bootstrap: `make brand` failed (see above); fix it and run `make bootstrap` again")
@@ -484,8 +507,8 @@ def main() -> None:
     backend("alembic", "upgrade", "head")  # needs only DATABASE_URL
     backend("python", "-m", "app.billing.sync")  # needs only the Lago settings
     compose("up", "-d", "--force-recreate", "jobs")  # its first run needs the migrated tables
-    if mock:
-        bootstrap_mock_payment()
+    if mock:  # no provider is added and stripe-cli stays idle, so nothing here can reach Stripe
+        print_mock_payment_on()
     else:
         bootstrap_stripe(webhook_secret)  # the backend already has the key: it was recreated from the same .env
     # Last: the app gets its client id only once everything behind it is configured.

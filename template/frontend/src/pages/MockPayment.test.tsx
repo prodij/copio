@@ -1,10 +1,14 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { Route, Routes } from "react-router";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mockFetch, renderWithQuery } from "@/test/utils";
 import { MockPayment } from "./MockPayment";
 
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => window.sessionStorage.setItem("checkout_plan", "starter"));
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.sessionStorage.clear();
+});
 
 const access = (mock_payment: boolean) => ({
   "GET /me/access": { status: 200, body: { billing_configured: true, mock_payment, plan_code: null, state: null, features: {}, current_period_end: null } },
@@ -27,5 +31,13 @@ it("does nothing with real billing", async () => {
   mockFetch(access(false));
   renderWithQuery(<MockPayment />);
   expect(await screen.findByText("Mock payment is off.")).toBeInTheDocument();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+});
+
+it("links to the plans page when no plan was chosen", async () => {
+  window.sessionStorage.clear();
+  mockFetch(access(true));
+  renderWithQuery(<MockPayment />);
+  expect(await screen.findByRole("link", { name: "See plans" })).toHaveAttribute("href", "/plans");
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
