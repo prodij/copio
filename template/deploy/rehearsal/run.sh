@@ -4,7 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 CURL_IMAGE=curlimages/curl:8.11.1
 project="$(awk '/^name:/{print $2; exit}' docker-compose.aws.yml)-rehearsal"
+# The same question make infra-doctor asks (scripts/infra_doctor.py).
+PART_CONFIG_QUERY="select count(*) from partman.part_config where parent_table='public.enriched_events'"
 
+rm -rf .rehearsal  # an earlier run that was killed outright left its temp folder and throwaway key
 mkdir -p .rehearsal
 workdir="$(mktemp -d "$PWD/.rehearsal/XXXXXX")"
 envfile="$workdir/env"
@@ -24,13 +27,26 @@ compose() {
   docker compose -p "$project" --env-file "$envfile" \
     -f docker-compose.aws.yml -f deploy/rehearsal/docker-compose.rehearsal.yml "$@"
 }
-remove_stack() { compose --profile setup down -v --remove-orphans >/dev/null 2>&1 || true; }
-cleanup() { remove_stack; rm -rf "$workdir"; rmdir .rehearsal 2>/dev/null || true; }
+remove_stack() {
+  if ! compose --profile setup down -v --remove-orphans >"$workdir/down.log" 2>&1; then
+    cat "$workdir/down.log" >&2
+    echo "REHEARSAL: could not remove project $project. Check with: docker ps -a --filter name=$project" >&2
+    return 1
+  fi
+}
+# A run that passes but leaves its stack behind still exits non-zero.
+cleanup() {
+  local code=$?
+  remove_stack || code=1
+  rm -rf "$workdir"
+  rmdir .rehearsal 2>/dev/null || true
+  exit "$code"
+}
 trap cleanup EXIT
 trap 'exit 1' INT TERM
 fail() { echo "REHEARSAL FAILED: $1" >&2; compose --profile setup logs --tail=60 >&2 || true; exit 1; }
 
-remove_stack  # an earlier run that was killed outright
+remove_stack || fail "couldn't clear an earlier run"  # one that was killed outright
 compose up -d --wait db redis || fail "the stand-in database or Redis didn't start"
 
 psql_as() {
@@ -71,15 +87,21 @@ compose up -d --no-deps lago-worker lago-clock lago-front zitadel-login caddy \
   || fail "the rest of the stack didn't start"
 
 echo "== Lago created its partitions"
-count="$(psql_as lago rehearsal-lago -d lago -Atc "SELECT count(*) FROM partman.part_config;")"
-[ "$count" -ge 1 ] || fail "partman.part_config is empty: Lago skipped partitioning"
+count="$(psql_as lago rehearsal-lago -d lago -Atc "$PART_CONFIG_QUERY;")"
+[ "$count" = 1 ] || fail "partman.part_config has no row for enriched_events: Lago skipped partitioning"
 partitions="$(psql_as lago rehearsal-lago -d lago -Atc \
   "SELECT count(*) FROM pg_inherits WHERE inhparent = 'public.enriched_events'::regclass;")"
 [ "$partitions" -ge 1 ] || fail "enriched_events has no partitions"
-echo "part_config rows: $count; enriched_events partitions: $partitions"
+echo "part_config rows for enriched_events: $count; enriched_events partitions: $partitions"
+doctor="$(compose exec -T lago-api bin/rails runner \
+  "puts ActiveRecord::Base.connection.select_value(\"$PART_CONFIG_QUERY\")" 2>/dev/null | tail -n 1 || true)"
+[ "$doctor" = 1 ] || fail "make infra-doctor's question through lago-api answered '$doctor', expected 1"
 
-echo "== Lago's migrations run again and change nothing, as on every later start"
-compose run --rm --no-deps lago-migrate >/dev/null 2>&1 || fail "lago-migrate failed on a migrated database"
+echo "== Lago's migrate command exits 0 on a migrated database, as on every later start"
+if ! compose run --rm --no-deps lago-migrate >"$workdir/migrate-again.log" 2>&1; then
+  tail -n 60 "$workdir/migrate-again.log" >&2
+  fail "lago-migrate failed on a migrated database"
+fi
 
 echo "== routing"
 network="${project}_default"
@@ -102,11 +124,7 @@ check() {
 d=rehearsal.localhost
 check "lago.$d" / 403
 check "lago-api.$d" /api/v1/plans 403
-webhook="$(status "lago-api.$d" /webhooks/stripe/none)"
-case "$webhook" in
-  403|000|502|503|504) fail "Lago's webhooks answered '$webhook': they should reach Lago" ;;
-esac
-echo "https://lago-api.$d/webhooks/stripe/none -> $webhook (from Lago)"
+check "lago-api.$d" /webhooks/stripe/none 404  # Lago's own answer: Caddy gives 403 if blocked, 502 if it can't reach Lago
 check "auth.$d" /debug/ready 200
 check "auth.$d" /ui/v2/login/healthy 200
 
@@ -121,10 +139,13 @@ got="$(status "lago-api.$d" /api/v1/plans -H "Authorization: Bearer rehearsal-la
 [ "$got" = 200 ] || fail "Lago's seeded API key answered '$got', expected 200"
 echo "https://lago-api.$d/api/v1/plans with the API key -> $got"
 
-echo "== everything is still running"
+echo "== everything is still running and has never restarted"
 running="$(compose ps --status running --services)"
 for service in db redis caddy zitadel-api zitadel-login lago-api lago-worker lago-clock lago-front lago-pdf; do
   printf '%s\n' "$running" | grep -qx "$service" || fail "$service isn't running"
+  # `restart: unless-stopped` can make a crash loop look running at any one moment.
+  restarts="$(docker inspect -f '{{.RestartCount}}' "$(compose ps -q "$service")")"
+  [ "$restarts" = 0 ] || fail "$service has restarted $restarts times"
 done
 
 echo "== memory, to confirm the server size (idle; backend and jobs aren't running: they have no image here)"

@@ -39,6 +39,25 @@ def test_missing_partman_is_a_problem() -> None:
     assert any("pg_partman" in p for p in infra_doctor.problems(results))
 
 
+def test_empty_part_config_is_a_problem_even_with_the_extension_installed() -> None:
+    # Loading Lago's structure.sql installs the extension and leaves part_config empty.
+    assert "partman.part_config" in infra_doctor.SERVER_CHECK
+    assert "pg_extension" not in infra_doctor.SERVER_CHECK
+    results = good()
+    results["partman"] = infra_doctor.parse_server_output("RUNNING:\nPARTMAN:0\n")[1]
+    assert any("part_config" in p for p in infra_doctor.problems(results))
+
+
+def test_lago_api_down_is_reported_along_with_partman() -> None:
+    running, partman = infra_doctor.parse_server_output("RUNNING:caddy redis \nPARTMAN:\n")
+    results = good()
+    results["running"], results["partman"] = running, partman
+    found = infra_doctor.problems(results)
+    assert partman == "0"
+    assert any("lago-api" in p and "not running" in p for p in found)
+    assert any("pg_partman" in p for p in found)
+
+
 def test_lago_being_public_is_a_problem() -> None:
     results = good()
     results["http"]["https://lago-api.x.test/api/v1/plans"] = 200  # type: ignore[index]
@@ -101,7 +120,7 @@ def test_server_command_is_pinned() -> None:
     command = infra_doctor.SERVER_CHECK
     assert command.startswith('export HOME="${HOME:-/root}" PATH="$PATH:/usr/local/bin"; ')
     assert "docker compose ps --status running --services" in command
-    assert "COMPOSE_FILE=docker-compose.aws.yml" in command and "pg_partman" in command
+    assert "COMPOSE_FILE=docker-compose.aws.yml" in command and "partman.part_config" in command
 
 
 @pytest.mark.parametrize(("text", "expected"), [

@@ -13,7 +13,7 @@ SERVER_CHECK = (
     + "cd /opt/app && export COMPOSE_FILE=docker-compose.aws.yml; "
     + "echo \"RUNNING:$(docker compose ps --status running --services | tr '\\n' ' ')\"; "
     + "echo \"PARTMAN:$(docker compose exec -T lago-api bin/rails runner "
-    + "\"puts ActiveRecord::Base.connection.select_value(\\\"select count(*) from pg_extension where extname='pg_partman'\\\")\" "
+    + "\"puts ActiveRecord::Base.connection.select_value(\\\"select count(*) from partman.part_config where parent_table='public.enriched_events'\\\")\" "
     + "2>/dev/null | tail -n 1)\""
 )
 EXPECTED_SERVICES = ["caddy", "redis", "zitadel-api", "zitadel-login", "lago-api", "lago-worker",
@@ -46,7 +46,8 @@ def problems(results: dict[str, Any]) -> list[str]:
             found.append(f"not running on the server: {', '.join(missing)}. Caddy answers 403 for Lago even when it is down")
     partman = results.get("partman")
     if partman is not None and partman != "1":
-        found.append("pg_partman isn't installed in Lago's database, and Lago skips its setup silently. Re-run make infra-bootstrap")
+        found.append("pg_partman isn't set up in Lago's database: partman.part_config has no row for enriched_events, "
+                     "or lago-api couldn't answer. Lago's first migration adds that row: see `docker compose logs lago-migrate`")
     return found
 
 

@@ -192,7 +192,8 @@ def test_rehearsal_publishes_no_ports(product_dir: pathlib.Path) -> None:
         assert not service.get("ports"), f"{name}: {service.get('ports')}"
 
 
-def test_rehearsal_never_mounts_the_products_bootstrap_folder(product_dir: pathlib.Path) -> None:
+def test_rehearsals_zitadel_services_dont_mount_the_products_bootstrap_folder(product_dir: pathlib.Path) -> None:
+    # `backend` still mounts it, and is never started here.
     services = rehearsal_compose(product_dir)["services"]
     for name in ["zitadel-api", "zitadel-login"]:
         sources = [volume["source"] for volume in services[name]["volumes"]]
@@ -210,3 +211,9 @@ def test_lago_migrations_run_instead_of_loading_structure_sql(product_dir: pathl
     # Loading it drops and recreates pg_partman, which Lago's non-superuser role can't do.
     command = aws_compose(product_dir)["services"]["lago-migrate"]["command"]
     assert "rm -f db/structure.sql" in " ".join(command)
+
+
+def test_rehearsal_asks_what_the_doctor_asks(product_dir: pathlib.Path) -> None:
+    query = "select count(*) from partman.part_config where parent_table='public.enriched_events'"
+    assert query in (product_dir / "deploy" / "rehearsal" / "run.sh").read_text()
+    assert query in (product_dir / "scripts" / "infra_doctor.py").read_text()

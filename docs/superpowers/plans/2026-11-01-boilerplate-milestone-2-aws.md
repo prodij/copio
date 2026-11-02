@@ -29,7 +29,7 @@
 |---|---|---|
 | `rds.force_ssl` defaults to on for Postgres 15+ | AWS RDS docs | All connection strings use `sslmode=require` |
 | Creating `pg_partman` needs `rds_superuser`, which the RDS admin has | AWS RDS docs | `db-init.sql` creates it; Lago's own `IF NOT EXISTS` then does nothing |
-| Lago's partman migrations skip silently if the extension is missing | `lago-api` v1.55.0 `db/migrate/20260109*` | `infra-doctor` checks it explicitly |
+| Lago's partman migrations skip silently only if the extension isn't available on the server. On RDS it is, so they try to create it and fail unless `db-init.sql` already has | `lago-api` v1.55.0 `db/migrate/20260109*`, `lib/migrations/extension_helper.rb` | `infra-doctor` checks `partman.part_config` has a row |
 | Lago's S3 settings: `LAGO_USE_AWS_S3`, `LAGO_AWS_S3_REGION`, `LAGO_AWS_S3_BUCKET` | `lago` v1.55.0 Compose, `lago-api` `config/storage.yml` | Used in Task 6. **Using the instance role with the key variables unset is not yet proven**; Task 12 tests it |
 | Zitadel `init` takes the admin login; `start-from-setup` doesn't need it | `zitadel` v4.20.0 `cmd/` | Admin password is used only once, in a one-shot service |
 | Zitadel's first-instance SMTP settings | `zitadel` v4.20.0 `cmd/defaults.yaml` | Used in Task 6 |
@@ -1606,7 +1606,7 @@ GRANT lago TO CURRENT_USER;
 SELECT 'CREATE DATABASE app OWNER app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'app') \gexec
 SELECT 'CREATE DATABASE lago OWNER lago' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'lago') \gexec
 
--- Lago's migrations skip partitioning silently without this, and creating it needs rds_superuser.
+-- Lago's first migration would fail trying to create pg_partman: creating it needs rds_superuser, and `lago` isn't one.
 \connect lago
 CREATE SCHEMA IF NOT EXISTS partman;
 CREATE EXTENSION IF NOT EXISTS pg_partman SCHEMA partman;
@@ -2593,7 +2593,8 @@ def problems(results: dict[str, Any]) -> list[str]:
         elif status != 200:
             found.append(f"{url} answered HTTP {status}")
     if results["partman"] != "1":
-        found.append("pg_partman isn't installed in Lago's database, and Lago skips its setup silently. Re-run make infra-bootstrap")
+        found.append("pg_partman isn't set up in Lago's database: partman.part_config has no row for enriched_events, "
+                     "or lago-api couldn't answer. Lago's first migration adds that row: see `docker compose logs lago-migrate`")
     return found
 
 
@@ -2860,16 +2861,18 @@ git commit -m "feat(infra): per-folder deploy workflows over OIDC"
 
 **Amendments, 2026-11-02** (found by running `make rehearse-aws`)
 
-- `lago-migrate` deletes `db/structure.sql` before migrating (`docker-compose.aws.yml`). This is a real AWS bug the rehearsal found. Rails 8's `db:migrate` loads that file into an empty database, and its first statements include `DROP EXTENSION IF EXISTS pg_partman`, so the non-superuser `lago` role stopped with "must be owner of extension pg_partman". Without the file, Rails runs all the migrations. Checked on Lago v1.55.0 with both paths as a superuser: both record 1185 migrations and their schemas match apart from an extra `cached_aggregations.event_id` column and its index, which only the migrations create. Loading the file also left `partman.part_config` empty, so the migrations are the only path that sets up partitioning. They need Redis, which `lago-migrate` already depends on.
+- `lago-migrate` deletes `db/structure.sql` before migrating (`docker-compose.aws.yml`). This is a real AWS bug the rehearsal found. Rails 8's `db:migrate` loads that file into an empty database, and its first statements include `DROP EXTENSION IF EXISTS pg_partman`, so the non-superuser `lago` role stopped with "must be owner of extension pg_partman". Without the file, Rails runs all the migrations. Checked on Lago v1.55.0 with both paths as a superuser: both end with 1185 `schema_migrations` rows (`db/migrate` has 736 files, and the initial migration inserts the squashed versions) and their schemas match apart from a `cached_aggregations.event_id` column and its index. Lago drops that column only outside production, so the migration path matches what upgraded self-hosters have, and the model ignores it. Loading the file also left `partman.part_config` empty, so the migrations are the only path that sets up partitioning. They need Redis, which `lago-migrate` already depends on.
 - `SMTP_HOST` in `rehearsal.env` is `smtp.rehearsal.invalid:587`, with placeholder SES values, not blank. Zitadel's setup refuses a first-instance SMTP host without a port (`INST-9JdRe`). AWS is fine: `server.tf` already sets `host:587`. The `SMTP_HOST: ""` override is gone for the same reason.
 - The stand-in requires TLS through `pg_hba.conf` (`hostssl` only), and `run.sh` checks that a plain connection is refused. `ssl=on` alone would have allowed plain connections, so `sslmode=require` would have gone untested. Its healthcheck uses TCP because the socket also answers during the image's temporary first-start server.
-- `run.sh` runs `db-init.sql`'s roles and databases as `dbadmin` first, then the whole file twice as the superuser, so only the `pg_partman` part depends on the superuser.
+- `run.sh` runs `db-init.sql`'s roles and databases once as `dbadmin`, then the whole file twice as the superuser. So the re-run is proved only as the superuser, and the `pg_partman` part only ever ran as the superuser.
 - `run.sh` unsets every name in `rehearsal.env`, because Compose prefers shell values to `--env-file` and the Makefile exports the product's `.env`.
-- Checks added to `run.sh`: both PAT files are written, `enriched_events` has partitions, `lago-migrate` re-runs cleanly, the login route answers, everything is still running, and, with `ADMIN_CIDRS` set to the Compose subnet, Lago's UI and API are reached and the seeded API key works. The 403 checks alone never reach `lago-front` or show that the admin list lets anyone in.
+- Checks added to `run.sh`: both PAT files are written, `enriched_events` has partitions, `lago-migrate` exits 0 on a second run, the login route answers, everything is still running, and, with `ADMIN_CIDRS` set to the Compose subnet, Lago's UI and API are reached and the seeded API key works. The 403 checks alone never reach `lago-front` or show that the admin list lets anyone in.
 - `status()` keeps only the last three characters of curl's output, because `-w` writes a code for each retry (`000403`).
 - `infra.py` leaves `deploy/rehearsal` out of the server bundle. The server has no use for it.
 - Default `instance_type` stays `t3.large`. For Task 13: measured idle on Docker Desktop on an arm64 Mac, all services except the backend and jobs, 1478 MiB including 231 MiB for the stand-in database, so 1247 MiB on the server. With estimated (not measured) allowances of 500 MiB each for the backend and jobs, 1000 MiB for a PDF render and 700 MiB for Lago under load, that is about 3.9 GB, under the 6 GB limit. `lago-pdf` is an x86 image under emulation there, so its figure is only indicative. Measure again on the real server.
-- For Task 13, things only RDS can answer: `db-init.sql`'s `pg_partman` part as `dbadmin` under `rds_superuser`, including the `GRANT`s, and that RDS's `pg_partman` default version accepts `p_type := 'range'` (5.x does, and the rehearsal ran 5.4.0; check `SELECT default_version FROM pg_available_extensions WHERE name = 'pg_partman'`). Lago v1.55.0's code never calls `partman.run_maintenance`, so new partitions stop 3 months after the first migration unless something runs it, and later rows go to the default partition.
+- The RDS checks, the memory re-measure and the partition maintenance decision are in Task 13's own steps, since that is what James follows.
+- Fix round 1: the webhook check expects exactly 404. A failed `lago-migrate` re-run prints its output. A failed `down` prints its output and makes the run exit non-zero, and a killed run's temp folder is removed by the next run. "Still running" also fails on any `RestartCount` above 0, so a crash loop can't pass. `run.sh` asks `lago-api` the same `part_config` question as `make infra-doctor`.
+- Fix round 1: `infra_doctor.py` checks that `partman.part_config` has a row for `enriched_events`, not only that the extension exists, because an empty `part_config` is the state loading `structure.sql` leaves. When `lago-api` is down it still reports the service as not running and also this problem, as before.
 
 This is the only test of the database setup and routing before real money is spent. It stands in for RDS with a Postgres that requires TLS, and an admin that isn't a superuser.
 
@@ -2879,7 +2882,7 @@ This is the only test of the database setup and routing before real money is spe
 
 **Interfaces:**
 - Consumes: Task 6's Compose file, Caddyfile and `db-init.sql`.
-- Produces: `make rehearse-aws`, exit 0 when every check passes. It proves: `db-init.sql` runs and re-runs; `zitadel-init` works with a non-superuser admin over TLS; Zitadel starts from setup; Lago migrates and creates its partitions with the granted rights; Caddy's routing rules. It does **not** prove AWS itself, sign-in in a browser, email, S3 or real certificates.
+- Produces: `make rehearse-aws`, exit 0 when every check passes. It proves: `db-init.sql`'s roles and databases run as the non-superuser admin, and the whole file runs and re-runs as the stand-in superuser; `zitadel-init` works with a non-superuser admin over TLS; Zitadel starts from setup; Lago migrates and creates its partitions with the granted rights; Caddy's routing rules. It does **not** prove AWS itself, sign-in in a browser, email, S3 or real certificates.
 
 - [ ] **Step 1: Implement.**
 
@@ -3160,14 +3163,18 @@ git commit -m "docs(infra): deploy runbook"
 
 An agent can't do this task, by the guard and by the rules on AWS writes. It needs the AWS account and domain James will provide, and it costs real money. Each numbered step needs James's go-ahead. An agent may read `make infra-plan` and `make infra-doctor` output and fix template bugs found on a branch.
 
+**Open decision, James owns it: partition maintenance.** Nothing in Lago v1.55.0 calls `partman.run_maintenance`, and this milestone doesn't build a scheduler, because choosing between `pg_cron` and a timer needs real RDS. Until it is decided: new partitions stop about 3 months after the first migration, later rows go to the default partition, retention doesn't run, and nothing fails.
+
 **Files:**
 - Modify: `template/README.md.jinja` (measured numbers), this plan (dated notes)
 
-- [ ] **Step 1: Deploy.** Generate a test product, then follow `infra/README.md`, First deploy.
+- [ ] **Step 1: Deploy.** Generate a test product, then follow `infra/README.md`, First deploy. After `make infra-apply` and before `make infra-bootstrap`, check RDS's `pg_partman` version as `dbadmin`: `SELECT default_version FROM pg_available_extensions WHERE name = 'pg_partman'`. The rehearsal ran 5.4.0, whose `create_parent` accepted `p_type := 'range'`, the value Lago's migration passes. If it is below 5, stop and fix this first, because that migration is expected to fail.
 
 - [ ] **Step 2: Check spec §1 items 1 and 2.** Sign up at `https://app.<domain>` with an SES-verified address, create a workspace, confirm the branding, and open the plans page. Change one frontend file, merge, and confirm the backend's container start time is unchanged.
 
 - [ ] **Step 3: Check things the rehearsal couldn't.**
+  - `db-init.sql`'s `pg_partman` part worked as `dbadmin` under `rds_superuser`, and `p_type := 'range'` was accepted: after the first bootstrap, `make infra-doctor` reports no `pg_partman` problem, which means `partman.part_config` has a row for `enriched_events`. An empty table means partitioning isn't set up, even if the extension is installed.
+  - Memory on the real server: `docker stats --no-stream`. Compare with the rehearsal's 1247 MiB idle, measured without the backend and jobs on an arm64 Mac, and about 3.9 GB estimated with them and under load. If the total is over 6 GB of `t3.large`'s 8 GB, change the default `instance_type` and note why.
   - Lago can write to S3 with the server's role. On the server: `docker compose exec lago-api bin/rails runner 'ActiveStorage::Blob.service.upload("rehearsal-check", StringIO.new("x")); puts "ok"'`. If this fails, the fallback is a dedicated IAM user whose key is in `<slug>/app`, passed as `LAGO_AWS_S3_ACCESS_KEY_ID` and `LAGO_AWS_S3_SECRET_ACCESS_KEY`.
   - The budget's `cost_filter` value in the plan reads `user:Product$<slug>`.
   - The disk alarm's dimensions match the real device (`nvme0n1p1` and `xfs`) in CloudWatch. If the alarm shows "insufficient data", correct them.

@@ -8,7 +8,7 @@ GRANT lago TO CURRENT_USER;
 SELECT 'CREATE DATABASE app OWNER app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'app') \gexec
 SELECT 'CREATE DATABASE lago OWNER lago' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'lago') \gexec
 
--- Lago's migrations skip partitioning silently without this, and creating it needs rds_superuser.
+-- Lago's first migration would fail trying to create pg_partman: creating it needs rds_superuser, and `lago` isn't one.
 \connect lago
 CREATE SCHEMA IF NOT EXISTS partman;
 CREATE EXTENSION IF NOT EXISTS pg_partman SCHEMA partman;
