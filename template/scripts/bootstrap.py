@@ -1,4 +1,5 @@
-"""`make bootstrap`: configure the local Zitadel, Lago and S3 storage once. Safe to re-run.
+"""`make bootstrap`: configure Zitadel, Lago and S3 storage once, locally or (DEPLOY_TARGET=aws) on the server.
+Safe to re-run.
 
 Every step looks before it creates, so a failed run is fixed by fixing the cause and running again.
 IDs go to .bootstrap/ids.env and the backend's token to .bootstrap/backend/backend.pat (both
@@ -514,15 +515,23 @@ def ensure_bucket(name: str = "data") -> None:
 
 def publish_aws_state() -> None:
     import boto3
+    from botocore.exceptions import BotoCoreError, ClientError
 
     import aws_state
 
     ids = read_ids()
     region, slug = env("AWS_REGION"), env("SLUG")
-    aws_state.publish_frontend(
-        boto3.client("ssm", region_name=region), slug,
-        aws_state.frontend_values(env("DOMAIN"), ids["ZITADEL_CLIENT_ID"], ids["ZITADEL_PROJECT_ID"]))
-    aws_state.save_tokens(boto3.client("secretsmanager", region_name=region), slug, STATE)
+    values = aws_state.frontend_values(env("DOMAIN"), ids["ZITADEL_CLIENT_ID"], ids["ZITADEL_PROJECT_ID"])
+    try:
+        # Tokens first: Zitadel writes them only once, so an SSM failure must not stop them being saved.
+        aws_state.save_tokens(boto3.client("secretsmanager", region_name=region), slug, STATE)
+        aws_state.publish_frontend(boto3.client("ssm", region_name=region), slug, values)
+    except (BotoCoreError, ClientError) as exc:
+        code = exc.response.get("Error", {}).get("Code", "") if isinstance(exc, ClientError) else ""
+        raise SystemExit(
+            f"bootstrap: saving state to AWS failed ({type(exc).__name__} {code}".rstrip()
+            + "). Check the server role's Secrets Manager and SSM permissions, then run the first-run again."
+        ) from None
 
 
 def backend(*args: str) -> None:
@@ -530,7 +539,8 @@ def backend(*args: str) -> None:
 
 
 def main() -> None:
-    # First: a wrong key, or one Stripe rejects, stops before anything changes. The backend must not
+    # First: a wrong key, or one Stripe rejects, stops before anything changes (on AWS the key is only
+    # checked for its sk_test_ prefix here; Stripe doesn't see it until Lago uses it). The backend must not
     # get a key Lago has no provider for, or new workspaces fail. Saved back so Compose, which prefers
     # this process's environment over .env, gets the cleaned value.
     key = os.environ["STRIPE_SECRET_KEY"] = stripe_secret_key()
@@ -563,13 +573,15 @@ def main() -> None:
         compose("up", "-d", "--force-recreate", "frontend")
         wait_for(f"the app at {app_url()}", lambda: http_ok(app_url(), "/"))  # it runs `npm ci` first
     s3_line = "" if on_aws() else f"\n  S3           http://localhost:{env('S3_PORT')} (SeaweedFS, bucket data)"
+    next_step = ("Next: `gh workflow run deploy-frontend` (the frontend isn't deployed yet)" if on_aws()
+                 else f"Open {app_url()}")
     print(f"""
 Ready.
   App          {app_url()}
   API          {public_url("api", "API_PORT")}
   Zitadel      {zitadel}/ui/console
   Lago         {public_url("lago", "LAGO_FRONT_PORT")}{s3_line}
-Open {app_url()}""")
+{next_step}""")
 
 
 if __name__ == "__main__":

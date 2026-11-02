@@ -699,3 +699,84 @@ def test_ensure_bucket_is_left_to_terraform_on_aws(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("DEPLOY_TARGET", "aws")
     monkeypatch.setattr(bootstrap, "wait_for", lambda *a, **k: pytest.fail("touched SeaweedFS"))
     bootstrap.ensure_bucket()
+
+
+def test_aws_main_publishes_state_before_brand_and_touches_nothing_local(
+    monkeypatch: pytest.MonkeyPatch, stubbed_main: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = FakeStripeSetup(monkeypatch, [], "whsec_abc")
+    for name in list(os.environ):
+        if name.endswith("_PORT"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("DEPLOY_TARGET", "aws")
+    monkeypatch.setenv("DOMAIN", "x.test")
+    monkeypatch.setenv("AWS_REGION", "eu-west-2")
+    monkeypatch.setenv("SLUG", "acme")
+    monkeypatch.setattr(bootstrap, "publish_aws_state", lambda: fake.events.append("publish"))
+    monkeypatch.setattr(bootstrap.subprocess, "run",
+                        lambda *a, **_k: fake.events.append("brand") or subprocess.CompletedProcess([], 0))
+    bootstrap.main()
+    assert fake.events.index("publish") < fake.events.index("brand")
+    text = " | ".join(fake.events)
+    assert "--print-secret" not in text and "stripe-cli" not in text and "frontend" not in text.replace("publish", "")
+    out = capsys.readouterr().out
+    assert "gh workflow run deploy-frontend" in out and "Open " not in out and "S3 " not in out
+
+
+def test_publish_aws_state_saves_tokens_before_the_frontend_values(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    from unittest.mock import MagicMock
+
+    import boto3
+
+    (tmp_path / "zitadel").mkdir()
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "zitadel/admin.pat").write_text("A")
+    (tmp_path / "zitadel/login-client.pat").write_text("L")
+    (tmp_path / "backend/backend.pat").write_text("B")
+    (tmp_path / "ids.env").write_text("ZITADEL_CLIENT_ID=c1\nZITADEL_PROJECT_ID=p1\n")
+    monkeypatch.setattr(bootstrap, "STATE", tmp_path)
+    monkeypatch.setattr(bootstrap, "IDS", tmp_path / "ids.env")
+    for name, value in {"AWS_REGION": "eu-west-2", "SLUG": "acme", "DOMAIN": "x.test"}.items():
+        monkeypatch.setenv(name, value)
+    clients = {"ssm": MagicMock(), "secretsmanager": MagicMock()}
+    order: list[str] = []
+    clients["secretsmanager"].put_secret_value.side_effect = lambda **_k: order.append("tokens")
+    clients["ssm"].put_parameter.side_effect = lambda **_k: order.append("frontend")
+    monkeypatch.setattr(boto3, "client", lambda service, **_k: clients[service])
+    bootstrap.publish_aws_state()
+    assert order == ["tokens", "frontend"]
+    assert clients["ssm"].put_parameter.call_args.kwargs["Name"] == "/acme/frontend"
+    secret = clients["secretsmanager"].put_secret_value.call_args.kwargs
+    assert secret["SecretId"] == "acme/bootstrap"
+    assert set(json.loads(secret["SecretString"])) == {"admin_pat", "login_client_pat", "backend_pat", "ids_env"}
+
+
+def test_publish_aws_state_turns_an_aws_error_into_a_plain_stop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    import boto3
+    from botocore.exceptions import ClientError
+
+    (tmp_path / "ids.env").write_text("ZITADEL_CLIENT_ID=c1\nZITADEL_PROJECT_ID=p1\n")
+    monkeypatch.setattr(bootstrap, "IDS", tmp_path / "ids.env")
+    for name, value in {"AWS_REGION": "eu-west-2", "SLUG": "acme", "DOMAIN": "x.test"}.items():
+        monkeypatch.setenv(name, value)
+
+    def denied(*_a: object, **_k: object) -> object:
+        raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "secret-detail"}}, "PutSecretValue")
+
+    from unittest.mock import MagicMock
+
+    client = MagicMock()
+    client.put_secret_value.side_effect = denied
+    monkeypatch.setattr(boto3, "client", lambda *_a, **_k: client)
+    (tmp_path / "zitadel").mkdir()
+    (tmp_path / "backend").mkdir()
+    for f in ("zitadel/admin.pat", "zitadel/login-client.pat", "backend/backend.pat"):
+        (tmp_path / f).write_text("x")
+    monkeypatch.setattr(bootstrap, "STATE", tmp_path)
+    with pytest.raises(SystemExit, match=r"bootstrap: saving state to AWS failed \(ClientError AccessDeniedException\)") as stopped:
+        bootstrap.publish_aws_state()
+    assert "secret-detail" not in str(stopped.value)

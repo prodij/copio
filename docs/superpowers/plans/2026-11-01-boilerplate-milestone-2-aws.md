@@ -1962,6 +1962,7 @@ git commit -m "feat(infra): server start, first-run and deploy scripts with roll
 - `brand.py` `main`: the server's bundle has no `frontend/`, so `write_frontend` and its print are skipped when `DEPLOY_TARGET=aws`. Add a test.
 - `pyproject.toml`: add `aws_state.py` to mypy's `files`, and a `[[tool.mypy.overrides]]` for `boto3` with `ignore_missing_imports = true`.
 - Implemented as amended; deviations: `test_aws_state.py` uses `match=r"backend\.pat"` (ruff RUF043), and `test_bootstrap.py` adds tests that `bootstrap_stripe` and `ensure_bucket` do nothing local on AWS. The Ready summary builds the S3 line only locally.
+- Review fix round 1: `publish_aws_state` saves tokens before the SSM parameter and turns `BotoCoreError`/`ClientError` into a `bootstrap:` stop naming class and code only; on AWS the Ready summary points to `gh workflow run deploy-frontend` instead of "Open"; mypy override covers `botocore.*` too; tests added for AWS `main()` and `publish_aws_state`.
 
 **Files:**
 - Create: `template/scripts/aws_state.py`, `template/scripts/tests/test_aws_state.py`
