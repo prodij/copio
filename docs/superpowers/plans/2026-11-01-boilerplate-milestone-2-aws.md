@@ -21,7 +21,7 @@
 - Stripe test keys only (`sk_test_`). No `stripe-cli` and no mock payment path in `docker-compose.aws.yml`.
 - x86 server. Single-zone RDS Postgres 15. No NAT gateway. No SSH port.
 - GitHub Actions are pinned to a full commit SHA with a `# vX.Y.Z` comment.
-- Prerequisite: milestone 1's `feat/run-without-stripe` is merged into `main`. Rebase this branch on it before Task 8, because that branch rewrites `template/scripts/bootstrap.py`. Task 8 identifies changes by function name for that reason.
+- This work is on `feat/aws-m2`, cut from `feat/two-products`, which contains PRs #7 (`feat/run-without-stripe`), #8 and #9. Its PR is stacked on #9.
 
 ## Facts verified while planning (2026-11-01)
 
@@ -84,6 +84,11 @@ tests/test_infra_template.py template-level checks on a generated product
 ---
 
 ### Task 1: Agent guard and spec amendments
+
+**Amendments, 2026-11-01** (from checking this plan against `feat/two-products`, before any code ran. These override the steps and code below. Later fixes found by running the code are added here too.)
+
+- Spec edits also: set the Status line to approved; in §3 replace "so it needs upgrading first" wording only if it reads as a blocker (agents use a pinned binary; James upgrades for Task 13); in §6 say `make infra-plan` prints the account, and that `make infra-destroy` shows Terraform's plan and asks for confirmation at each stage instead of auto-approving; in §14 say this work is stacked on PRs #7 to #9.
+- `run` is the helper's real name in `test_guard.py`. `.dev/acme` comes from root `make dev`.
 
 **Files:**
 - Modify: `template/.claude/hooks/guard.py`, `template/.claude/hooks/test_guard.py`, `docs/superpowers/specs/2026-11-01-boilerplate-milestone-2-aws-design.md`
@@ -183,6 +188,12 @@ git commit -m "feat(infra): guard blocks agents from infrastructure writes; spec
 ---
 
 ### Task 2: Terraform foundation, network and template checks
+
+**Amendments, 2026-11-01** (from checking this plan against `feat/two-products`, before any code ran. These override the steps and code below. Later fixes found by running the code are added here too.)
+
+- `test_tfvars_has_the_slug_and_no_secrets`: the file is aligned by `terraform fmt`, so match with `re.search(r'^slug\s*=\s*"acme-reports"', text, re.M)`.
+- `NOT_RESOURCE_NAMES` must also hold `"Managed-CachingOptimized"`, `"/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"` and `"deploy"` (the SSM document's step name). These appear in Tasks 4 and 5. Add them now.
+- `test_terraform_is_valid` passes at this task but fails during Tasks 3 and 4 by design, until Task 5 adds the resources they reference.
 
 **Files:**
 - Create: `template/infra/versions.tf`, `variables.tf`, `network.tf`, `outputs.tf`, `terraform.tfvars.jinja`, `tests/test_infra_template.py`
@@ -420,6 +431,11 @@ git commit -m "feat(infra): Terraform foundation, network and template checks"
 
 ### Task 3: Database, storage, secrets and email
 
+**Amendments, 2026-11-01** (from checking this plan against `feat/two-products`, before any code ran. These override the steps and code below. Later fixes found by running the code are added here too.)
+
+- `aws_iam_user.ses_smtp` gets `force_destroy = true`. `make infra-secrets` creates its access key outside Terraform, and without this `terraform destroy` fails with DeleteConflict (spec §1 item 5). Assert it in a test.
+- Add an `aws_route53_record.ses_verification` TXT record: name `_amazonses.${var.domain}`, records `[aws_ses_domain_identity.main.verification_token]`, ttl 600, and add it to the verification resource's `depends_on`. `aws_ses_domain_identity_verification` waits on the identity's verification status, and this TXT record is the provider's documented way to reach it.
+
 **Files:**
 - Create: `template/infra/database.tf`, `storage.tf`, `secrets.tf`, `email.tf`
 - Modify: `template/infra/outputs.tf`
@@ -631,6 +647,11 @@ git commit -m "feat(infra): RDS, S3, ECR, secret containers and SES"
 ---
 
 ### Task 4: Server, DNS and alarms
+
+**Amendments, 2026-11-01** (from checking this plan against `feat/two-products`, before any code ran. These override the steps and code below. Later fixes found by running the code are added here too.)
+
+- In `user_data.sh.tftpl`, `aws s3 sync` also gets `--exclude "scripts/.venv/*"`, or every boot deletes and rebuilds the scripts' environment.
+- `ami = data.aws_ssm_parameter.al2023.insecure_value`: `.value` is sensitive, which hides the AMI in the plan a person has to read.
 
 **Files:**
 - Create: `template/infra/server.tf`, `user_data.sh.tftpl`, `monitoring.tf`, `dns.tf`
@@ -1002,6 +1023,10 @@ git commit -m "feat(infra): server, DNS, alarms and budget"
 
 ### Task 5: Frontend hosting and CI access
 
+**Amendments, 2026-11-01** (from checking this plan against `feat/two-products`, before any code ran. These override the steps and code below. Later fixes found by running the code are added here too.)
+
+- `test_second_product_can_skip_the_oidc_provider`: `terraform fmt` aligns `count`, so match with `re.search(r"count\s*=\s*var\.create_github_oidc_provider \? 1 : 0", text)`.
+
 **Files:**
 - Create: `template/infra/frontend.tf`, `ci.tf`
 - Modify: `template/infra/outputs.tf`
@@ -1253,6 +1278,13 @@ git commit -m "feat(infra): CloudFront frontend, GitHub OIDC deploy role and dep
 ---
 
 ### Task 6: AWS Compose file and Caddy
+
+**Amendments, 2026-11-01** (from checking this plan against `feat/two-products`, before any code ran. These override the steps and code below. Later fixes found by running the code are added here too.)
+
+- `LAGO_ORG_NAME`, `ZITADEL_FIRSTINSTANCE_ORG_NAME`, and `ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_FROMNAME` use `{{ product_name | tojson }}` with no surrounding quotes, like `docker-compose.yml.jinja`.
+- `zitadel-login` also gets `CUSTOM_REQUEST_HEADERS: x-zitadel-public-host:auth.${DOMAIN}`, which PR #9 added locally so logo and font URLs point at the right host.
+- Do not add `LAGO_DISABLE_SSL`. Checked in `getlago/api:v1.55.0` `config/environments/production.rb`: `assume_ssl` is on unless that's set and `force_ssl` is false, so plain http on the Compose network isn't redirected and generated URLs stay https. Say so in a one-line comment in the file.
+- Spec §10 requires `docker compose config` on this file on every PR. Add a fast test: `docker compose -f docker-compose.aws.yml --profile setup config --quiet --no-interpolate` in `product_dir`, returning 0.
 
 **Files:**
 - Create: `template/docker-compose.aws.yml.jinja`, `template/deploy/Caddyfile`, `template/deploy/db-init.sql`
@@ -1595,6 +1627,13 @@ git commit -m "feat(infra): AWS Compose file, Caddy routing and database setup"
 
 ### Task 7: Server scripts: start, first run and deploy
 
+**Amendments, 2026-11-01** (from checking this plan against `feat/two-products`, before any code ran. These override the steps and code below. Later fixes found by running the code are added here too.)
+
+- `first-run.sh` as written would fail: `bootstrap.py` reads `DOMAIN`, `SLUG`, `LAGO_API_KEY`, `LAGO_ORG_USER_EMAIL` and `LAGO_ORG_USER_PASSWORD` from its process environment, and nothing puts them there. Before `uv run`, export `DEPLOY_TARGET=aws`, `SLUG`, `DOMAIN`, `LAGO_API_KEY`, `LAGO_ORG_USER_PASSWORD`, `STRIPE_SECRET_KEY` from `val`, and `LAGO_ORG_USER_EMAIL=admin@$DOMAIN`, which matches the Compose file. Keep `val` tolerant of a missing key under `set -e`: `STRIPE_SECRET_KEY` usually isn't in `.env`. Add a test with stubs, including a `uv` stub that records its environment, that proves these reach it and that no value is printed.
+- SSM Run Command gives no reliable `HOME` or `PATH`. All three scripts start with `export HOME="${HOME:-/root}"` and `PATH="$PATH:/usr/local/bin"`. Append to `PATH`, so test stubs still win.
+- `template/scripts/tests/test_deploy_scripts.py` must pass `make check`'s `ruff check .`: tests don't have an S607 exemption, so add `# noqa: S607` where `bash` is called.
+- Commit the three scripts with the executable bit.
+
 **Files:**
 - Create: `template/deploy/start.sh`, `template/deploy/first-run.sh`, `template/deploy/deploy.sh`, `template/scripts/tests/test_deploy_scripts.py`
 
@@ -1910,6 +1949,15 @@ git commit -m "feat(infra): server start, first-run and deploy scripts with roll
 
 ### Task 8: Bootstrap on AWS
 
+**Amendments, 2026-11-01** (from checking this plan against `feat/two-products`, before any code ran. These override the steps and code below. Later fixes found by running the code are added here too.)
+
+- `main`: on AWS `stripe_webhook_secret` must not run, because it calls the `stripe-cli` service, which isn't in the AWS file: `webhook_secret = stripe_webhook_secret() if key and not on_aws() else ""`.
+- `bootstrap_stripe`: when `on_aws()`, skip both `compose("up", ..., "stripe-cli")` and `apply_stripe_webhook_secret`, and print a line saying Lago registers its own webhook. Lago's `RegisterWebhookJob` does this because `LAGO_API_URL` is public.
+- `main`: the final `wait_for(the app ...)` is local-only too, along with recreating `frontend`. On AWS the frontend isn't deployed yet.
+- Call `publish_aws_state()` straight after `bootstrap_lago()` and before `ensure_bucket()` and the brand step, because brand needs Lago's S3 and that's the likeliest thing to fail on a first deploy. Tokens must already be saved by then.
+- `brand.py` `main`: the server's bundle has no `frontend/`, so `write_frontend` and its print are skipped when `DEPLOY_TARGET=aws`. Add a test.
+- `pyproject.toml`: add `aws_state.py` to mypy's `files`, and a `[[tool.mypy.overrides]]` for `boto3` with `ignore_missing_imports = true`.
+
 **Files:**
 - Create: `template/scripts/aws_state.py`, `template/scripts/tests/test_aws_state.py`
 - Modify: `template/scripts/bootstrap.py`, `template/scripts/tests/test_bootstrap.py`, `template/scripts/pyproject.toml`, `template/scripts/uv.lock`
@@ -2143,6 +2191,15 @@ git commit -m "feat(infra): bootstrap runs on AWS and saves tokens and frontend 
 ---
 
 ### Task 9: The `make infra-*` commands
+
+**Amendments, 2026-11-01** (from checking this plan against `feat/two-products`, before any code ran. These override the steps and code below. Later fixes found by running the code are added here too.)
+
+- `pyproject.toml`: add `infra.py` and `infra_doctor.py` to mypy's `files`. Fix what strict mode reports, for example `json.loads` returning `Any` from `read_secret`.
+- `infra_doctor.main`: `admin_set` must not depend on spacing. Use `not re.search(r"^\s*admin_cidrs\s*=\s*\[\s*\]", text, re.M)`.
+- `destroy`: drop `-auto-approve` from both Terraform steps. Spec §6 says the protection change is a separate, visible plan, so a person reads and confirms each one.
+- `destroy` also deletes this product's SSM parameters that Terraform doesn't own (`/<slug>/tags/*`, `/<slug>/frontend`), through a small `delete_parameters(ssm, slug)` with a MagicMock-based test. Otherwise a redeploy of the slug starts from stale tags, and "removes everything" is false.
+- `upload_bundle` also skips `.pytest_cache`, `.mypy_cache` and `.ruff_cache`.
+- `infra-plan` first prints the account (spec §6): `@echo "Account: $$(aws sts get-caller-identity --query Account --output text)"`.
 
 **Files:**
 - Create: `template/scripts/infra.py`, `template/scripts/infra_doctor.py`, `template/scripts/tests/test_infra.py`, `template/scripts/tests/test_infra_doctor.py`
@@ -2776,6 +2833,16 @@ git commit -m "feat(infra): per-folder deploy workflows over OIDC"
 
 ### Task 11: Local rehearsal, without AWS
 
+**Amendments, 2026-11-01** (from checking this plan against `feat/two-products`, before any code ran. These override the steps and code below. Later fixes found by running the code are added here too.)
+
+- Ports 80 and others are taken on developers' machines, and every check runs inside the Compose network. So the rehearsal publishes nothing: `ports: !reset []` on `caddy` and `lago-api` in the override file.
+- The file is `deploy/rehearsal/rehearsal.env`, not `.env.rehearsal`. The guard (rightly) blocks `.env.*` names and `.gitignore` ignores them, so no `.gitignore` exception is needed for it.
+- Project name: the slug from `docker-compose.aws.yml`'s `name:` plus `-rehearsal`, so two products don't clash.
+- Never touch the product's `.bootstrap/`, which a local stack may be using. `run.sh` makes a `chmod 777` temp folder under a git-ignored `.rehearsal/` (add it to `template/.gitignore`), and the override file mounts it over Zitadel's and the login's bootstrap volumes using `!override`.
+- Use the one-shot `curl` container with `--resolve name:443:<caddy ip>` and `-k` from the start, since Caddy picks certificates by SNI. Pin an exact `curlimages/curl` tag.
+- For a useful memory figure, also start `zitadel-login`, `lago-worker`, `lago-clock` and `lago-front`, and print the total. The backend and jobs aren't running, because they have no image here; say so in the output.
+- `db-init.sql` runs as the stand-in superuser because `pg_partman` isn't a trusted extension here, while on RDS `dbadmin` runs it as `rds_superuser`. That difference is a limit of this rehearsal, and the output should say so.
+
 This is the only test of the database setup and routing before real money is spent. It stands in for RDS with a Postgres that requires TLS, and an admin that isn't a superuser.
 
 **Files:**
@@ -2938,6 +3005,13 @@ git commit -m "feat(infra): local rehearsal of the AWS database setup and routin
 ---
 
 ### Task 12: Runbook and README
+
+**Amendments, 2026-11-01** (from checking this plan against `feat/two-products`, before any code ran. These override the steps and code below. Later fixes found by running the code are added here too.)
+
+- "To go back": the OIDC role only trusts `refs/heads/main`, so `gh workflow run` from an earlier commit is refused. Document only `aws ssm send-command --document-name <slug>-deploy --instance-ids <id> --parameters service=backend,tag=<tag>`.
+- "The server failed": `cd infra && terraform plan -replace=aws_instance.server -out=tfplan`, then `make infra-apply`. Drop "point DNS again": the Elastic IP moves with the apply.
+- "Database": say plainly that switching production to a restored instance isn't automated in this milestone. Restoring and reading from it is what's documented and tested.
+- "Removing a product": Terraform shows two plans, and you confirm each one.
 
 **Files:**
 - Create: `template/infra/README.md` (replacing the stub)
