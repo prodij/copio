@@ -154,5 +154,7 @@ resource "aws_ssm_parameter" "config" {
     DISTRIBUTION_ID     = aws_cloudfront_distribution.frontend.id
     SMTP_HOST           = "email-smtp.${var.aws_region}.amazonaws.com:587"
     INSTANCE_ID         = aws_instance.server.id
+    # Read by the backend and jobs (connector credentials). Not a secret: using it needs the server role.
+    CONNECTOR_KMS_KEY_ID = aws_kms_key.connectors.arn
   })
 }
