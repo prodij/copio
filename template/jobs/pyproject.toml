@@ -3,7 +3,8 @@ name = "jobs"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = ["boto3>=1.35", "sqlalchemy>=2.0.36", "psycopg[binary]>=3.2", "httpx>=0.28",
-                "croniter>=5.0", "pyyaml>=6.0"]
+                "croniter>=6.1", "pyyaml>=6.0",
+                "procrastinate>=3.11,<3.12", "cryptography>=46"]
 
 [dependency-groups]
 dev = ["pytest>=8.3", "respx>=0.21", "moto[s3]>=5.0", "ruff>=0.8", "mypy>=1.13", "types-pyyaml"]
