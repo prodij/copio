@@ -266,6 +266,176 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sync/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Connections */
+        get: operations["list_connections_sync_connections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sync/connections/{connection_id}/datasets/{dataset}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Now
+         * @description Queue a manual incremental run from the end of published coverage to now. It goes through the
+         *     same queue, leases and rate budgets as a scheduled run.
+         */
+        post: operations["refresh_now_sync_connections__connection_id__datasets__dataset__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sync/connections/{connection_id}/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Connection Health */
+        get: operations["connection_health_sync_connections__connection_id__health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sync/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Operator Health */
+        get: operations["operator_health_sync_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sync/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runs */
+        get: operations["list_runs_sync_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sync/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_sync_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sync/runs/{run_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay Run
+         * @description Re-process a run's stored raw objects with the current parser. Never calls the provider, so it
+         *     is allowed while a connection is paused or needs reconnecting, but not once it is disconnected.
+         */
+        post: operations["replay_run_sync_runs__run_id__replay_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sync/runs/{run_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Run
+         * @description Run a waiting run now instead of at `next_attempt_at`. A waiting run is not finished, so it is
+         *     put back in the outbox as it is (same id, stage and checkpoint) rather than copied. Rate budgets
+         *     still apply when it runs.
+         */
+        post: operations["resume_run_sync_runs__run_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sync/runs/{run_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Run
+         * @description A failed run is terminal; retrying creates a new run for the same unit of work. The checkpoint
+         *     is carried over, so a report that was already requested is polled, never requested again.
+         */
+        post: operations["retry_run_sync_runs__run_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces": {
         parameters: {
             query?: never;
@@ -323,6 +493,17 @@ export interface components {
             /** Checkout Url */
             checkout_url: string | null;
         };
+        /** ConnectionHealth */
+        ConnectionHealth: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            connection: components["schemas"]["ConnectionSummary"];
+            /** Datasets */
+            datasets: components["schemas"]["DatasetHealth"][];
+        };
         /**
          * ConnectionOut
          * @description Never carries a credential: only whether one is stored and when it expires.
@@ -358,6 +539,32 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** ConnectionSummary */
+        ConnectionSummary: {
+            /** Account Ref */
+            account_ref: string;
+            /** Datasets */
+            datasets: number;
+            /** Display Name */
+            display_name: string;
+            /** Failed Runs Awaiting Action */
+            failed_runs_awaiting_action: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last Publish At */
+            last_publish_at: string | null;
+            /** Provider */
+            provider: string;
+            /** Stale Datasets */
+            stale_datasets: number;
+            /** State */
+            state: string;
+            /** State Reason */
+            state_reason: string | null;
         };
         /** CreateConnection */
         CreateConnection: {
@@ -397,6 +604,45 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /**
+         * DatasetHealth
+         * @description `last_publish_*` is the last complete publication; `last_attempt` is the newest run, whatever
+         *     it did. They are separate on purpose.
+         */
+        DatasetHealth: {
+            /** Active Run Id */
+            active_run_id: string | null;
+            /** Covered From */
+            covered_from: string | null;
+            /** Covered To */
+            covered_to: string | null;
+            /** Dataset */
+            dataset: string;
+            /**
+             * Freshness
+             * @enum {string}
+             */
+            freshness: "fresh" | "stale" | "never_synced" | "no_target";
+            /** Freshness Target S */
+            freshness_target_s: number | null;
+            /** Lag S */
+            lag_s: number | null;
+            last_attempt: components["schemas"]["RunBrief"] | null;
+            /** Last Attempt At */
+            last_attempt_at: string | null;
+            /** Last Publish At */
+            last_publish_at: string | null;
+            /** Last Publish Run Id */
+            last_publish_run_id: string | null;
+            /** Lease Expired */
+            lease_expired: boolean;
+            /** Missing Periods */
+            missing_periods: components["schemas"]["Period"][];
+            /** Replay Backlog */
+            replay_backlog: number;
+            /** Schedule Paused */
+            schedule_paused: boolean | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -419,6 +665,50 @@ export interface components {
             /** Role */
             role: string;
         };
+        /** OperatorHealth */
+        OperatorHealth: {
+            /** Auth Failures Recent */
+            auth_failures_recent: number;
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Expired Leases */
+            expired_leases: number;
+            /** Failed Runs Awaiting Action */
+            failed_runs_awaiting_action: number;
+            /** Oldest Queued Age S */
+            oldest_queued_age_s: number | null;
+            /** Oldest Unprocessed Raw At */
+            oldest_unprocessed_raw_at: string | null;
+            oldest_unpublished: components["schemas"]["StreamRef"] | null;
+            /** Outbox Pending */
+            outbox_pending: number;
+            /** Queued Runs */
+            queued_runs: number;
+            /** Rate Limited Recent */
+            rate_limited_recent: number;
+            /** Recent Window S */
+            recent_window_s: number;
+            /** Reconnect Needed Connections */
+            reconnect_needed_connections: number;
+            /** Waiting Runs */
+            waiting_runs: number;
+        };
+        /** Period */
+        Period: {
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+        };
         /** PlanOut */
         PlanOut: {
             /** Amount Cents */
@@ -439,6 +729,165 @@ export interface components {
         /** ReconnectIn */
         ReconnectIn: {
             credentials: components["schemas"]["CredentialsIn"];
+        };
+        /** RunBrief */
+        RunBrief: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Error Code */
+            error_code: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Stage */
+            stage: string;
+            /** Status */
+            status: string;
+            /** Trigger */
+            trigger: string;
+        };
+        /** RunDetail */
+        RunDetail: {
+            /** Attempt */
+            attempt: number;
+            /**
+             * Connection Id
+             * Format: uuid
+             */
+            connection_id: string;
+            /** Connector Version */
+            connector_version: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset */
+            dataset: string;
+            /** Enqueued At */
+            enqueued_at: string | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Detail */
+            error_detail: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Max Attempts */
+            max_attempts: number;
+            /** Next Attempt At */
+            next_attempt_at: string | null;
+            /** Provider Request Ref */
+            provider_request_ref: string | null;
+            /** Raw Objects */
+            raw_objects: number;
+            /** Raw Unprocessed */
+            raw_unprocessed: number;
+            /** Records Accepted */
+            records_accepted: number;
+            /** Records Rejected */
+            records_rejected: number;
+            /** Records Stale */
+            records_stale: number;
+            /** Replay Of */
+            replay_of: string | null;
+            /** Requested By */
+            requested_by: string | null;
+            /** Stage */
+            stage: string;
+            /** Started At */
+            started_at: string | null;
+            /** Status */
+            status: string;
+            /** Trigger */
+            trigger: string;
+            /** Wait Reason */
+            wait_reason: string | null;
+            /**
+             * Window End
+             * Format: date-time
+             */
+            window_end: string;
+            /**
+             * Window Start
+             * Format: date-time
+             */
+            window_start: string;
+        };
+        /** RunOut */
+        RunOut: {
+            /** Attempt */
+            attempt: number;
+            /**
+             * Connection Id
+             * Format: uuid
+             */
+            connection_id: string;
+            /** Connector Version */
+            connector_version: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset */
+            dataset: string;
+            /** Error Code */
+            error_code: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Max Attempts */
+            max_attempts: number;
+            /** Next Attempt At */
+            next_attempt_at: string | null;
+            /** Records Accepted */
+            records_accepted: number;
+            /** Records Rejected */
+            records_rejected: number;
+            /** Records Stale */
+            records_stale: number;
+            /** Replay Of */
+            replay_of: string | null;
+            /** Stage */
+            stage: string;
+            /** Started At */
+            started_at: string | null;
+            /** Status */
+            status: string;
+            /** Trigger */
+            trigger: string;
+            /**
+             * Window End
+             * Format: date-time
+             */
+            window_end: string;
+            /**
+             * Window Start
+             * Format: date-time
+             */
+            window_start: string;
         };
         /** ScheduleIn */
         ScheduleIn: {
@@ -504,6 +953,18 @@ export interface components {
             paused: boolean;
             /** Timezone */
             timezone: string;
+        };
+        /** StreamRef */
+        StreamRef: {
+            /**
+             * Connection Id
+             * Format: uuid
+             */
+            connection_id: string;
+            /** Covered To */
+            covered_to: string | null;
+            /** Dataset */
+            dataset: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -1046,6 +1507,316 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MeWorkspace"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_connections_sync_connections_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_now_sync_connections__connection_id__datasets__dataset__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                connection_id: string;
+                dataset: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connection_health_sync_connections__connection_id__health_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionHealth"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    operator_health_sync_health_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorHealth"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_sync_runs_get: {
+        parameters: {
+            query?: {
+                connection_id?: string | null;
+                dataset?: string | null;
+                status?: string | null;
+                kind?: string | null;
+                trigger?: string | null;
+                /** @description Only runs created before this time (paging) */
+                before?: string | null;
+                limit?: number;
+            };
+            header?: {
+                "x-workspace-id"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_sync_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_run_sync_runs__run_id__replay_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_run_sync_runs__run_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_run_sync_runs__run_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
                 };
             };
             /** @description Validation Error */
