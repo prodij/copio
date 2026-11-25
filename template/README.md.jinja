@@ -29,8 +29,8 @@ It is off by default. To turn it on, keep `STRIPE_SECRET_KEY` empty, set `BILLIN
 - The app shows a "Mock payment" banner on every page. Lago's invoice stays unpaid, because nothing pays it.
 - **A mock payment pass is not a Stripe pass.** The Stripe payment test is reported as skipped. The mock run does
   not prove Stripe's page, saved cards, Lago's payment-gated subscription, or what happens when a payment fails.
-- `billing_reconcile` also activates mock subscriptions: it asks Lago every 15 minutes and when the scheduler
-  starts, and Lago says active with nothing paid. So without the webhook, premium stays off only until its next
+- `billing_reconcile` also activates mock subscriptions: it asks Lago every 15 minutes (and when `jobs` starts
+  again after missing a run), and Lago says active with nothing paid. So without the webhook, premium stays off only until its next
   run. That is why the test stops the job while it checks that only the webhook grants access.
 - The test pauses `lago-worker` and stops `jobs`, and puts them back afterwards. The next mock payment `make e2e`
   repairs a killed run too; to do it by hand: `docker compose unpause lago-worker && docker compose start jobs`.
