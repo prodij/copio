@@ -75,4 +75,6 @@ def clean_tables(pg_engine: Engine) -> Iterator[Engine]:
     with pg_engine.begin() as conn:
         conn.execute(text(
             "truncate audit_events, synced_records, raw_objects, sync_streams, sync_runs, sync_schedules,"
-            " rate_budgets, credentials, connections, workspaces cascade"))
+            " rate_budgets, credentials, connections, workspaces,"
+            " procrastinate_jobs, procrastinate_events, procrastinate_periodic_defers,"
+            " procrastinate_workers cascade"))

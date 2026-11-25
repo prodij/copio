@@ -41,11 +41,13 @@ from jobs.sync.contract import (
     Provider,
     ProviderError,
     RateLimited,
+    RawObjectView,
     ReportProvider,
     ReportState,
     RunKind,
     RunSpec,
     RunStatus,
+    RunView,
     Stage,
     StaleLease,
     TransientError,
@@ -60,33 +62,6 @@ TERMINAL = frozenset({RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED
 # What the runner needs beyond contract.py. Each is a proposed contract addition (see the S4 report);
 # until the integrator adopts them they live here so the runner can be built and tested.
 # ---------------------------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class RunView:
-    """A read of one sync_runs row. Proposed: `Ledger.get_run`."""
-
-    run_id: uuid.UUID
-    spec: RunSpec
-    status: RunStatus
-    stage: Stage
-    checkpoint: Mapping[str, Any]
-    attempt: int  # number of claims so far (claim increments it)
-    max_attempts: int
-    replay_of: uuid.UUID | None = None
-
-
-@dataclass(frozen=True)
-class RawObjectView:
-    """A read of one raw_objects row. Proposed: `Ledger.raw_objects`."""
-
-    id: uuid.UUID
-    run_id: uuid.UUID
-    page_seq: int
-    storage_key: str
-    sha256: str
-    size: int
-    processed: bool
 
 
 class RunLedger(Ledger, Protocol):

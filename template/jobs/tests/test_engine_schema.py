@@ -21,7 +21,7 @@ def test_vendored_schema_matches_the_installed_procrastinate() -> None:
 
 def test_migration_follows_the_contract_migration() -> None:
     source = (MIGRATIONS / "versions" / "s2_procrastinate.py").read_text()
-    assert 'revision = "s2_procrastinate"' in source and 'down_revision = "0004"' in source
+    assert 'revision = "s2_procrastinate"' in source and 'down_revision = "s1_ledger_receipts"' in source  # linearized
 
 
 def test_queue_tables_exist_next_to_the_connector_tables(pg_engine: Engine) -> None:

@@ -183,6 +183,8 @@ services:
       LAGO_API_KEY: ${LAGO_API_KEY}
       LAGO_WEBHOOK_ISSUER: https://lago-api.${DOMAIN}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      APP_ENV: production  # refuses CONNECTOR_LOCAL_KEK and mock payment
+      CONNECTOR_KMS_KEY_ID: ${CONNECTOR_KMS_KEY_ID}  # from the SSM config (infra/server.tf)
     volumes: [./.bootstrap/backend:/run/bootstrap:ro]
     ports: ["127.0.0.1:8000:8000"]
 
@@ -198,6 +200,8 @@ services:
       DATABASE_URL: postgresql+psycopg://app:${APP_DB_PASSWORD}@${DB_HOST}:5432/app?sslmode=require
       LAGO_API_URL: http://lago-api:3000
       LAGO_API_KEY: ${LAGO_API_KEY}
+      APP_ENV: production
+      CONNECTOR_KMS_KEY_ID: ${CONNECTOR_KMS_KEY_ID}
       AWS_DEFAULT_REGION: ${AWS_REGION}
       RAW_BUCKET: ${DATA_BUCKET}
       SYNC_CONCURRENCY: ${SYNC_CONCURRENCY:-4}  # incremental, report and replay runs at once

@@ -77,11 +77,14 @@ class ReportState(enum.StrEnum):
 
 
 class ProviderError(Exception):
-    """Base. `request_ref` is the provider's request id, safe to show an operator."""
+    """Base. `request_ref` is the provider's request id, safe to show an operator. `raw` is the response
+    body when the provider got one it could not use (a schema change): the runner stores it for replay.
+    The message is never shown to an operator; the runner records a fixed code instead."""
 
-    def __init__(self, message: str, *, request_ref: str | None = None) -> None:
+    def __init__(self, message: str, *, request_ref: str | None = None, raw: bytes | None = None) -> None:
         super().__init__(message)
         self.request_ref = request_ref
+        self.raw = raw
 
 
 class RateLimited(ProviderError):
@@ -189,6 +192,33 @@ class Lease:
 
 
 @dataclass(frozen=True)
+class RunView:
+    """A read of one sync_runs row."""
+
+    run_id: uuid.UUID
+    spec: RunSpec
+    status: RunStatus
+    stage: Stage
+    checkpoint: Mapping[str, Any]
+    attempt: int  # claims so far: claim increments it
+    max_attempts: int
+    replay_of: uuid.UUID | None = None
+
+
+@dataclass(frozen=True)
+class RawObjectView:
+    """A read of one raw_objects row."""
+
+    id: uuid.UUID
+    run_id: uuid.UUID
+    page_seq: int
+    storage_key: str
+    sha256: str
+    size: int
+    processed: bool
+
+
+@dataclass(frozen=True)
 class PublishResult:
     accepted: int
     rejected: int
@@ -209,6 +239,11 @@ class Provider(Protocol):
 
     def fetch_page(self, cred: Credential, dataset: str, window: Window, cursor: str | None) -> Page: ...
 
+    def parse_page(self, dataset: str, raw: bytes) -> Page:
+        """Stored raw bytes back into a Page, with no network. Replay and crash recovery need it.
+        Raises PermanentError if this connector version cannot read them."""
+        ...
+
 
 @runtime_checkable
 class ReportProvider(Protocol):
@@ -220,13 +255,59 @@ class ReportProvider(Protocol):
     def request_report(self, cred: Credential, dataset: str, window: Window) -> str: ...
     def report_status(self, cred: Credential, report_id: str) -> ReportStatus: ...
     def download(self, cred: Credential, document_ref: str) -> Page: ...
+    def parse_page(self, dataset: str, raw: bytes) -> Page: ...
+
+
+@runtime_checkable
+class TokenRefresher(Protocol):
+    """Optional provider capability: exchange a credential for a fresh access token. Only ever called
+    through `CredentialStore.refresh`, which serializes it per connection."""
+
+    def refresh_token(self, cred: Credential) -> tuple[str, datetime | None]: ...
+
+
+class RateBudgets(Protocol):
+    """Provider quota blocks (session S2's budgets, as the runner uses them)."""
+
+    def blocked_until(self, budget_key: str) -> datetime | None: ...
+    def block(self, budget_key: str, until: datetime) -> None:
+        """Block until `until`. A later block never shortens an existing one."""
+        ...
+
+
+class AuditSink(Protocol):
+    """Writes an audit_events row with actor_type='system', in its own transaction."""
+
+    def record(self, workspace_id: uuid.UUID, action: str, target_type: str, target_id: str,
+               detail: Mapping[str, Any]) -> None: ...
 
 
 class Ledger(Protocol):
-    """Durable run state in Postgres (session S1). Every mutating call after claim carries the lease."""
+    """Durable run state in Postgres (session S1). Every mutating call after claim carries the lease.
+
+    Semantics the contract suite holds every implementation to:
+    - `claim` counts as an attempt, and moves a queued or waiting run to running.
+    - publishing an equal version replaces the record (a replay re-derives data); an older one is skipped.
+    - `checkpoint` replaces the whole checkpoint.
+    - `complete` raises if any raw object of the run is unprocessed.
+    - `wait` sets status waiting and next_attempt_at, and leaves queue_job_id alone (the dispatcher
+      re-queues waiting runs once they are due and their previous job has finished).
+    """
 
     def create_run(self, spec: RunSpec) -> tuple[uuid.UUID, bool]:
         """(run_id, created). Same dedupe key → the existing run id and created=False."""
+        ...
+
+    def create_replay(self, source_run_id: uuid.UUID, connector_version: str,
+                      requested_by: str | None = None) -> uuid.UUID:
+        """A new queued outbox run of kind replay: the source run's window, `replay_of` set, and a
+        dedupe key of its own, so each replay request is a separate run."""
+        ...
+
+    def get_run(self, run_id: uuid.UUID) -> RunView | None: ...
+
+    def raw_objects(self, run_id: uuid.UUID) -> Sequence[RawObjectView]:
+        """Every raw object the run saved, ordered by page_seq."""
         ...
 
     def claim(self, run_id: uuid.UUID, owner: str, lease_s: float) -> Lease | None:
@@ -276,6 +357,12 @@ class CredentialStore(Protocol):
     def rotate(self, cred: Credential, access_token: str, expires_at: datetime | None,
                extra: Mapping[str, str] | None = None) -> Credential:
         """Save a refreshed token only if `cred.version` is still current; else return the newer one."""
+        ...
+
+    def refresh(self, cred: Credential, refresher: TokenRefresher) -> Credential:
+        """Refresh under the per-connection lock: if `cred.version` is still current, call the provider
+        once and save the result; if another worker already refreshed, return its credential without
+        calling the provider. AuthRevoked from the provider propagates."""
         ...
 
     def mark_revoked(self, connection_id: uuid.UUID, reason: str) -> None: ...

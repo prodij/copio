@@ -11,7 +11,7 @@ from pathlib import Path
 from alembic import op
 
 revision = "s2_procrastinate"
-down_revision = "0004"
+down_revision = "s1_ledger_receipts"  # linearized at merge (was 0004)
 
 SCHEMA = Path(__file__).resolve().parents[1] / "procrastinate" / "schema-3.11.0.sql"
 
