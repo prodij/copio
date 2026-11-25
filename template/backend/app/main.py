@@ -4,6 +4,8 @@ from app import errors
 from app.access.routes import router as access_router
 from app.billing.routes import router as billing_router
 from app.config import BillingModeSettings, FrontendSettings, Settings, get_settings
+from app.connectors.health import router as sync_health_router
+from app.connectors.runs_routes import router as sync_runs_router
 from app.cors import FrontendCORS
 from app.demo.routes import router as demo_router
 from app.workspaces.routes import router as workspaces_router
@@ -27,6 +29,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(billing_router)
     app.include_router(access_router)
     app.include_router(demo_router)
+    app.include_router(sync_health_router)
+    app.include_router(sync_runs_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

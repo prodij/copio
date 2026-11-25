@@ -4,6 +4,8 @@ import { BrandMark } from "@/components/BrandMark";
 import { MockPaymentBanner } from "@/components/MockPaymentBanner";
 import { Billing } from "@/pages/Billing";
 import { CheckoutReturn } from "@/pages/CheckoutReturn";
+import { ConnectionDetail } from "@/pages/ConnectionDetail";
+import { Connections } from "@/pages/Connections";
 import { CreateWorkspace } from "@/pages/CreateWorkspace";
 import { Home } from "@/pages/Home";
 import { MockPayment } from "@/pages/MockPayment";
@@ -19,6 +21,7 @@ function Layout() {
         <Link to="/premium">Report</Link>
         <Link to="/plans">Plans</Link>
         <Link to="/billing">Billing</Link>
+        <Link to="/connections">Connections</Link>
         <button type="button" className="ml-auto" onClick={() => void userManager.signoutRedirect()}>Sign out</button>
       </nav>
       {/* Keyed so it asks again on every page: there is no workspace to ask about until one exists. */}
@@ -39,6 +42,8 @@ export const routes = [
       { path: "/billing/mock-payment", element: <MockPayment /> },
       { path: "/billing/return", element: <CheckoutReturn /> },
       { path: "/premium", element: <PremiumReport /> },
+      { path: "/connections", element: <Connections /> },
+      { path: "/connections/:connectionId", element: <ConnectionDetail /> },
       { path: "/callback", element: <Navigate to="/" replace /> },
     ],
   },
