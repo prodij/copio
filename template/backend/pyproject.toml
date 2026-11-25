@@ -13,6 +13,7 @@ dependencies = [
   "pyjwt[crypto]>=2.10",
   "pyyaml>=6.0",
   "cryptography>=46",
+  "boto3>=1.35",  # KMS for connector credentials (app/connectors/vault.py)
 ]
 
 [dependency-groups]
@@ -31,6 +32,9 @@ ignore = ["E501"]
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["app"]
+[[tool.mypy.overrides]]
+module = ["boto3", "botocore.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
