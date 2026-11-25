@@ -4,4 +4,4 @@ WORKDIR /jobs
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 COPY . .
-CMD ["uv", "run", "--no-dev", "python", "-m", "jobs.scheduler"]
+CMD ["uv", "run", "--no-dev", "python", "-m", "jobs.worker"]
