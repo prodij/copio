@@ -11,8 +11,19 @@ from typing import Any
 
 import pytest
 from sqlalchemy import Engine, text
+from sqlalchemy.exc import IntegrityError
 
-from jobs.sync.contract import Lease, Record, RunKind, RunSpec, Stage, StaleLease, Trigger, Window
+from jobs.sync.contract import (
+    Lease,
+    Record,
+    RunKind,
+    RunSpec,
+    RunStatus,
+    Stage,
+    StaleLease,
+    Trigger,
+    Window,
+)
 from jobs.sync.ledger import (
     BacklogPending,
     PgLedger,
@@ -231,23 +242,28 @@ def test_racing_claims_after_expiry_give_one_lease(ledger: PgLedger, conn_id: An
     assert len(won) == 1 and won[0].fence == 2
 
 
-def test_claim_refuses_finished_runs_and_fails_exhausted_ones(ledger: PgLedger, conn_id: Any,
-                                                             clean_tables: Engine) -> None:
+def test_claim_refuses_finished_runs_but_never_caps_attempts(ledger: PgLedger, conn_id: Any,
+                                                             clean_tables: Engine, clock: Clock) -> None:
     done = sync(ledger, spec(conn_id), [rec("k1", "1")])
     assert ledger.claim(done, "w1", 30) is None
 
+    # Bounding attempts is the runner's job: waits and backfill chunks each take a claim.
     run_id, _ = ledger.create_run(spec(conn_id, day=1))
-    with clean_tables.begin() as conn:
-        conn.execute(text("update sync_runs set attempt = max_attempts where id = :id"), {"id": run_id})
-    assert ledger.claim(run_id, "w1", 30) is None
-    r = row(clean_tables, "select status, error_code from sync_runs where id = :id", id=run_id)
-    assert (r.status, r.error_code) == ("failed", "attempts_exhausted")
+    for n in range(1, 8):
+        lease = ledger.claim(run_id, "w1", 30)
+        assert lease is not None
+        ledger.wait(lease, clock.now, "retry")
+        r = ledger.get_run(run_id)
+        assert r is not None and (r.status, r.attempt) == (RunStatus.WAITING, n)
+    lease = ledger.claim(run_id, "w1", 30)  # a waiting run moves back to running
+    r = ledger.get_run(run_id)
+    assert lease is not None and r is not None and (r.status, r.attempt) == (RunStatus.RUNNING, 8)
 
 
 # --- checkpoint and raw -------------------------------------------------------------------------
 
 
-def test_checkpoint_merges_progress_and_sets_stage(ledger: PgLedger, conn_id: Any, clean_tables: Engine) -> None:
+def test_checkpoint_replaces_the_whole_checkpoint(ledger: PgLedger, conn_id: Any, clean_tables: Engine) -> None:
     run_id, _ = ledger.create_run(spec(conn_id, kind=RunKind.REPORT))
     lease = ledger.claim(run_id, "w1", 30)
     assert lease is not None
@@ -255,20 +271,23 @@ def test_checkpoint_merges_progress_and_sets_stage(ledger: PgLedger, conn_id: An
     ledger.checkpoint(lease, Stage.FETCHING, {"page_seq": 3})
     r = row(clean_tables, "select stage, checkpoint from sync_runs where id = :id", id=run_id)
     assert r.stage == "fetching"
-    assert r.checkpoint == {"report_id": "rpt-1", "page_seq": 3}  # the report id is never lost
+    assert r.checkpoint == {"page_seq": 3}  # the runner always writes all of it
 
 
-def test_save_raw_is_idempotent_and_new_bytes_go_back_in_the_backlog(ledger: PgLedger, conn_id: Any,
-                                                                    clean_tables: Engine) -> None:
+def test_save_raw_is_idempotent_and_refuses_a_conflicting_entry(ledger: PgLedger, conn_id: Any,
+                                                               clean_tables: Engine) -> None:
     run_id, _ = ledger.create_run(spec(conn_id))
     lease = ledger.claim(run_id, "w1", 30)
     assert lease is not None
     raw = ledger.save_raw(lease, 0, "raw/0.json", SHA_A, 10)
     assert ledger.save_raw(lease, 0, "raw/0.json", SHA_A, 10) == raw
     ledger.publish(lease, raw, [rec("k1", "1")])
-    assert ledger.save_raw(lease, 0, "raw/0-refetch.json", SHA_B, 12) == raw
-    r = row(clean_tables, "select sha256, processed_at from raw_objects where id = :id", id=raw)
-    assert (r.sha256, r.processed_at) == (SHA_B, None)
+    before = snapshot(clean_tables)
+    with pytest.raises(IntegrityError):  # same page, other bytes: never rewrite what was published
+        ledger.save_raw(lease, 0, "raw/0-refetch.json", SHA_B, 12)
+    with pytest.raises(IntegrityError):  # another page cannot reuse a storage key
+        ledger.save_raw(lease, 1, "raw/0.json", SHA_B, 12)
+    assert snapshot(clean_tables) == before
     with pytest.raises(ValueError, match="sha256"):
         ledger.save_raw(lease, 1, "raw/1.json", "not-a-digest", 1)
 
@@ -305,20 +324,30 @@ def test_versions_compare_in_byte_order_not_locale_order(ledger: PgLedger, conn_
     assert records(clean_tables) == {"k": ("a", False)}
 
 
-def test_publish_rejects_bad_records_and_dedupes_within_a_page(ledger: PgLedger, conn_id: Any,
+def test_an_equal_version_replaces(ledger: PgLedger, conn_id: Any, clean_tables: Engine) -> None:
+    run_id, _ = ledger.create_run(spec(conn_id))
+    lease = ledger.claim(run_id, "w1", 30)
+    assert lease is not None
+    run_page(ledger, lease, 0, [rec("k", "0005", total=1)])
+    raw = ledger.save_raw(lease, 1, "raw/1.json", SHA_B, 10)
+    assert ledger.publish(lease, raw, [rec("k", "0005", total=2)]).accepted == 1
+    assert row(clean_tables, "select data from synced_records").data["total"] == 2
+
+
+def test_publish_applies_records_in_order_and_rejects_bad_ones(ledger: PgLedger, conn_id: Any,
                                                               clean_tables: Engine) -> None:
     run_id, _ = ledger.create_run(spec(conn_id))
     lease = ledger.claim(run_id, "w1", 30)
     assert lease is not None
     raw = ledger.save_raw(lease, 0, "raw/0.json", SHA_A, 10)
     result = ledger.publish(lease, raw, [
-        rec("k1", "0001"), rec("k1", "0003"), rec("k1", "0002"),  # one key, three versions: 0003 wins
+        rec("k1", "0001"), rec("k1", "0003"), rec("k1", "0002"),  # in order: 0002 loses to 0003
         rec("", "0001"),  # no key
         Record(key="k2", version="0001", data={"x": float("nan")}),  # not JSON
         Record(key="k3", version="0001", data={"x": "nul\x00"}),  # Postgres can't store it
         rec("k4", "0001", deleted=True),  # a tombstone is a valid record
     ])
-    assert (result.accepted, result.rejected, result.stale_skipped) == (2, 3, 2)
+    assert (result.accepted, result.rejected, result.stale_skipped) == (3, 3, 1)
     assert records(clean_tables) == {"k1": ("0003", False), "k4": ("0001", True)}
 
 
@@ -438,12 +467,10 @@ def test_replay_republishes_stored_raw_of_the_original_run(ledger: PgLedger, con
                                                            clean_tables: Engine) -> None:
     original = sync(ledger, spec(conn_id), [rec("k", "1", total=1)])
     raw_id = row(clean_tables, "select id from raw_objects where run_id = :id", id=original).id
-    replay_id, _ = ledger.create_run(spec(conn_id, kind=RunKind.REPLAY))
-    with clean_tables.begin() as conn:
-        conn.execute(text("update sync_runs set replay_of = :o where id = :id"), {"o": original, "id": replay_id})
+    replay_id = ledger.create_replay(original, "synthetic-2")
     lease = ledger.claim(replay_id, "w1", 30)
     assert lease is not None
-    # A fixed parser produces different data at the same version; a replay may rewrite it.
+    # A fixed parser produces different data at the same version; the replay rewrites it.
     assert ledger.publish(lease, raw_id, [rec("k", "1", total=2)]).accepted == 1
     ledger.complete(lease, spec(conn_id).window, snapshot_complete=False)
     assert row(clean_tables, "select data from synced_records").data["total"] == 2
@@ -467,25 +494,17 @@ def test_wait_stores_a_sanitized_reason_and_releases_the_stream(ledger: PgLedger
     assert again is not None and again.fence == lease.fence + 1
 
 
-def test_fail_with_attempts_left_waits_then_fails_for_good(ledger: PgLedger, conn_id: Any,
-                                                           clean_tables: Engine, clock: Clock) -> None:
+def test_fail_stores_sanitized_detail_and_is_terminal(ledger: PgLedger, conn_id: Any,
+                                                       clean_tables: Engine) -> None:
     run_id, _ = ledger.create_run(spec(conn_id))
-    with clean_tables.begin() as conn:
-        conn.execute(text("update sync_runs set max_attempts = 2 where id = :id"), {"id": run_id})
     lease = ledger.claim(run_id, "w1", 30)
     assert lease is not None
-    retry_at = clock.now + timedelta(seconds=90)
-    ledger.fail(lease, "Transient", "upstream 503", "req-1", retry_at=retry_at)
-    r = row(clean_tables, "select status, next_attempt_at, error_code from sync_runs where id = :id", id=run_id)
-    assert (r.status, r.next_attempt_at, r.error_code) == ("waiting", retry_at, "transient")
-
-    lease = ledger.claim(run_id, "w1", 30)
-    assert lease is not None
-    ledger.fail(lease, "transient", "upstream 503 access_token=abc123", "req-2", retry_at=retry_at)
-    r = row(clean_tables, "select status, next_attempt_at, error_detail, provider_request_ref, finished_at"
-            " from sync_runs where id = :id", id=run_id)
-    assert (r.status, r.next_attempt_at, r.provider_request_ref) == ("failed", None, "req-2")
-    assert r.error_detail == "upstream 503 access_token=[redacted]" and r.finished_at is not None
+    ledger.fail(lease, "Permanent", "upstream 400 access_token=abc123\nmore", "req 2/€")
+    r = row(clean_tables, "select status, next_attempt_at, error_code, error_detail, provider_request_ref,"
+            " finished_at from sync_runs where id = :id", id=run_id)
+    assert (r.status, r.next_attempt_at, r.error_code) == ("failed", None, "permanent")
+    assert r.error_detail == "upstream 400 access_token=[redacted] more"
+    assert r.provider_request_ref == "req2/" and r.finished_at is not None
     assert ledger.claim(run_id, "w1", 30) is None
 
 
@@ -506,3 +525,67 @@ def test_verify_run_detects_a_tampered_receipt(ledger: PgLedger, conn_id: Any, c
     with pytest.raises(ReceiptMismatch):
         ledger.verify_run(run_id)
 
+
+
+# --- reads and replays --------------------------------------------------------------------------
+
+
+def test_get_run_reads_back_the_spec_and_progress(ledger: PgLedger, conn_id: Any) -> None:
+    s = spec(conn_id, kind=RunKind.BACKFILL, trigger=Trigger.MANUAL)
+    run_id, _ = ledger.create_run(s)
+    view = ledger.get_run(run_id)
+    assert view is not None
+    assert (view.spec, view.status, view.stage, view.attempt, view.max_attempts, view.replay_of) == (
+        s, RunStatus.QUEUED, Stage.PENDING, 0, 5, None)
+    lease = ledger.claim(run_id, "w1", 30)
+    assert lease is not None
+    ledger.checkpoint(lease, Stage.FETCHING, {"cursor": "c2"})
+    view = ledger.get_run(run_id)
+    assert view is not None and (view.status, view.stage, view.checkpoint, view.attempt) == (
+        RunStatus.RUNNING, Stage.FETCHING, {"cursor": "c2"}, 1)
+    assert ledger.get_run(uuid.uuid4()) is None
+
+
+def test_raw_objects_are_listed_in_page_order(ledger: PgLedger, conn_id: Any) -> None:
+    run_id, _ = ledger.create_run(spec(conn_id))
+    lease = ledger.claim(run_id, "w1", 30)
+    assert lease is not None
+    ids = {seq: ledger.save_raw(lease, seq, f"raw/{seq}.json", f"{seq:064x}", seq + 1) for seq in (2, 0, 1)}
+    ledger.publish(lease, ids[1], [rec("k", "1")])
+    raws = ledger.raw_objects(run_id)
+    assert [(r.page_seq, r.id, r.size, r.processed) for r in raws] == [
+        (0, ids[0], 1, False), (1, ids[1], 2, True), (2, ids[2], 3, False)]
+    assert raws[0].storage_key == "raw/0.json" and raws[0].sha256 == f"{0:064x}"
+    assert ledger.raw_objects(uuid.uuid4()) == []
+
+
+def test_create_replay_makes_a_separate_queued_run_each_time(ledger: PgLedger, conn_id: Any,
+                                                            clean_tables: Engine) -> None:
+    s = spec(conn_id, day=3)
+    original = sync(ledger, s, [rec("k", "1")])
+    first = ledger.create_replay(original, "synthetic-2", requested_by="user-1")
+    second = ledger.create_replay(original, "synthetic-2")
+    assert first != second
+    view = ledger.get_run(first)
+    assert view is not None
+    assert (view.status, view.spec.kind, view.spec.window, view.spec.connector_version, view.replay_of) == (
+        RunStatus.QUEUED, RunKind.REPLAY, s.window, "synthetic-2", original)
+    r = row(clean_tables, "select requested_by, enqueued_at, trigger from sync_runs where id = :id", id=first)
+    assert (r.requested_by, r.enqueued_at, r.trigger) == ("user-1", None, "manual")  # an outbox row
+    again = ledger.get_run(ledger.create_replay(first, "synthetic-3"))  # a replay of a replay
+    assert again is not None and again.replay_of == original  # points at the run that owns the raw
+    with pytest.raises(RunNotFound):
+        ledger.create_replay(uuid.uuid4(), "synthetic-2")
+
+
+def test_wait_leaves_the_queue_job_alone(ledger: PgLedger, conn_id: Any, clean_tables: Engine,
+                                         clock: Clock) -> None:
+    run_id, _ = ledger.create_run(spec(conn_id))
+    with clean_tables.begin() as conn:
+        conn.execute(text("update sync_runs set enqueued_at = now(), queue_job_id = 41 where id = :id"),
+                     {"id": run_id})
+    lease = ledger.claim(run_id, "w1", 30)
+    assert lease is not None
+    ledger.wait(lease, clock.now + timedelta(seconds=30), "retry")
+    r = row(clean_tables, "select status, queue_job_id, enqueued_at from sync_runs where id = :id", id=run_id)
+    assert (r.status, r.queue_job_id) == ("waiting", 41) and r.enqueued_at is not None
