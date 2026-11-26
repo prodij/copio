@@ -143,6 +143,29 @@ def _check_window(window: Window) -> None:
         raise ValueError("window must be non-empty: start < end")
 
 
+def _join_succeeded(conn: Connection, lease: Lease, start: datetime, end: datetime) -> tuple[datetime, datetime]:
+    """Extends [start, end) through the stream's other succeeded windows that touch it, in both
+    directions. Windows that succeeded past a hole are joined once the hole is filled; without this,
+    every later window would be "past the gap" and coverage would never advance again."""
+    stream = {"connection_id": lease.connection_id, "dataset": lease.dataset, "run_id": lease.run_id}
+    # Sorted by start, a window that doesn't touch `end` means none after it can.
+    for w in conn.execute(text(
+            "select window_start, window_end from sync_runs where connection_id = :connection_id"
+            " and dataset = :dataset and status = 'succeeded' and id <> :run_id and window_end > :end"
+            " order by window_start"), {**stream, "end": end}):
+        if w.window_start > end:
+            break
+        end = max(end, w.window_end)
+    for w in conn.execute(text(
+            "select window_start, window_end from sync_runs where connection_id = :connection_id"
+            " and dataset = :dataset and status = 'succeeded' and id <> :run_id and window_start < :start"
+            " order by window_end desc"), {**stream, "start": start}):
+        if w.window_end < start:
+            break
+        start = min(start, w.window_start)
+    return start, end
+
+
 def _encode_record(record: Record) -> str | None:
     """The record's data as JSON, or None if the record cannot be stored as sent."""
     if not isinstance(record.key, str) or not 0 < len(record.key) <= MAX_KEY:
@@ -500,6 +523,8 @@ class PgLedger:
                 start, end = min(start, window.start), max(end, window.end)
             else:
                 contiguous = False
+            if contiguous:
+                start, end = _join_succeeded(conn, lease, start, end)
             advanced = (start, end) != (stream.covered_from, stream.covered_to)
             conn.execute(text(
                 "update sync_streams set covered_from = :start, covered_to = :end, last_publish_at = :now,"

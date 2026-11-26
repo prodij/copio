@@ -279,6 +279,17 @@ class MemoryLedger:
         elif window.start <= stream.covered_to and window.end >= stream.covered_from:
             stream.covered_from = min(stream.covered_from, window.start)
             stream.covered_to = max(stream.covered_to, window.end)
+        # A window past a hole leaves coverage alone. One that joined it may also reach windows that
+        # already succeeded past a hole it just filled.
+        if window.start <= stream.covered_to and window.end >= stream.covered_from:
+            done = [r.spec.window for r in self.runs.values() if r.id != run.id and r.status is RunStatus.SUCCEEDED
+                    and (r.spec.connection_id, r.spec.dataset) == (run.spec.connection_id, run.spec.dataset)]
+            for w in sorted(done, key=lambda w: w.start):  # forward through windows published past the hole
+                if w.start <= stream.covered_to:
+                    stream.covered_to = max(stream.covered_to, w.end)
+            for w in sorted(done, key=lambda w: w.end, reverse=True):  # and backward, symmetrically
+                if w.end >= stream.covered_from:
+                    stream.covered_from = min(stream.covered_from, w.start)
         if snapshot_complete:
             for (conn, ds, key), rec in self.records.items():
                 if (conn, ds) == (run.spec.connection_id, run.spec.dataset) and not rec.deleted \

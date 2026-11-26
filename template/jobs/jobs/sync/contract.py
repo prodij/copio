@@ -331,7 +331,10 @@ class Ledger(Protocol):
 
     def complete(self, lease: Lease, window: Window, snapshot_complete: bool) -> None:
         """Advance coverage to include the window, only if every raw object of the run is processed.
-        Deletions are inferred only when snapshot_complete is True."""
+        Coverage is one contiguous range and never spans a window that hasn't succeeded. A window that
+        touches it extends it, and so do the succeeded windows that the extended range now touches (they
+        may have succeeded earlier, past a hole this window fills). Deletions are inferred only when
+        snapshot_complete is True."""
         ...
 
     def wait(self, lease: Lease, until: datetime, reason: str) -> None: ...

@@ -100,7 +100,7 @@ class DatasetHealth(BaseModel):
     last_attempt_at: datetime | None
     last_attempt: RunBrief | None
     active_run_id: uuid.UUID | None
-    missing_periods: list[Period]  # failed windows outside coverage that nobody has retried
+    missing_periods: list[Period]  # time after coverage that no run published or is working on
     replay_backlog: int  # raw objects saved but not yet published
     lease_expired: bool
     schedule_paused: bool | None  # None: no schedule for this dataset
@@ -163,6 +163,24 @@ def _subtract(period: Period, cov_from: datetime | None, cov_to: datetime | None
     return pieces
 
 
+def missing_periods(windows: list[tuple[datetime, datetime, str]], cov_from: datetime | None,
+                    cov_to: datetime | None) -> list[Period]:
+    """Time nobody has data for or is fetching: from the end of coverage (or the first attempt, if
+    nothing was ever published) to the end of the latest attempted window, minus every window a run
+    published or is still working on. That counts failed windows nobody retried, and also time no run
+    ever asked for, such as slots the scheduler dropped after an outage longer than its catch-up."""
+    if not windows:
+        return []
+    low = cov_to if cov_to is not None else min(start for start, _, _ in windows)
+    high = max(end for _, end, _ in windows)
+    gaps = [Period(start=low, end=high)] if high > low else []
+    for start, end, run_status in sorted(windows):
+        if run_status not in (*ACTIVE, "succeeded"):
+            continue
+        gaps = [piece for gap in gaps for piece in _subtract(gap, start, end)]
+    return _merge([piece for gap in gaps for piece in _subtract(gap, cov_from, cov_to)])
+
+
 def _merge(periods: list[Period]) -> list[Period]:
     merged: list[Period] = []
     for p in sorted(periods, key=lambda p: p.start):
@@ -203,7 +221,6 @@ def dataset_health(session: Session, conn: Connection, at: datetime) -> list[Dat
         select(RawObject.dataset, func.count()).where(RawObject.connection_id == conn.id,
                                                       RawObject.processed_at.is_(None))
         .group_by(RawObject.dataset))}
-    failed = session.scalars(select(SyncRun).where(SyncRun.connection_id == conn.id, awaiting_action())).all()
 
     out = []
     for name in sorted(set(streams) | set(schedules) | set(backlog)):
@@ -217,8 +234,10 @@ def dataset_health(session: Session, conn: Connection, at: datetime) -> list[Dat
         active = session.scalars(select(SyncRun.id).where(
             SyncRun.connection_id == conn.id, SyncRun.dataset == name, SyncRun.status.in_(ACTIVE))
             .order_by(SyncRun.created_at.desc()).limit(1)).first()
-        missing = _merge([piece for r in failed if r.dataset == name
-                          for piece in _subtract(Period(start=r.window_start, end=r.window_end), cov_from, cov_to)])
+        windows = session.execute(select(SyncRun.window_start, SyncRun.window_end, SyncRun.status).where(
+            SyncRun.connection_id == conn.id, SyncRun.dataset == name,
+            *([SyncRun.window_end > cov_to] if cov_to is not None else []))).all()
+        missing = missing_periods([(w.window_start, w.window_end, w.status) for w in windows], cov_from, cov_to)
         lease_expired = bool(st.stream and st.stream.lease_run_id and st.stream.lease_expires_at
                              and st.stream.lease_expires_at < at)
         out.append(DatasetHealth(
