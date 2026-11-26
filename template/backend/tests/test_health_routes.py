@@ -134,10 +134,11 @@ def test_missing_periods_and_replay_backlog(client: TestClient, db_session: Sess
     # Fails across the coverage edge: only the part after covered_to is missing.
     make_run(db_session, conn, status="failed", created=ago(hours=4), start=ago(hours=7), end=ago(hours=5))
     # Fails, then a later retry is queued for the same window: being dealt with, not missing.
-    make_run(db_session, conn, status="failed", created=ago(hours=3), start=ago(hours=3), end=ago(hours=2))
-    make_run(db_session, conn, status="queued", trigger="retry", created=ago(hours=1), start=ago(hours=3),
+    make_run(db_session, conn, status="failed", created=ago(hours=3), start=ago(hours=5), end=ago(hours=2))
+    make_run(db_session, conn, status="queued", trigger="retry", created=ago(hours=1), start=ago(hours=5),
              end=ago(hours=2))
-    with_raw = make_run(db_session, conn, status="running", created=ago(minutes=30))
+    with_raw = make_run(db_session, conn, status="running", created=ago(minutes=30), start=ago(hours=2),
+                        end=ago(minutes=30))
     make_raw(db_session, with_raw, 1)
     make_raw(db_session, with_raw, 2)
     make_raw(db_session, with_raw, 3, processed=True)
@@ -203,3 +204,46 @@ def test_another_workspaces_connection_is_not_found(client: TestClient, db_sessi
 def test_health_routes_need_a_workspace(client: TestClient) -> None:
     assert client.get("/sync/connections").status_code == 401
     assert client.get("/sync/health").status_code == 401
+
+
+def _periods(body: dict[str, Any], name: str = "orders") -> list[tuple[datetime, datetime]]:
+    return [(datetime.fromisoformat(p["start"]), datetime.fromisoformat(p["end"]))
+            for p in _dataset(body, name)["missing_periods"]]
+
+
+def test_time_no_run_asked_for_is_missing(client: TestClient, db_session: Session, owner_workspace: str,
+                                          owner_headers: dict[str, str]) -> None:
+    # The scheduler was down past its catch-up window: runs resume hours after coverage ends, and
+    # nothing ever asks for the time in between.
+    conn = make_conn(db_session, owner_workspace)
+    covered_to = ago(hours=10)
+    make_stream(db_session, conn, covered_to=covered_to)
+    make_run(db_session, conn, status="succeeded", created=ago(hours=2), start=ago(hours=3), end=ago(hours=2))
+    make_run(db_session, conn, status="queued", created=ago(minutes=1), start=ago(hours=2), end=ago(hours=1))
+
+    body = client.get(f"/sync/connections/{conn.id}/health", headers=owner_headers).json()
+    assert _periods(body) == [(covered_to, ago(hours=3))]
+
+
+def test_never_published_counts_from_the_first_attempt(client: TestClient, db_session: Session,
+                                                       owner_workspace: str, owner_headers: dict[str, str]) -> None:
+    conn = make_conn(db_session, owner_workspace)
+    make_stream(db_session, conn)  # claimed, never published
+    make_run(db_session, conn, status="failed", created=ago(hours=11), start=ago(hours=12), end=ago(hours=11))
+    make_run(db_session, conn, status="failed", created=ago(hours=1), start=ago(hours=2), end=ago(hours=1))
+    make_run(db_session, conn, status="running", created=ago(minutes=5), start=ago(hours=1), end=ago(minutes=5))
+
+    body = client.get(f"/sync/connections/{conn.id}/health", headers=owner_headers).json()
+    assert _periods(body) == [(ago(hours=12), ago(hours=1))]
+
+
+def test_nothing_is_missing_when_runs_follow_coverage(client: TestClient, db_session: Session,
+                                                      owner_workspace: str, owner_headers: dict[str, str]) -> None:
+    conn = make_conn(db_session, owner_workspace)
+    make_stream(db_session, conn, covered_to=ago(hours=1))
+    make_run(db_session, conn, status="succeeded", created=ago(hours=1), start=ago(hours=2), end=ago(hours=1))
+    make_run(db_session, conn, status="running", created=ago(minutes=1), start=ago(hours=1, minutes=5),
+             end=ago(minutes=1))
+
+    body = client.get(f"/sync/connections/{conn.id}/health", headers=owner_headers).json()
+    assert _periods(body) == []
