@@ -4,7 +4,7 @@ Must observe: connection becomes reconnect_needed; one rotation wins; nothing ov
 
 from datetime import timedelta
 
-from jobs.sync.contract import ConnectionState, Credential, RunStatus
+from jobs.sync.contract import AuthRevoked, ConnectionState, Credential, RunStatus, TokenRefresher
 from jobs.sync.runner import Outcome
 from jobs.sync.testing.world import ACCOUNTS
 
@@ -43,23 +43,41 @@ def test_refresh_race_one_rotation_wins(implementations: Harness) -> None:
     h.credentials.put(A.connection_id, "tok-a-0", expires_at=expiring)
     run_events, _ = h.ledger.create_run(h.spec(A))
     run_accounts, _ = h.ledger.create_run(h.spec(A, dataset=ACCOUNTS))
-    original = h.feed.refresh_token
+    original = h.credentials.refresh
     inner: dict[str, Outcome] = {}
 
-    def racing_refresh(cred: Credential) -> tuple[str, object]:
+    def racing_refresh(cred: Credential, refresher: TokenRefresher) -> Credential:
         if not inner:
-            # Worker 1 has read version 1 and is refreshing; worker 2 refreshes and rotates first.
+            # Worker 1 read version 1 and wants to refresh; worker 2 gets the lock first and refreshes.
             inner["second"] = h.once(run_accounts, owner="worker-2")
-        return original(cred)
+        return original(cred, refresher)
 
-    h.feed.refresh_token = racing_refresh  # type: ignore[method-assign,assignment]
+    h.credentials.refresh = racing_refresh  # type: ignore[method-assign]
     first = h.once(run_events, owner="worker-1")
 
     assert inner["second"] is Outcome.SUCCEEDED
     assert first is Outcome.SUCCEEDED
+    assert h.feed.refreshes == 1  # the loser never called the provider
     stored = h.credentials.get(A.connection_id)
     assert stored.version == 2  # exactly one rotation was saved
     assert h.credentials.rotations == 1
     assert h.credentials.lost_races == 1
     assert stored.access_token == "tok-" + str(A.connection_id)[:8] + "-r1"  # worker 2's token kept
     assert h.connections.get(A.connection_id) is ConnectionState.HEALTHY
+
+
+def test_revoked_refresh_marks_reconnect_needed(implementations: Harness) -> None:
+    h = implementations
+    h.credentials.put(A.connection_id, "tok-a-0", expires_at=h.clock.now())
+
+    def revoked(cred: Credential) -> tuple[str, object]:
+        raise AuthRevoked("refresh grant revoked tok-a-0")
+
+    h.feed.refresh_token = revoked  # type: ignore[method-assign,assignment]
+    run_id = h.submit(h.spec(A))
+    h.drain()
+
+    assert h.run_row(run_id).error_code == "auth_revoked"
+    assert h.credentials.get(A.connection_id).version == 1  # nothing saved
+    assert h.connections.get(A.connection_id) is ConnectionState.RECONNECT_NEEDED
+    assert h.feed.call_count == 0

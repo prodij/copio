@@ -27,13 +27,11 @@ class Fault(enum.StrEnum):
 
 
 class SchemaChanged(PermanentError):
-    """The body no longer matches what this connector version parses. Carries the raw body so the
-    runner can keep it for a replay after the connector is fixed. Proposed contract change:
-    `ProviderError.raw`."""
+    """The body no longer matches what this connector version parses. Carries the raw body
+    (`ProviderError.raw`) so the runner keeps it for a replay after the connector is fixed."""
 
     def __init__(self, message: str, *, raw: bytes, request_ref: str | None = None) -> None:
-        super().__init__(message, request_ref=request_ref)
-        self.raw = raw
+        super().__init__(message, request_ref=request_ref, raw=raw)
 
 
 @dataclass(frozen=True)

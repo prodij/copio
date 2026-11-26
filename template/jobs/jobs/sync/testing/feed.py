@@ -40,7 +40,7 @@ def parse_body(raw: bytes, *, connector_version: str) -> Page:
 
 @dataclass
 class SyntheticFeed:
-    """Implements `Provider`, plus `parse_page` (replay) and `refresh_token` (credential refresh)."""
+    """Implements `Provider` and `TokenRefresher`."""
 
     world: SyntheticWorld
     faults: FaultPlan = field(default_factory=FaultPlan)
