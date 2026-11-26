@@ -102,3 +102,43 @@ class Budgets:
             raise UnknownBudget(key)
         blocked: datetime = row.blocked_until
         return blocked
+
+
+class PgRateBudgets:
+    """contract.RateBudgets on `rate_budgets`: the slice the runner uses.
+
+    `blocked_until` returns the stored time as is (the runner compares it with its own clock).
+    `block` works for a key nobody created yet: a provider can 429 before any acquire, so a missing
+    bucket is created blocked and empty with the default capacity. Like `Budgets.block`, a later block
+    never shortens an existing one, and refill starts when the block ends.
+    """
+
+    def __init__(self, engine: Engine, *, default_capacity: float = 60.0,
+                 default_refill_per_s: float = 1.0) -> None:
+        if default_capacity <= 0 or default_refill_per_s <= 0:
+            raise ValueError("default_capacity and default_refill_per_s must be positive")
+        self.engine = engine
+        self.default_capacity = default_capacity
+        self.default_refill_per_s = default_refill_per_s
+
+    def blocked_until(self, budget_key: str) -> datetime | None:
+        with self.engine.connect() as conn:
+            value: datetime | None = conn.execute(
+                text("select blocked_until from rate_budgets where budget_key = :key"),
+                {"key": budget_key}).scalar_one_or_none()
+        return value
+
+    def block(self, budget_key: str, until: datetime) -> None:
+        if until.tzinfo is None:
+            raise ValueError("until must be timezone-aware")
+        with self.engine.begin() as conn:
+            conn.execute(text("""
+                insert into rate_budgets (budget_key, capacity, refill_per_s, tokens, blocked_until, updated_at)
+                values (:key, :capacity, :refill, 0, :until, :until)
+                on conflict (budget_key) do update
+                   set tokens = 0,
+                       blocked_until = greatest(coalesce(rate_budgets.blocked_until, excluded.blocked_until),
+                                                excluded.blocked_until),
+                       updated_at = greatest(rate_budgets.updated_at, excluded.blocked_until)
+            """), {"key": budget_key, "capacity": self.default_capacity,
+                   "refill": self.default_refill_per_s, "until": until})

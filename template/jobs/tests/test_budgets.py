@@ -4,7 +4,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import Engine, text
 
-from jobs.sync.budgets import Budgets, UnknownBudget
+from jobs.sync.budgets import Budgets, PgRateBudgets, UnknownBudget
+from jobs.sync.contract import RateBudgets
 
 T0 = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
 KEY = "synthetic:acct-1"
@@ -90,3 +91,49 @@ def test_concurrent_acquires_never_overspend(budgets: Budgets, clean_tables: Eng
         t.join()
     assert granted.count(True) == 20 and len(granted) == 50
     assert _tokens(clean_tables) == pytest.approx(0, abs=1e-3)
+
+
+# -- contract.RateBudgets, as the runner uses it ---------------------------------------------------
+
+
+def test_pg_rate_budgets_satisfies_the_contract(clean_tables: Engine) -> None:
+    budgets: RateBudgets = PgRateBudgets(clean_tables)
+    assert budgets.blocked_until("synthetic:fresh") is None
+
+
+def test_block_creates_a_missing_bucket_blocked_and_empty(clean_tables: Engine) -> None:
+    rb = PgRateBudgets(clean_tables, default_capacity=10, default_refill_per_s=2)
+    until = T0 + timedelta(seconds=30)
+    rb.block("synthetic:new", until)  # a 429 before anyone ever acquired from this scope
+    assert rb.blocked_until("synthetic:new") == until
+    b = Budgets(clean_tables)
+    assert b.acquire("synthetic:new", now=T0 + timedelta(seconds=10)).blocked_until == until
+    assert not b.acquire("synthetic:new", now=until).ok  # empty when the block ends
+    assert b.acquire("synthetic:new", cost=2, now=until + timedelta(seconds=1)).ok  # default refill 2/s
+
+
+def test_a_later_block_never_shortens_an_existing_one(budgets: Budgets, clean_tables: Engine) -> None:
+    rb = PgRateBudgets(clean_tables)
+    long, short = T0 + timedelta(minutes=5), T0 + timedelta(seconds=10)
+    rb.block(KEY, long)
+    rb.block(KEY, short)
+    assert rb.blocked_until(KEY) == long
+    rb.block(KEY, long + timedelta(minutes=1))
+    assert rb.blocked_until(KEY) == long + timedelta(minutes=1)
+    # The existing bucket keeps its capacity; it is only emptied.
+    with clean_tables.connect() as conn:
+        assert conn.execute(text("select capacity, tokens from rate_budgets where budget_key = :k"),
+                            {"k": KEY}).one() == (5, 0)
+    # Budgets.block and PgRateBudgets.block share one row and one rule.
+    assert budgets.block(KEY, retry_after_s=1, now=T0) == long + timedelta(minutes=1)
+
+
+def test_blocked_until_returns_a_past_block_as_stored(clean_tables: Engine) -> None:
+    rb = PgRateBudgets(clean_tables)
+    rb.block(KEY, T0)
+    assert rb.blocked_until(KEY) == T0  # the runner compares with its own clock
+
+
+def test_block_needs_an_aware_time(clean_tables: Engine) -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        PgRateBudgets(clean_tables).block(KEY, datetime(2026, 11, 25, 12))
