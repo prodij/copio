@@ -15,8 +15,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from jobs.storage import RawStore
-from jobs.sync.contract import RunKind, RunSpec, Trigger, Window
-from jobs.sync.runner import AnyProvider, Outcome, RunnerDeps, RunnerPolicy, RunView, execute
+from jobs.sync.contract import RunKind, RunSpec, RunView, Trigger, Window
+from jobs.sync.runner import AnyProvider, Outcome, RunnerDeps, RunnerPolicy, execute
 from jobs.sync.testing import (
     SYNTHETIC_WORKSPACES,
     SyntheticAccount,

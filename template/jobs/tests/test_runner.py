@@ -12,7 +12,7 @@ from contract.harness import DAY, START, A, Harness, memory_harness
 from moto import mock_aws
 
 from jobs.sync.contract import ConnectionState, RunKind, RunStatus, Window
-from jobs.sync.runner import Outcome, _safe_ref, execute
+from jobs.sync.runner import ExecutorMisconfigured, Outcome, _safe_ref, deps_from_env, execute
 from jobs.sync.testing import Fault, FaultPlan, FaultRule
 
 
@@ -108,3 +108,34 @@ def test_request_refs_are_reduced_to_an_id_shape() -> None:
     assert _safe_ref("req-12 token=abc {\"x\":1}") == "req-12tokenabcx:1"
     assert _safe_ref("") is None
     assert _safe_ref("x" * 400) == "x" * 255
+
+
+def test_the_worker_loads_the_executor_lazily(monkeypatch: pytest.MonkeyPatch) -> None:
+    from jobs import worker
+
+    monkeypatch.delenv("SYNC_EXECUTOR", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    executor = worker.load_executor()
+    assert callable(executor)  # loading builds nothing
+    with pytest.raises(ExecutorMisconfigured, match="DATABASE_URL"):
+        executor(uuid.uuid4())
+
+
+def test_a_missing_piece_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = {"DATABASE_URL": "postgresql+psycopg://x@127.0.0.1:1/x", "RAW_BUCKET": "data",
+           "SYNC_AUDIT": "jobs.sync.nowhere:PgAuditSink",
+           "SYNC_BUDGETS": "jobs.sync.budgets:Budgets",
+           "SYNC_CREDENTIALS": "contract.fakes:MemoryCredentialStore"}
+    with pytest.raises(ExecutorMisconfigured, match=r"audit \(jobs\.sync\.nowhere:PgAuditSink"):
+        deps_from_env(env)
+    env["SYNC_AUDIT"] = "contract.fakes:MemoryAudit"
+    with pytest.raises(ExecutorMisconfigured, match="SYNC_PROVIDERS"):
+        deps_from_env(env)
+
+
+def test_misconfiguration_never_echoes_secrets() -> None:
+    env = {"DATABASE_URL": "postgresql+psycopg://app:s3cret@db/app", "RAW_BUCKET": "data",
+           "CONNECTOR_LOCAL_KEK": "c2VjcmV0", "SYNC_LEDGER": "jobs.sync.nowhere:L"}
+    with pytest.raises(ExecutorMisconfigured) as info:
+        deps_from_env(env)
+    assert "s3cret" not in str(info.value) and "c2VjcmV0" not in str(info.value)

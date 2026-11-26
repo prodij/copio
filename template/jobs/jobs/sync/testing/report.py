@@ -32,7 +32,7 @@ class _Report:
 
 @dataclass
 class SyntheticReportProvider:
-    """Implements `ReportProvider`, plus `parse_page` for replay.
+    """Implements `ReportProvider`.
 
     `script` is the sequence of states successive status calls return; the last one repeats."""
 

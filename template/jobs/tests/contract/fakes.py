@@ -20,15 +20,18 @@ from jobs.sync.contract import (
     Credential,
     Lease,
     PublishResult,
+    RawObjectView,
     Record,
     RunKind,
     RunSpec,
     RunStatus,
+    RunView,
     Stage,
     StaleLease,
+    TokenRefresher,
     Window,
 )
-from jobs.sync.runner import Outcome, RawObjectView, RunView
+from jobs.sync.runner import Outcome
 
 TERMINAL = {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}
 
@@ -116,7 +119,7 @@ class StoredRecord:
 
 
 class MemoryLedger:
-    """Implements `RunLedger` (the contract's Ledger plus get_run and raw_objects)."""
+    """Implements `Ledger`."""
 
     def __init__(self, clock: FakeClock) -> None:
         self.clock = clock
@@ -140,9 +143,10 @@ class MemoryLedger:
         self.streams.setdefault((spec.connection_id, spec.dataset), _Stream(spec.workspace_id))
         return run_id, True
 
-    def create_replay(self, source_run_id: uuid.UUID, connector_version: str) -> uuid.UUID:
-        """Semantics (proposed contract addition): a replay run points at its source run, has kind
-        REPLAY, its own unique dedupe key, and the source run's window."""
+    def create_replay(self, source_run_id: uuid.UUID, connector_version: str,
+                      requested_by: str | None = None) -> uuid.UUID:
+        """Semantics: a new queued run of kind REPLAY with `replay_of` set, the source run's window, and a
+        dedupe key of its own, so each replay request is a separate run."""
         source = self.runs[source_run_id]
         spec = replace(source.spec, kind=RunKind.REPLAY, connector_version=connector_version)
         run_id = uuid.uuid4()
@@ -159,9 +163,11 @@ class MemoryLedger:
                        max_attempts=run.max_attempts, replay_of=run.replay_of)
 
     def raw_objects(self, run_id: uuid.UUID) -> Sequence[RawObjectView]:
+        """Semantics: ordered by page_seq."""
+        rows = sorted((r for r in self.raw.values() if r.run_id == run_id), key=lambda r: r.page_seq)
         return [RawObjectView(id=r.id, run_id=r.run_id, page_seq=r.page_seq, storage_key=r.storage_key,
                               sha256=r.sha256, size=r.size, processed=r.processed_at is not None)
-                for r in self.raw.values() if r.run_id == run_id]
+                for r in rows]
 
     # --- leases ----------------------------------------------------------------------------------
 
@@ -373,8 +379,11 @@ class MemoryCredentialStore:
     """Implements `CredentialStore`.
 
     Semantics: `rotate` saves only if cred.version is current and returns the stored credential with
-    version + 1; otherwise it saves nothing and returns the newer stored credential. `mark_revoked`
-    moves the connection to reconnect_needed and writes a system audit event in the same step."""
+    version + 1; otherwise it saves nothing and returns the newer stored credential. `refresh` does the
+    same around one provider call, holding the per-connection lock (trivially held here: one thread):
+    if cred.version is stale it returns the stored credential without calling the provider; AuthRevoked
+    from the provider propagates and nothing is saved. `mark_revoked` moves the connection to
+    reconnect_needed and writes a system audit event in the same step."""
 
     def __init__(self, connections: MemoryConnections, audit: MemoryAudit) -> None:
         self.connections = connections
@@ -382,6 +391,7 @@ class MemoryCredentialStore:
         self.creds: dict[uuid.UUID, Credential] = {}
         self.rotations = 0
         self.lost_races = 0
+        self.provider_refreshes = 0
 
     def put(self, connection_id: uuid.UUID, token: str, expires_at: datetime | None = None) -> None:
         self.creds[connection_id] = Credential(connection_id, token, 1, expires_at)
@@ -400,6 +410,15 @@ class MemoryCredentialStore:
         self.creds[cred.connection_id] = new
         self.rotations += 1
         return new
+
+    def refresh(self, cred: Credential, refresher: TokenRefresher) -> Credential:
+        current = self.creds[cred.connection_id]
+        if current.version != cred.version:
+            self.lost_races += 1
+            return current
+        self.provider_refreshes += 1
+        token, expires_at = refresher.refresh_token(current)
+        return self.rotate(current, token, expires_at)
 
     def mark_revoked(self, connection_id: uuid.UUID, reason: str) -> None:
         self.connections.state[connection_id] = ConnectionState.RECONNECT_NEEDED

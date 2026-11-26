@@ -19,17 +19,21 @@ from __future__ import annotations
 
 import enum
 import hashlib
+import importlib
 import logging
+import os
 import random
 import re
+import socket
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, NoReturn, Protocol, runtime_checkable
+from typing import Any, NoReturn, Protocol
 
 from jobs.storage import RawStore
 from jobs.sync.contract import (
+    AuditSink,
     AuthRevoked,
     ConnectionState,
     Credential,
@@ -40,6 +44,7 @@ from jobs.sync.contract import (
     PermanentError,
     Provider,
     ProviderError,
+    RateBudgets,
     RateLimited,
     RawObjectView,
     ReportProvider,
@@ -47,9 +52,9 @@ from jobs.sync.contract import (
     RunKind,
     RunSpec,
     RunStatus,
-    RunView,
     Stage,
     StaleLease,
+    TokenRefresher,
     TransientError,
 )
 
@@ -58,50 +63,8 @@ log = logging.getLogger("jobs.sync.runner")
 TERMINAL = frozenset({RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED})
 
 
-# ---------------------------------------------------------------------------------------------
-# What the runner needs beyond contract.py. Each is a proposed contract addition (see the S4 report);
-# until the integrator adopts them they live here so the runner can be built and tested.
-# ---------------------------------------------------------------------------------------------
-
-
-class RunLedger(Ledger, Protocol):
-    def get_run(self, run_id: uuid.UUID) -> RunView | None: ...
-    def raw_objects(self, run_id: uuid.UUID) -> Sequence[RawObjectView]:
-        """All raw objects saved by the run, any order."""
-        ...
-
-
-@runtime_checkable
-class PageParser(Protocol):
-    """Turns stored raw bytes back into a Page. Needed for replay and for crash recovery (a raw object
-    saved but not published). Proposed: part of Provider and ReportProvider."""
-
-    def parse_page(self, dataset: str, raw: bytes) -> Page: ...
-
-
-@runtime_checkable
-class TokenRefresher(Protocol):
-    """Exchanges a credential for a fresh access token. Proposed: optional Provider capability."""
-
-    def refresh_token(self, cred: Credential) -> tuple[str, datetime | None]: ...
-
-
 class Clock(Protocol):
     def now(self) -> datetime: ...
-
-
-class RateBudgets(Protocol):
-    """The slice of S2's budgets the runner uses: honor and set `rate_budgets.blocked_until`."""
-
-    def blocked_until(self, budget_key: str) -> datetime | None: ...
-    def block(self, budget_key: str, until: datetime) -> None: ...
-
-
-class AuditSink(Protocol):
-    """Writes an `audit_events` row with actor_type='system'."""
-
-    def record(self, workspace_id: uuid.UUID, action: str, target_type: str, target_id: str,
-               detail: Mapping[str, Any]) -> None: ...
 
 
 class SystemClock:
@@ -140,7 +103,7 @@ AnyProvider = Provider | ReportProvider
 
 @dataclass
 class RunnerDeps:
-    ledger: RunLedger
+    ledger: Ledger
     credentials: CredentialStore
     raw_store: RawStore
     providers: Callable[[RunSpec], AnyProvider]
@@ -348,8 +311,6 @@ class _Execution:
         source = self.ledger.get_run(self.run.replay_of) if self.run.replay_of else None
         if source is None:
             self.fail("replay_source_missing", "the run to replay does not exist")
-        if not isinstance(provider, PageParser):
-            self.fail("replay_unsupported", "this connector cannot parse stored raw objects")
         raws = sorted(self.ledger.raw_objects(source.run_id), key=lambda r: r.page_seq)
         start = int(self.cp.get("replay_index", 0))
         for index in range(start, len(raws)):
@@ -384,8 +345,6 @@ class _Execution:
                          if not r.processed or r.page_seq >= done), key=lambda r: r.page_seq)
         if not behind:
             return
-        if not isinstance(provider, PageParser):
-            self.fail("backlog_unparseable", "saved raw objects cannot be parsed by this connector")
         self.may_store_carried_raw = False  # the raw is already stored
         for raw in behind:
             self.keep_alive()
@@ -439,9 +398,9 @@ class _Execution:
         if (cred.expires_at is not None and isinstance(provider, TokenRefresher)
                 and cred.expires_at - now <= timedelta(seconds=self.policy.refresh_skew_s)):
             self.keep_alive()
-            token, expires_at = provider.refresh_token(cred)
-            # rotate is version-checked: if another worker refreshed first, theirs wins and comes back.
-            cred = self.deps.credentials.rotate(cred, token, expires_at)
+            # Serialized per connection by the store: if another worker refreshed first, its credential
+            # comes back and the provider is not called again.
+            cred = self.deps.credentials.refresh(cred, provider)
         return cred
 
     def honor_budget(self) -> None:
@@ -487,8 +446,8 @@ class _Execution:
         self.retry_later("transient_exhausted", "the provider kept failing transiently", exc)
 
     def on_permanent(self, exc: PermanentError) -> NoReturn:
-        carried = getattr(exc, "raw", None)
-        if self.may_store_carried_raw and isinstance(carried, bytes):
+        carried = exc.raw
+        if self.may_store_carried_raw and carried is not None:
             # Keep the body that could not be parsed, so a fixed connector can replay it. It stays in
             # the backlog, so coverage cannot advance past it.
             self.store_raw("unparsed", carried, "json")
@@ -527,3 +486,105 @@ class _Execution:
         self.ledger.fail(self.lease, code, detail, _safe_ref(ref))
         log.warning("sync run %s failed: %s", self.run.run_id, code)
         raise _Stop(Outcome.FAILED)
+
+
+# ---------------------------------------------------------------------------------------------
+# The worker's entry point: SYNC_EXECUTOR=jobs.sync.runner:build_executor (the default)
+# ---------------------------------------------------------------------------------------------
+
+
+class ExecutorMisconfigured(RuntimeError):
+    """A piece the runner needs in production is missing or unset. The message names it; it never
+    contains a secret."""
+
+
+# Each production piece, overridable by an env var naming "module:attribute". Every factory takes the
+# SQLAlchemy engine (the credential store also takes the vault).
+PIECES: dict[str, tuple[str, str]] = {
+    "ledger": ("SYNC_LEDGER", "jobs.sync.ledger:PgLedger"),
+    "credentials": ("SYNC_CREDENTIALS", "jobs.sync.credentials:PgCredentialStore"),
+    "budgets": ("SYNC_BUDGETS", "jobs.sync.budgets:RunnerBudgets"),
+    "audit": ("SYNC_AUDIT", "jobs.sync.audit:PgAuditSink"),
+}
+
+
+def _resolve(piece: str, env: Mapping[str, str]) -> Any:
+    var, default = PIECES[piece]
+    target = env.get(var) or default
+    module_name, _, attribute = target.partition(":")
+    try:
+        return getattr(importlib.import_module(module_name), attribute)
+    except (ModuleNotFoundError, AttributeError) as exc:
+        raise ExecutorMisconfigured(
+            f"the sync runner needs its {piece} ({target}, set {var} to override), which is not "
+            "available") from exc
+
+
+def _provider_resolver(env: Mapping[str, str]) -> Callable[[RunSpec], AnyProvider]:
+    target = env.get("SYNC_PROVIDERS", "").strip()
+    if not target:
+        raise ExecutorMisconfigured("set SYNC_PROVIDERS to a 'module:factory' returning the product's "
+                                    "provider resolver (RunSpec -> provider)")
+    module_name, _, attribute = target.partition(":")
+    try:
+        factory = getattr(importlib.import_module(module_name), attribute)
+    except (ModuleNotFoundError, AttributeError) as exc:
+        raise ExecutorMisconfigured(f"SYNC_PROVIDERS names {target}, which is not available") from exc
+    resolver: Callable[[RunSpec], AnyProvider] = factory()
+    return resolver
+
+
+def pg_connection_state(engine: Any) -> Callable[[uuid.UUID], ConnectionState]:
+    from sqlalchemy import text
+
+    def state(connection_id: uuid.UUID) -> ConnectionState:
+        with engine.connect() as conn:
+            value = conn.execute(text("select state from connections where id = :id"),
+                                 {"id": connection_id}).scalar_one_or_none()
+        return ConnectionState(value) if value is not None else ConnectionState.DISCONNECTED
+
+    return state
+
+
+def deps_from_env(env: Mapping[str, str]) -> RunnerDeps:
+    """Production deps: Postgres for ledger, credentials, budgets, audit and connection state; S3 for raw.
+    Raises ExecutorMisconfigured naming the first missing piece."""
+    missing = [name for name in ("DATABASE_URL", "RAW_BUCKET") if not env.get(name, "").strip()]
+    if missing:
+        raise ExecutorMisconfigured(f"the sync runner needs {', '.join(missing)}")
+    ledger_cls = _resolve("ledger", env)
+    store_cls = _resolve("credentials", env)
+    if not callable(getattr(store_cls, "refresh", None)):
+        raise ExecutorMisconfigured("the credential store has no refresh(); the runner needs it")
+    budgets_cls = _resolve("budgets", env)
+    audit_cls = _resolve("audit", env)
+    providers = _provider_resolver(env)
+
+    from sqlalchemy import create_engine
+
+    from jobs.handlers.sample_fetch import s3_client
+    from jobs.sync.credentials import vault_from_env
+
+    engine = create_engine(env["DATABASE_URL"])
+    snapshots = frozenset(d.strip() for d in env.get("SYNC_SNAPSHOT_DATASETS", "").split(",") if d.strip())
+    return RunnerDeps(
+        ledger=ledger_cls(engine), credentials=store_cls(engine, vault_from_env(env)),
+        raw_store=RawStore(env["RAW_BUCKET"], s3_client()), providers=providers,
+        budgets=budgets_cls(engine), audit=audit_cls(engine),
+        connection_state=pg_connection_state(engine),
+        owner=f"{socket.gethostname()}:{os.getpid()}",
+        policy=RunnerPolicy(snapshot_datasets=snapshots))
+
+
+def build_executor() -> Callable[[uuid.UUID], None]:
+    """What the worker loads. Cheap: deps are built from the environment on the first run, so a worker
+    starts even before every piece is configured, and a misconfigured one fails each job with a message
+    that says what is missing (the run stays in the ledger, retryable)."""
+    built: list[RunnerDeps] = []
+
+    def run(run_id: uuid.UUID) -> None:
+        if not built:
+            built.append(deps_from_env(os.environ))
+        execute(run_id, built[0])
+
+    return run
