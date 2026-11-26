@@ -195,6 +195,8 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}  # optional: empty means billing isn't set up
       BILLING_MODE: ${BILLING_MODE:-}  # off unless .env says mock (mock payment); needs APP_ENV=local
       APP_ENV: ${APP_ENV:-}
+      CONNECTOR_LOCAL_KEK: ${CONNECTOR_LOCAL_KEK:-}  # dev key for connector credentials (make env writes it)
+      CONNECTOR_KMS_KEY_ID: ${CONNECTOR_KMS_KEY_ID:-}
     volumes: [./.bootstrap/backend:/run/bootstrap:ro]
     ports: ["127.0.0.1:${API_PORT:-8000}:8000"]
     depends_on: {postgres: {condition: service_healthy}}
@@ -202,6 +204,11 @@ services:
   jobs:
     build: ./jobs
     restart: unless-stopped
+    # One process (jobs/worker.py --role all): Procrastinate workers for the sync, backfill and
+    # maintenance queues, plus the dispatcher and the sync scheduler. `--role worker` and `--role clock`
+    # split them; deploy/deploy.sh only rolls the `jobs` service, so a split needs it to roll both.
+    command: ["uv", "run", "--no-dev", "python", "-m", "jobs.worker", "--role", "all"]
+    stop_grace_period: 60s  # running sync jobs finish their current step; the rest stay queued
     environment:
       DATABASE_URL: postgresql+psycopg://app:app@postgres:5432/app
       LAGO_API_URL: http://lago-api:3000
@@ -211,6 +218,11 @@ services:
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
       AWS_DEFAULT_REGION: us-east-1
       RAW_BUCKET: data  # not `raw`: keys already start raw/ (spec §7)
+      SYNC_CONCURRENCY: ${SYNC_CONCURRENCY:-4}  # incremental, report and replay runs at once
+      BACKFILL_CONCURRENCY: ${BACKFILL_CONCURRENCY:-1}  # backfill runs at once, never using sync slots
+      APP_ENV: ${APP_ENV:-}
+      CONNECTOR_LOCAL_KEK: ${CONNECTOR_LOCAL_KEK:-}
+      CONNECTOR_KMS_KEY_ID: ${CONNECTOR_KMS_KEY_ID:-}
     depends_on: {postgres: {condition: service_healthy}}
 
   frontend:

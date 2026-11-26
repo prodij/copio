@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 KEY = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
 MARKER = re.compile(r"^# (Default|Generate): (.+)$")
 # Empty on purpose: mock payment is off unless someone turns it on, so these are not "still to fill".
-OFF_BY_DEFAULT = {"BILLING_MODE", "APP_ENV"}
+OFF_BY_DEFAULT = {"BILLING_MODE", "APP_ENV", "CONNECTOR_KMS_KEY_ID"}  # KMS: AWS only
 PORT_DEFAULT = re.compile(r"^# Default: (\d+)\n([A-Z][A-Z0-9_]*_PORT)=[ \t]*$", re.M)
 PORT_STEP = 10
 PORT_TRIES = 50

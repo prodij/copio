@@ -1,4 +1,6 @@
-# job: module name under jobs/handlers; cron in UTC.
+# job: module name under jobs/handlers; cron in UTC. jobs/worker.py runs each as a Procrastinate
+# periodic task: once per slot across every worker, and a missed slot (worker down) runs on start
+# if it is less than 15 minutes old.
 schedules:
   - job: billing_reconcile
     cron: "*/15 * * * *"
