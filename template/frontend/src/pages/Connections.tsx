@@ -47,8 +47,8 @@ export function Connections() {
                       {c.state_reason && <div className="text-xs text-muted-foreground">{c.state_reason}</div>}
                     </td>
                     <td className="py-2 pr-3">
-                      {c.datasets}
-                      {c.stale_datasets > 0 && <span className="text-destructive">, {c.stale_datasets} stale</span>}
+                      {c.datasets} {c.datasets === 1 ? "dataset" : "datasets"}
+                      {c.stale_datasets > 0 && <div className="text-xs text-destructive">{c.stale_datasets} stale</div>}
                       {c.failed_runs_awaiting_action > 0 && (
                         <div className="text-xs text-destructive">
                           {c.failed_runs_awaiting_action} failed {c.failed_runs_awaiting_action === 1 ? "run" : "runs"} to look at

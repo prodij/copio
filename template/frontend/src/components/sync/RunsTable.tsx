@@ -79,7 +79,7 @@ export function RunsTable({ runs, connection, action }: { runs: Run[]; connectio
   const [open, setOpen] = useState<string | null>(null);
   if (!runs.length) return <p className="text-sm text-muted-foreground">No runs match.</p>;
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead className="text-xs text-muted-foreground">
           <tr className="border-b">

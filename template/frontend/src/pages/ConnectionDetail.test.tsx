@@ -145,3 +145,74 @@ it("shows not found for another workspace's connection", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("Connection not found");
   expect(screen.getByRole("link", { name: "All connections" })).toBeInTheDocument();
 });
+
+it("pauses a healthy connection after confirming, and offers no resume or reconnect", async () => {
+  const spy = mockFetch({
+    ...health(), "GET /sync/runs": { status: 200, body: [] },
+    "POST /connections/c1/pause": { status: 200, body: { ...connection, state: "paused" } },
+  });
+  renderPage();
+  const controls = await screen.findByRole("group", { name: "Connection controls" });
+  expect(within(controls).queryByRole("button", { name: "Resume syncing" })).not.toBeInTheDocument();
+  expect(within(controls).queryByRole("button", { name: "Reconnect" })).not.toBeInTheDocument();
+  fireEvent.click(within(controls).getByRole("button", { name: "Pause syncing" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Syncing paused.");
+  expect(posts(spy)).toEqual(["/connections/c1/pause"]);
+});
+
+it("resumes a paused connection", async () => {
+  const spy = mockFetch({
+    ...health({ state: "paused" }), "GET /sync/runs": { status: 200, body: [] },
+    "POST /connections/c1/resume": { status: 200, body: connection },
+  });
+  renderPage();
+  const controls = await screen.findByRole("group", { name: "Connection controls" });
+  expect(within(controls).queryByRole("button", { name: "Pause syncing" })).not.toBeInTheDocument();
+  fireEvent.click(within(controls).getByRole("button", { name: "Resume syncing" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Syncing resumed.");
+  expect(posts(spy)).toEqual(["/connections/c1/resume"]);
+});
+
+it("reconnects with a new token sent in the body, never shown on the page", async () => {
+  const spy = mockFetch({
+    ...health({ state: "reconnect_needed", state_reason: "token revoked" }), "GET /sync/runs": { status: 200, body: [] },
+    "POST /connections/c1/reconnect": { status: 200, body: connection },
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("button", { name: "Reconnect" }));
+  const field = screen.getByLabelText("New access token");
+  expect(field).toHaveAttribute("type", "password");
+  fireEvent.change(field, { target: { value: "new-token-123" } });
+  fireEvent.submit(field.closest("form")!);
+  expect(await screen.findByRole("status")).toHaveTextContent("Reconnected.");
+  expect(posts(spy)).toEqual(["/connections/c1/reconnect"]);
+  const sent = spy.mock.calls.map(([input]) => input as Request).find((r) => r.method === "POST")!;
+  expect(await sent.clone().json()).toEqual({ credentials: { access_token: "new-token-123" } });
+  expect(document.body).not.toHaveTextContent("new-token-123");
+});
+
+it("disconnects after confirming, and a disconnected connection can only reconnect", async () => {
+  const spy = mockFetch({
+    ...health(), "GET /sync/runs": { status: 200, body: [] },
+    "POST /connections/c1/disconnect": { status: 200, body: { ...connection, state: "disconnected" } },
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("button", { name: "Disconnect" }));
+  expect(screen.getByRole("group", { name: /stored credential is destroyed/ })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Disconnected.");
+  expect(posts(spy)).toEqual(["/connections/c1/disconnect"]);
+});
+
+it("shows the API's refusal next to the controls", async () => {
+  mockFetch({
+    ...health(), "GET /sync/runs": { status: 200, body: [] },
+    "POST /connections/c1/pause": { status: 403, body: { detail: "Only the workspace owner can do that" } },
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("button", { name: "Pause syncing" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Only the workspace owner can do that");
+});

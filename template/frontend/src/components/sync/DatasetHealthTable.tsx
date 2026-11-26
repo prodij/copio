@@ -36,7 +36,7 @@ export function DatasetHealthTable({ connection, datasets, action }: {
   }
   const blocked = connection.state !== "healthy" ? `The connection is ${connection.state.replaceAll("_", " ")}` : undefined;
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead className="text-xs text-muted-foreground">
           <tr className="border-b">

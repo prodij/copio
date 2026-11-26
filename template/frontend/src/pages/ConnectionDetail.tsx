@@ -7,6 +7,7 @@ import { PageSkeleton } from "@/components/PageSkeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 import { connectionHealthQuery, runsQuery } from "@/components/sync/api";
 import { ConnectionStateBadge } from "@/components/sync/badges";
+import { ConnectionActions } from "@/components/sync/ConnectionActions";
 import { DatasetHealthTable } from "@/components/sync/DatasetHealthTable";
 import { RunsTable } from "@/components/sync/RunsTable";
 import { ActionNotice, useSyncAction } from "@/components/sync/useSyncAction";
@@ -32,7 +33,7 @@ export function ConnectionDetail() {
   const { connection, datasets } = health.data;
   return (
     <div className="space-y-6">
-      <header className="space-y-1">
+      <header className="space-y-2">
         <Link to="/connections" className="text-xs text-muted-foreground hover:underline">← Connections</Link>
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-lg font-semibold">{connection.display_name}</h1>
@@ -42,6 +43,8 @@ export function ConnectionDetail() {
           {connection.provider} · {connection.account_ref}
           {connection.state_reason ? ` · ${connection.state_reason}` : ""}
         </p>
+        <ConnectionActions connection={connection} action={action} />
+        <ActionNotice notice={action.notice} scope={["connection"]} />
       </header>
 
       <section aria-labelledby="datasets" className="space-y-2">

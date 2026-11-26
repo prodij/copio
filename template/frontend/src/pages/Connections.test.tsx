@@ -33,6 +33,8 @@ it("lists connections with their state, stale datasets and what needs attention"
   expect(revoked).toHaveTextContent("Reconnect needed");
   expect(revoked).toHaveTextContent("token revoked");
   expect(revoked).toHaveTextContent("1 stale");
+  expect(revoked).toHaveTextContent("2 datasets");
+  expect(revoked).not.toHaveTextContent(", 1 stale");
   expect(revoked).toHaveTextContent("2 failed runs to look at");
   expect(revoked).toHaveTextContent("Never");
   expect(screen.getByRole("link", { name: "Demo shop" })).toHaveAttribute("href", "/connections/c1");
