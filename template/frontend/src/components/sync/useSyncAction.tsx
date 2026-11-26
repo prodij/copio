@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { ApiError } from "@/api/errors";
-import { syncKeys, type Run } from "./api";
+import { syncKeys } from "./api";
 
 export type Notice = { kind: "ok" | "error"; text: string; key: string };
 
@@ -10,7 +10,7 @@ export type Notice = { kind: "ok" | "error"; text: string; key: string };
 export function useSyncAction() {
   const client = useQueryClient();
   const [notice, setNotice] = useState<Notice | null>(null);
-  const mutation = useMutation<Run, ApiError, { key: string; run: () => Promise<Run>; done: string }>({
+  const mutation = useMutation<unknown, ApiError, { key: string; run: () => Promise<unknown>; done: string }>({
     mutationFn: ({ run }) => run(),
     onSuccess: (_run, { key, done }) => setNotice({ kind: "ok", text: done, key }),
     onError: (error, { key }) => setNotice({ kind: "error", text: error.detail, key }),
@@ -19,7 +19,7 @@ export function useSyncAction() {
   return {
     notice,
     pendingKey: mutation.isPending ? mutation.variables?.key : undefined,
-    act: (key: string, run: () => Promise<Run>, done: string) => {
+    act: (key: string, run: () => Promise<unknown>, done: string) => {
       setNotice(null);
       mutation.mutate({ key, run, done });
     },

@@ -16,7 +16,7 @@ function Layout() {
   const { pathname } = useLocation();
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <nav className="flex items-center gap-4 text-sm">
+      <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
         <BrandMark className="mr-2 text-base" />
         <Link to="/premium">Report</Link>
         <Link to="/plans">Plans</Link>

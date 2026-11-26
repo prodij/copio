@@ -77,3 +77,15 @@ export const refreshDataset = (connectionId: string, dataset: string) =>
 export const retryRun = (runId: string) => unwrap(api.POST("/sync/runs/{run_id}/retry", { params: { path: { run_id: runId } } }));
 export const resumeRun = (runId: string) => unwrap(api.POST("/sync/runs/{run_id}/resume", { params: { path: { run_id: runId } } }));
 export const replayRun = (runId: string) => unwrap(api.POST("/sync/runs/{run_id}/replay", { params: { path: { run_id: runId } } }));
+
+// Connection controls (owner only; the API says so if not). They return the connection, not a run.
+const connectionPath = (connectionId: string) => ({ params: { path: { connection_id: connectionId } } });
+export const pauseConnection = (connectionId: string) => unwrap(api.POST("/connections/{connection_id}/pause", connectionPath(connectionId)));
+export const resumeConnection = (connectionId: string) => unwrap(api.POST("/connections/{connection_id}/resume", connectionPath(connectionId)));
+export const disconnectConnection = (connectionId: string) =>
+  unwrap(api.POST("/connections/{connection_id}/disconnect", connectionPath(connectionId)));
+export const reconnectConnection = (connectionId: string, accessToken: string) =>
+  unwrap(api.POST("/connections/{connection_id}/reconnect", {
+    ...connectionPath(connectionId),
+    body: { credentials: { access_token: accessToken } },
+  }));
