@@ -16,7 +16,9 @@ How it stays correct when workers crash, retry or race:
   A retried publish of the same raw bytes is answered from its verified receipt instead of repeated, and
   `verify_run` re-checks every receipt against its digest and the raw objects it names.
 - Versions compare as text in byte order (`collate "C"`, which matches Python's `str` order), never in
-  the database's locale order.
+  the database's locale order. An equal version replaces (a replay re-derives it); an older one is skipped.
+- The in-memory reference is jobs/tests/contract/fakes.py (MemoryLedger); this class matches it, and is
+  stricter in a few places noted on the methods.
 """
 
 from __future__ import annotations
@@ -35,12 +37,15 @@ from sqlalchemy import Connection, Engine, Row, text
 from jobs.sync.contract import (
     Lease,
     PublishResult,
+    RawObjectView,
     Record,
     RunKind,
     RunSpec,
     RunStatus,
+    RunView,
     Stage,
     StaleLease,
+    Trigger,
     Window,
 )
 
@@ -200,9 +205,59 @@ class PgLedger:
             raise LookupError("connection not found in this workspace")
         return existing.id, False
 
+    def create_replay(self, source_run_id: uuid.UUID, connector_version: str,
+                      requested_by: str | None = None) -> uuid.UUID:
+        """A new queued outbox run of kind replay over the source run's window, with `replay_of` set and
+        a dedupe key of its own. Replaying a replay points at the original run, which owns the raw."""
+        run_id = uuid.uuid4()
+        with self._engine.begin() as conn:
+            source = conn.execute(text(
+                "select coalesce(case when kind = 'replay' then replay_of end, id) as id from sync_runs"
+                " where id = :id"), {"id": source_run_id}).one_or_none()
+            if source is None:
+                raise RunNotFound(str(source_run_id))
+            conn.execute(text(
+                "insert into sync_runs (id, workspace_id, connection_id, dataset, kind, trigger,"
+                " window_start, window_end, connector_version, dedupe_key, status, stage, replay_of,"
+                " requested_by)"
+                " select :id, workspace_id, connection_id, dataset, :kind, :trigger, window_start,"
+                " window_end, :version, :key, :status, :stage, id, :by from sync_runs where id = :source"),
+                {"id": run_id, "kind": str(RunKind.REPLAY), "trigger": str(Trigger.MANUAL),
+                 "version": connector_version, "key": f"replay:{run_id}", "status": str(RunStatus.QUEUED),
+                 "stage": str(Stage.PENDING), "by": requested_by, "source": source.id})
+        return run_id
+
+    def get_run(self, run_id: uuid.UUID) -> RunView | None:
+        with self._engine.connect() as conn:
+            r = conn.execute(text(
+                "select id, workspace_id, connection_id, dataset, kind, trigger, window_start, window_end,"
+                " connector_version, status, stage, checkpoint, attempt, max_attempts, replay_of"
+                " from sync_runs where id = :id"), {"id": run_id}).one_or_none()
+        if r is None:
+            return None
+        spec = RunSpec(workspace_id=r.workspace_id, connection_id=r.connection_id, dataset=r.dataset,
+                       kind=RunKind(r.kind), trigger=Trigger(r.trigger),
+                       window=Window(r.window_start.astimezone(UTC), r.window_end.astimezone(UTC)),
+                       connector_version=r.connector_version)
+        return RunView(run_id=r.id, spec=spec, status=RunStatus(r.status), stage=Stage(r.stage),
+                       checkpoint=dict(r.checkpoint), attempt=r.attempt, max_attempts=r.max_attempts,
+                       replay_of=r.replay_of)
+
+    def raw_objects(self, run_id: uuid.UUID) -> Sequence[RawObjectView]:
+        """Every raw object the run saved, ordered by page_seq."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(text(
+                "select id, run_id, page_seq, storage_key, sha256, size_bytes, processed_at"
+                " from raw_objects where run_id = :id order by page_seq"), {"id": run_id}).all()
+        return [RawObjectView(id=r.id, run_id=r.run_id, page_seq=r.page_seq, storage_key=r.storage_key,
+                              sha256=r.sha256, size=r.size_bytes, processed=r.processed_at is not None)
+                for r in rows]
+
     def claim(self, run_id: uuid.UUID, owner: str, lease_s: float) -> Lease | None:
-        """Take the run's stream. None if another live lease holds it, or the run is finished, or the
-        run has used all its attempts (it is then failed with `attempts_exhausted`)."""
+        """Take the run's stream. None if the run is finished or any live lease holds the stream (even one
+        of this run: that is a duplicate execution). Otherwise the fence goes up by one, a queued, waiting
+        or abandoned running run becomes running, and `attempt` goes up by one. Bounding attempts is the
+        runner's job (it compares `attempt` with its own claim limit)."""
         if lease_s <= 0:
             raise ValueError("lease_s must be positive")
         if not 0 < len(owner) <= 128:
@@ -224,20 +279,12 @@ class PgLedger:
                 " where connection_id = :connection_id and dataset = :dataset for update"),
                 ident._asdict()).one()
             run = conn.execute(text(
-                "select status, attempt, max_attempts from sync_runs where id = :id for update"),
+                "select status from sync_runs where id = :id for update"),
                 {"id": run_id}).one()
             if run.status in TERMINAL:
                 return None
             if (stream.lease_run_id is not None and stream.lease_expires_at is not None
                     and stream.lease_expires_at > now):
-                return None
-            if run.attempt >= run.max_attempts:
-                conn.execute(text(
-                    "update sync_runs set status = :failed, error_code = 'attempts_exhausted',"
-                    " error_detail = :detail, next_attempt_at = null, finished_at = :now"
-                    " where id = :id"),
-                    {"failed": str(RunStatus.FAILED), "now": now, "id": run_id,
-                     "detail": f"stopped after {run.attempt} of {run.max_attempts} attempts"})
                 return None
             expires = now + timedelta(seconds=lease_s)
             fence = conn.execute(text(
@@ -289,21 +336,21 @@ class PgLedger:
         return replace(lease, expires_at=expires)
 
     def checkpoint(self, lease: Lease, stage: Stage, data: Mapping[str, Any]) -> None:
-        """Set the stage and merge `data` into the run's checkpoint (keys not named are kept, so a
-        report id saved earlier survives later cursor checkpoints)."""
+        """Set the stage and replace the whole checkpoint with `data` (the runner always writes all of it)."""
         stage = Stage(stage)
         payload = canonical(dict(data)).decode()
         with self._engine.begin() as conn:
             self._fenced(conn, lease)
             conn.execute(text(
-                "update sync_runs set stage = :stage, checkpoint = checkpoint || cast(:data as jsonb)"
+                "update sync_runs set stage = :stage, checkpoint = cast(:data as jsonb)"
                 " where id = :id"), {"stage": str(stage), "data": payload, "id": lease.run_id})
 
     # -- raw and publish ------------------------------------------------------------------------
 
     def save_raw(self, lease: Lease, page_seq: int, storage_key: str, sha256: str, size: int) -> uuid.UUID:
-        """Record a stored page as unprocessed. Saving the same page again with the same bytes returns
-        the same id; with different bytes it replaces the entry and puts it back in the backlog."""
+        """Record a stored page as unprocessed. Saving exactly the same entry again returns the same id;
+        a different entry for the same page or storage key raises IntegrityError (as the fake does), so
+        the record of what was published is never rewritten."""
         if page_seq < 0 or size < 0:
             raise ValueError("page_seq and size must be non-negative")
         if not re.fullmatch(r"[0-9a-f]{64}", sha256):
@@ -317,16 +364,11 @@ class PgLedger:
                 "select id, storage_key, sha256, size_bytes from raw_objects"
                 " where run_id = :run_id and page_seq = :seq for update"),
                 {"run_id": lease.run_id, "seq": page_seq}).one_or_none()
-            if existing is not None:
-                if (existing.storage_key, existing.sha256, existing.size_bytes) != (storage_key, sha256, size):
-                    conn.execute(text(
-                        "update raw_objects set storage_key = :key, sha256 = :sha, size_bytes = :size,"
-                        " fetched_at = :now, processed_at = null, receipt = null, receipt_sha256 = null"
-                        " where id = :id"),
-                        {"key": storage_key, "sha": sha256, "size": size, "now": now, "id": existing.id})
-                raw_id: uuid.UUID = existing.id
-                return raw_id
-            raw_id = uuid.uuid4()
+            if existing is not None and (existing.storage_key, existing.sha256,
+                                         existing.size_bytes) == (storage_key, sha256, size):
+                same: uuid.UUID = existing.id
+                return same
+            raw_id = uuid.uuid4()  # a conflicting entry fails on the unique constraints below
             conn.execute(text(
                 "insert into raw_objects (id, run_id, workspace_id, connection_id, dataset, page_seq,"
                 " storage_key, sha256, size_bytes, fetched_at)"
@@ -338,9 +380,11 @@ class PgLedger:
         return raw_id
 
     def publish(self, lease: Lease, raw_object_id: uuid.UUID, records: Sequence[Record]) -> PublishResult:
-        """In one transaction: verify the raw object, upsert records (a newer version wins; equal or
-        older is skipped, except a replay may rewrite an equal version), mark the raw object processed
-        with a receipt, and add the counts to the run."""
+        """In one transaction: verify the raw object, upsert records in order (a newer or equal version
+        replaces, an older one is skipped and counted stale), mark the raw object processed with a
+        receipt, and add the counts to the run. Rejected: an empty key or version, and (stricter than the
+        fake) data Postgres cannot store. The raw object must be this run's, or for a replay, its source
+        run's. Re-publishing a processed raw object with the same records is answered from its receipt."""
         now = self._now()
         with self._engine.begin() as conn:
             run = self._fenced(conn, lease)
@@ -352,22 +396,16 @@ class PgLedger:
                     or not (raw.run_id == lease.run_id or (replay and raw.run_id == run.replay_of))):
                 raise RawObjectMismatch("raw object is not part of this run")
 
-            best: dict[str, tuple[Record, str]] = {}
+            valid: list[tuple[Record, str]] = []
             rejected = stale = 0
             for record in records:
                 data = _encode_record(record)
                 if data is None:
                     rejected += 1
-                    continue
-                prev = best.get(record.key)
-                if prev is None:
-                    best[record.key] = (record, data)
                 else:
-                    stale += 1
-                    if record.version > prev[0].version:
-                        best[record.key] = (record, data)
-            records_sha = digest(canonical(sorted(
-                [r.key, r.version, r.deleted, json.loads(d)] for r, d in best.values())))
+                    valid.append((record, data))
+            records_sha = digest(canonical(
+                [[r.key, r.version, r.deleted, json.loads(d)] for r, d in valid] + [rejected]))
 
             # A retry of a publish that already committed: answer from the verified receipt.
             if raw.processed_at is not None and raw.receipt is not None and not replay:
@@ -376,12 +414,11 @@ class PgLedger:
                     return PublishResult(receipt["accepted"], receipt["rejected"], receipt["stale_skipped"])
 
             accepted = 0
-            for key in sorted(best):
-                record, data = best[key]
-                params = {"connection_id": lease.connection_id, "dataset": lease.dataset, "key": key,
+            for record, data in valid:
+                params = {"connection_id": lease.connection_id, "dataset": lease.dataset, "key": record.key,
                           "workspace_id": run.workspace_id, "version": record.version, "data": data,
                           "deleted": record.deleted, "run_id": lease.run_id, "raw_id": raw_object_id,
-                          "now": now, "replay": replay}
+                          "now": now}
                 won = conn.execute(text(
                     "insert into synced_records (connection_id, dataset, record_key, workspace_id, version,"
                     " data, deleted, run_id, raw_object_id, published_at, last_seen_run_id)"
@@ -391,8 +428,7 @@ class PgLedger:
                     " version = excluded.version, data = excluded.data, deleted = excluded.deleted,"
                     " run_id = excluded.run_id, raw_object_id = excluded.raw_object_id,"
                     " published_at = excluded.published_at, last_seen_run_id = excluded.last_seen_run_id"
-                    ' where synced_records.version collate "C" < excluded.version collate "C"'
-                    ' or (:replay and synced_records.version collate "C" = excluded.version collate "C")'
+                    ' where synced_records.version collate "C" <= excluded.version collate "C"'
                     " returning record_key"), params).one_or_none()
                 if won is not None:
                     accepted += 1
@@ -495,8 +531,9 @@ class PgLedger:
                  "receipt": encoded.decode(), "sha": digest(encoded), "id": lease.run_id})
 
     def wait(self, lease: Lease, until: datetime, reason: str, *, request_ref: str | None = None) -> None:
-        """Yield the stream until `until` (rate limit, report still processing). Keeps stage and
-        checkpoint; releases the lease. `request_ref` is an S1 addition to the contract signature."""
+        """Status waiting with next_attempt_at; keeps stage and checkpoint and leaves queue_job_id alone
+        (the dispatcher re-queues due waiting runs). Releases the lease; the fence stays.
+        `request_ref` is an optional S1 addition to the contract signature."""
         until = _aware(until, "until")
         with self._engine.begin() as conn:
             self._fenced(conn, lease)
@@ -507,26 +544,19 @@ class PgLedger:
                  "ref": sanitize_ref(request_ref), "id": lease.run_id})
             self._release(conn, lease)
 
-    def fail(self, lease: Lease, error_code: str, detail: str, request_ref: str | None,
-             *, retry_at: datetime | None = None) -> None:
-        """Record a failed attempt and release the lease. With `retry_at` (an S1 addition) and attempts
-        left, the run waits until then; otherwise it is failed for good."""
-        retry_at = _aware(retry_at, "retry_at") if retry_at is not None else None
+    def fail(self, lease: Lease, error_code: str, detail: str, request_ref: str | None) -> None:
+        """Fail the run for good with a sanitized code, detail and request ref; release the lease."""
         now = self._now()
-        code = sanitize_code(error_code)
         with self._engine.begin() as conn:
-            run = self._fenced(conn, lease)
-            retry = retry_at is not None and run.attempt < run.max_attempts
+            self._fenced(conn, lease)
             conn.execute(text(
-                "update sync_runs set status = :status, next_attempt_at = :next, wait_reason = :reason,"
+                "update sync_runs set status = :failed, next_attempt_at = null, wait_reason = null,"
                 " error_code = :code, error_detail = :detail,"
                 " provider_request_ref = coalesce(:ref, provider_request_ref),"
-                " finished_at = :finished where id = :id"),
-                {"status": str(RunStatus.WAITING if retry else RunStatus.FAILED),
-                 "next": retry_at if retry else None,
-                 "reason": f"retry after {code}" if retry else None, "code": code,
-                 "detail": sanitize_detail(detail), "ref": sanitize_ref(request_ref),
-                 "finished": None if retry else now, "id": lease.run_id})
+                " finished_at = :now where id = :id"),
+                {"failed": str(RunStatus.FAILED), "code": sanitize_code(error_code),
+                 "detail": sanitize_detail(detail), "ref": sanitize_ref(request_ref), "now": now,
+                 "id": lease.run_id})
             self._release(conn, lease)
 
     # -- receipts -------------------------------------------------------------------------------
