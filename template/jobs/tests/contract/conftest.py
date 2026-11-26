@@ -1,8 +1,7 @@
 """The `implementations` fixture: every contract scenario runs once per implementation.
 
-To add Postgres (integrator, once S1, S2 and S3 are merged): add "postgres" to IMPLEMENTATIONS and build
-its Harness in `implementations` from `pg_engine`/`clean_tables`, PgLedger, PgCredentialStore and the
-audit table. Nothing in the scenario files changes.
+`memory` needs nothing. `postgres` uses the real schema through `two_workspaces` / `clean_tables` from
+jobs/tests/conftest.py (TEST_DATABASE_URL), so it needs a Postgres.
 """
 
 from collections.abc import Iterator
@@ -11,9 +10,9 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from .harness import Harness, memory_harness
+from .harness import Harness, memory_harness, postgres_harness
 
-IMPLEMENTATIONS = ["memory"]
+IMPLEMENTATIONS = ["memory", "postgres"]
 BUCKET = "contract-raw"
 
 
@@ -29,4 +28,6 @@ def s3_client() -> Iterator[object]:
 def implementations(request: pytest.FixtureRequest, s3_client: object) -> Harness:
     if request.param == "memory":
         return memory_harness(s3_client, BUCKET)
-    raise NotImplementedError(request.param)  # pragma: no cover
+    workspaces = request.getfixturevalue("two_workspaces")
+    engine = request.getfixturevalue("clean_tables")
+    return postgres_harness(engine, workspaces, s3_client, BUCKET)

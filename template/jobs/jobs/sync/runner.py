@@ -125,6 +125,10 @@ class Outcome(enum.StrEnum):
     NOOP = "noop"  # the run is already terminal (a duplicate delivery)
 
 
+class UnknownProvider(LookupError):
+    """No connector is registered for a run's provider. The run fails with `provider_unknown`."""
+
+
 class _Stop(Exception):  # internal control flow; never escapes execute()
     def __init__(self, outcome: Outcome) -> None:
         super().__init__(outcome.value)
@@ -196,7 +200,10 @@ class _Execution:
             self.fail("connection_unavailable", f"the connection is {state.value}")
         if state is ConnectionState.PAUSED:
             self.wait(self.policy.pause_recheck_s, "connection_paused")
-        provider = self.deps.providers(self.spec)
+        try:
+            provider = self.deps.providers(self.spec)
+        except UnknownProvider:
+            self.fail("provider_unknown", "no connector is registered for this connection's provider")
         self.cp.setdefault("connector_version", provider.version)
         try:
             if self.spec.kind is RunKind.REPLAY:
@@ -503,9 +510,27 @@ class ExecutorMisconfigured(RuntimeError):
 PIECES: dict[str, tuple[str, str]] = {
     "ledger": ("SYNC_LEDGER", "jobs.sync.ledger:PgLedger"),
     "credentials": ("SYNC_CREDENTIALS", "jobs.sync.credentials:PgCredentialStore"),
-    "budgets": ("SYNC_BUDGETS", "jobs.sync.budgets:RunnerBudgets"),
+    "budgets": ("SYNC_BUDGETS", "jobs.sync.budgets:PgRateBudgets"),
     "audit": ("SYNC_AUDIT", "jobs.sync.audit:PgAuditSink"),
 }
+
+# The product's connectors, by the `connections.provider` name. The product registers its own (at import
+# of the module SYNC_PROVIDERS names); the synthetic providers are registered only by tests.
+ProviderFactory = Callable[[RunSpec], AnyProvider]
+_PROVIDERS: dict[str, ProviderFactory] = {}
+
+
+def register_provider(name: str, factory: ProviderFactory) -> None:
+    """Make `factory` build the connector for every connection whose provider is `name`."""
+    _PROVIDERS[name] = factory
+
+
+def unregister_provider(name: str) -> None:
+    _PROVIDERS.pop(name, None)
+
+
+def registered_providers() -> frozenset[str]:
+    return frozenset(_PROVIDERS)
 
 
 def _resolve(piece: str, env: Mapping[str, str]) -> Any:
@@ -520,30 +545,35 @@ def _resolve(piece: str, env: Mapping[str, str]) -> Any:
             "available") from exc
 
 
-def _provider_resolver(env: Mapping[str, str]) -> Callable[[RunSpec], AnyProvider]:
-    target = env.get("SYNC_PROVIDERS", "").strip()
-    if not target:
-        raise ExecutorMisconfigured("set SYNC_PROVIDERS to a 'module:factory' returning the product's "
-                                    "provider resolver (RunSpec -> provider)")
-    module_name, _, attribute = target.partition(":")
-    try:
-        factory = getattr(importlib.import_module(module_name), attribute)
-    except (ModuleNotFoundError, AttributeError) as exc:
-        raise ExecutorMisconfigured(f"SYNC_PROVIDERS names {target}, which is not available") from exc
-    resolver: Callable[[RunSpec], AnyProvider] = factory()
-    return resolver
+def _load_provider_modules(env: Mapping[str, str]) -> None:
+    """SYNC_PROVIDERS: comma-separated modules (or "module:function") that register the product's
+    connectors with `register_provider`. A function is called with no arguments."""
+    for target in (t.strip() for t in env.get("SYNC_PROVIDERS", "").split(",")):
+        if not target:
+            continue
+        module_name, _, attribute = target.partition(":")
+        try:
+            module = importlib.import_module(module_name)
+            if attribute:
+                getattr(module, attribute)()
+        except (ModuleNotFoundError, AttributeError) as exc:
+            raise ExecutorMisconfigured(f"SYNC_PROVIDERS names {target}, which is not available") from exc
 
 
-def pg_connection_state(engine: Any) -> Callable[[uuid.UUID], ConnectionState]:
+def registry_resolver(engine: Any) -> Callable[[RunSpec], AnyProvider]:
+    """Looks up the run's connection provider and builds its registered connector."""
     from sqlalchemy import text
 
-    def state(connection_id: uuid.UUID) -> ConnectionState:
+    def resolve(spec: RunSpec) -> AnyProvider:
         with engine.connect() as conn:
-            value = conn.execute(text("select state from connections where id = :id"),
-                                 {"id": connection_id}).scalar_one_or_none()
-        return ConnectionState(value) if value is not None else ConnectionState.DISCONNECTED
+            name = conn.execute(text("select provider from connections where id = :id"),
+                                {"id": spec.connection_id}).scalar_one_or_none()
+        factory = _PROVIDERS.get(str(name)) if name is not None else None
+        if factory is None:
+            raise UnknownProvider(str(name))
+        return factory(spec)
 
-    return state
+    return resolve
 
 
 def deps_from_env(env: Mapping[str, str]) -> RunnerDeps:
@@ -554,25 +584,27 @@ def deps_from_env(env: Mapping[str, str]) -> RunnerDeps:
         raise ExecutorMisconfigured(f"the sync runner needs {', '.join(missing)}")
     ledger_cls = _resolve("ledger", env)
     store_cls = _resolve("credentials", env)
-    if not callable(getattr(store_cls, "refresh", None)):
-        raise ExecutorMisconfigured("the credential store has no refresh(); the runner needs it")
     budgets_cls = _resolve("budgets", env)
     audit_cls = _resolve("audit", env)
-    providers = _provider_resolver(env)
+    _load_provider_modules(env)
 
     from sqlalchemy import create_engine
 
     from jobs.handlers.sample_fetch import s3_client
-    from jobs.sync.credentials import vault_from_env
+    from jobs.sync.credentials import VaultError, connection_state, vault_from_env
 
-    engine = create_engine(env["DATABASE_URL"])
+    try:
+        vault = vault_from_env(env)
+    except VaultError as exc:
+        raise ExecutorMisconfigured(str(exc)) from exc  # the vault's messages name settings, not values
+    engine = create_engine(env["DATABASE_URL"], pool_pre_ping=True)
     snapshots = frozenset(d.strip() for d in env.get("SYNC_SNAPSHOT_DATASETS", "").split(",") if d.strip())
     return RunnerDeps(
-        ledger=ledger_cls(engine), credentials=store_cls(engine, vault_from_env(env)),
-        raw_store=RawStore(env["RAW_BUCKET"], s3_client()), providers=providers,
+        ledger=ledger_cls(engine), credentials=store_cls(engine, vault),
+        raw_store=RawStore(env["RAW_BUCKET"], s3_client()), providers=registry_resolver(engine),
         budgets=budgets_cls(engine), audit=audit_cls(engine),
-        connection_state=pg_connection_state(engine),
-        owner=f"{socket.gethostname()}:{os.getpid()}",
+        connection_state=lambda connection_id: connection_state(engine, connection_id),
+        owner=f"{socket.gethostname()}:{os.getpid()}"[:128],
         policy=RunnerPolicy(snapshot_datasets=snapshots))
 
 

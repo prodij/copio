@@ -9,12 +9,12 @@ from jobs.sync.runner import Outcome
 from jobs.sync.testing import Fault, FaultPlan, FaultRule
 
 from . import thresholds as T
-from .harness import DAY, START, A, Harness
+from .harness import DAY, START, Harness
 
 
 def test_a_paused_connection_waits_cheaply_then_resumes(implementations: Harness) -> None:
     h = implementations
-    h.connections.set(A.connection_id, ConnectionState.PAUSED, actor="user-1")
+    h.connections.set(h.a.connection_id, ConnectionState.PAUSED, actor="user-1")
     run_id = h.submit(h.spec())
     h.engine.run_steps(4)
 
@@ -24,7 +24,7 @@ def test_a_paused_connection_waits_cheaply_then_resumes(implementations: Harness
     assert all((b.at - a.at).total_seconds() >= T.PAUSE_RECHECK_S for a, b in itertools.pairwise(hist))
     assert h.run(run_id).status is RunStatus.WAITING
 
-    h.connections.set(A.connection_id, ConnectionState.HEALTHY, actor="user-1")
+    h.connections.set(h.a.connection_id, ConnectionState.HEALTHY, actor="user-1")
     h.drain()
     assert h.run(run_id).status is RunStatus.SUCCEEDED
     actions = [(e.actor_type, e.action) for e in h.audit.events]
@@ -39,7 +39,7 @@ def test_pausing_mid_run_finishes_the_current_page_only(implementations: Harness
     def pause_during_first_fetch() -> None:
         latency()
         if h.feed.call_count == 1:
-            h.connections.set(A.connection_id, ConnectionState.PAUSED, actor="user-1")
+            h.connections.set(h.a.connection_id, ConnectionState.PAUSED, actor="user-1")
 
     h.world.on_call = pause_during_first_fetch
     h.engine.run_steps(1)
@@ -47,7 +47,7 @@ def test_pausing_mid_run_finishes_the_current_page_only(implementations: Harness
     assert h.run_row(run_id).wait_reason == "connection_paused"
     assert all(r.processed for r in h.ledger.raw_objects(run_id))  # the page in hand was published
 
-    h.connections.set(A.connection_id, ConnectionState.HEALTHY, actor="user-1")
+    h.connections.set(h.a.connection_id, ConnectionState.HEALTHY, actor="user-1")
     h.drain()
     assert h.run(run_id).status is RunStatus.SUCCEEDED
     assert len(h.records()) == 9
