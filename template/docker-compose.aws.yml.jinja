@@ -183,7 +183,7 @@ services:
       LAGO_API_KEY: ${LAGO_API_KEY}
       LAGO_WEBHOOK_ISSUER: https://lago-api.${DOMAIN}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
-      APP_ENV: production  # refuses CONNECTOR_LOCAL_KEK and mock payment
+      APP_ENV: production  # refuses CONNECTOR_LOCAL_KEK and payment shortcuts
       CONNECTOR_KMS_KEY_ID: ${CONNECTOR_KMS_KEY_ID}  # from the SSM config (infra/server.tf)
     volumes: [./.bootstrap/backend:/run/bootstrap:ro]
     ports: ["127.0.0.1:8000:8000"]
