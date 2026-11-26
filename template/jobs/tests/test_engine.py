@@ -20,6 +20,7 @@ from jobs.sync.engine import (
     conninfo,
     stream_lock,
 )
+from jobs.sync.ledger import PgLedger
 
 T0 = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
 
@@ -323,3 +324,52 @@ def test_stalled_job_recovery_is_a_periodic_task(engine: ProcrastinateEngine) ->
     periodic = {task.task.name: task for task in engine.app.periodic_registry.periodic_tasks.values()}
     assert periodic[RETRY_STALLED_TASK].cron == "* * * * *"
     assert engine.app.tasks[RETRY_STALLED_TASK].queue == "maintenance"
+
+
+def test_dispatcher_requeues_a_run_the_ledger_left_waiting(engine: ProcrastinateEngine, db: Engine,
+                                                          two_workspaces: tuple[str, str]) -> None:
+    """With S1's PgLedger: `wait` leaves queue_job_id alone; the dispatcher re-queues the run only once
+    it is due and its previous job has finished, and then exactly once."""
+    ws, _ = two_workspaces
+    conn_id = make_connection(db, ws)
+    run_id = make_run(db, ws, conn_id)
+    ledger = PgLedger(db)
+    dispatcher = Dispatcher(engine)
+    dispatcher.dispatch()
+    first_job = run_row(db, run_id)["queue_job_id"]
+    seen_inside: list[int] = []
+
+    def runner_hits_a_429(rid: uuid.UUID) -> None:
+        lease = ledger.claim(rid, "worker-1", 60)
+        assert lease is not None
+        ledger.wait(lease, datetime.now(UTC) - timedelta(seconds=1), "rate_limited")  # already due
+        # Its own job is still `doing`: the dispatcher must not queue a second one yet.
+        seen_inside.append(dispatcher.dispatch().total)
+
+    engine.set_executor(runner_hits_a_429)
+    engine.run_worker(queues=[SYNC_QUEUE], until_idle=True)
+    assert seen_inside == [0]
+    row = run_row(db, run_id)
+    assert (row["status"], row["queue_job_id"]) == ("waiting", first_job)  # wait left it alone
+
+    # Not due yet: nothing happens and the old job id stays.
+    with db.begin() as conn:
+        conn.execute(text("update sync_runs set next_attempt_at = now() + interval '1 hour' where id = :id"),
+                     {"id": run_id})
+    assert dispatcher.dispatch().total == 0
+    assert run_row(db, run_id)["queue_job_id"] == first_job
+
+    # Due: re-queued once, with a new job; the old one is finished.
+    with db.begin() as conn:
+        conn.execute(text("update sync_runs set next_attempt_at = now() - interval '1 second' where id = :id"),
+                     {"id": run_id})
+    assert dispatcher.dispatch().resumed == [run_id]
+    assert dispatcher.dispatch().total == 0
+    second_job = run_row(db, run_id)["queue_job_id"]
+    assert second_job != first_job
+    assert {j["id"]: j["status"] for j in jobs(db)} == {first_job: "succeeded", second_job: "todo"}
+
+    # The retry claims it again: waiting -> running.
+    engine.set_executor(lambda rid: None if ledger.claim(rid, "worker-2", 60) else pytest.fail("no claim"))
+    engine.run_worker(queues=[SYNC_QUEUE], until_idle=True)
+    assert run_row(db, run_id)["status"] == "running"

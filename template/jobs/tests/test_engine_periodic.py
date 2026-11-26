@@ -51,7 +51,7 @@ def test_a_periodic_job_runs_its_handler(pg_url: str, clean_tables: Engine,
         return {"ok": True}
 
     monkeypatch.setattr(worker, "run_handler", fake_handler)
-    engine = worker.build(pg_url, schedules=[worker.PeriodicJob("sample_fetch", "0 * * * *")])
+    engine = worker.build(pg_url, schedules=[worker.PeriodicJob("sample_fetch", "0 0 1 1 *")])  # never recently due: only our defer runs
     try:
         with engine.app.open():
             engine.app.configure_task("periodic.sample_fetch").defer(timestamp=1_764_072_000)
