@@ -32,7 +32,7 @@ def test_429_waits_at_least_retry_after_and_blocks_the_budget(implementations: H
     assert 20.0 <= gap <= 20.0 * (1 + T.RATE_LIMIT_JITTER_FRACTION)
     [(key, _until)] = h.budgets.blocks
     assert key.endswith(str(h.spec().connection_id))
-    assert h.run_row(run_id).waits == ["rate_limited"]
+    assert h.waits(run_id) == ["rate_limited"]
 
 
 def test_429_without_retry_after_uses_the_default(implementations: Harness) -> None:
@@ -92,12 +92,12 @@ def test_errors_never_carry_secrets_or_payloads(implementations: Harness, fault:
     h = implementations
     caplog.set_level(logging.DEBUG)
     h.feed.faults = FaultPlan([FaultRule(fault, at_call=1, times=1000, retry_after_s=1.0)])
+    token = h.credentials.get(h.spec().connection_id).access_token
     run_id = h.submit(h.spec())
     h.drain()
 
     row = h.run_row(run_id)
     assert row.status is RunStatus.FAILED
-    token = h.credentials.get(h.spec().connection_id).access_token
     for text in (row.error_detail or "", row.provider_request_ref or "", caplog.text):
         assert token not in text
         assert "tok-" not in text

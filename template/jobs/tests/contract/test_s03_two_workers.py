@@ -24,14 +24,14 @@ def test_the_stale_worker_writes_nothing(implementations: Harness) -> None:
             h.clock.advance(T.LEASE_S + 1)
             # ...and worker B claims the stream and finishes the run.
             state["b"] = h.once(run_id, owner="worker-B")
-            state["writes_after_takeover"] = h.ledger.writes
+            state["writes_after_takeover"] = h.kill.writes
 
     h.world.on_call = on_call
     outcome_a = h.once(run_id, owner="worker-A")
 
     assert state["b"] is Outcome.SUCCEEDED
     assert outcome_a is Outcome.STALE
-    assert h.ledger.writes == state["writes_after_takeover"]  # A wrote nothing after the takeover
+    assert h.kill.writes == state["writes_after_takeover"]  # A wrote nothing after the takeover
     run = h.run(run_id)
     assert run.status is RunStatus.SUCCEEDED
     assert run.attempt == 2

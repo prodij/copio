@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from jobs.sync.contract import (
+    AuthRevoked,
     ConnectionState,
     Credential,
     Lease,
@@ -397,11 +398,16 @@ class MemoryCredentialStore:
         self.creds[connection_id] = Credential(connection_id, token, 1, expires_at)
 
     def get(self, connection_id: uuid.UUID) -> Credential:
+        """Semantics: a connection that needs reconnecting (or is disconnected) has no usable credential:
+        AuthRevoked, never a token the provider will refuse."""
+        if self.connections.state[connection_id] in (ConnectionState.RECONNECT_NEEDED,
+                                                     ConnectionState.DISCONNECTED):
+            raise AuthRevoked("the connection needs to be reconnected")
         return self.creds[connection_id]
 
     def rotate(self, cred: Credential, access_token: str, expires_at: datetime | None,
                extra: Mapping[str, str] | None = None) -> Credential:
-        current = self.creds[cred.connection_id]
+        current = self.get(cred.connection_id)
         if current.version != cred.version:
             self.lost_races += 1
             return current
@@ -412,7 +418,7 @@ class MemoryCredentialStore:
         return new
 
     def refresh(self, cred: Credential, refresher: TokenRefresher) -> Credential:
-        current = self.creds[cred.connection_id]
+        current = self.get(cred.connection_id)
         if current.version != cred.version:
             self.lost_races += 1
             return current
@@ -423,8 +429,9 @@ class MemoryCredentialStore:
     def mark_revoked(self, connection_id: uuid.UUID, reason: str) -> None:
         self.connections.state[connection_id] = ConnectionState.RECONNECT_NEEDED
         self.connections.reason[connection_id] = reason
-        self.audit.record(self.connections.workspace[connection_id], "connection.reconnect_needed",
-                          "connection", str(connection_id), {"reason": reason})
+        self.audit.events.append(AuditEvent(self.connections.workspace[connection_id], "system",
+                                            "credential-store", "connection.auth_revoked", "connection",
+                                            str(connection_id), {"reason": reason}))
 
 
 class MemoryBudgets:
@@ -478,10 +485,10 @@ class MemoryEngine:
     found its stream busy is retried after `busy_retry_s`. With until_idle, when nothing is due the
     clock jumps to the next job; the worker stops when the queues are empty."""
 
-    def __init__(self, clock: FakeClock, ledger: MemoryLedger,
+    def __init__(self, clock: FakeClock, waiting_until: Callable[[uuid.UUID], datetime | None],
                  task: Callable[[uuid.UUID], Outcome], *, max_steps: int, busy_retry_s: float = 5.0) -> None:
         self.clock = clock
-        self.ledger = ledger
+        self.waiting_until = waiting_until  # next_attempt_at of a waiting run, else None
         self.task = task
         self.max_steps = max_steps
         self.busy_retry_s = busy_retry_s
@@ -533,9 +540,9 @@ class MemoryEngine:
         at = self.clock.now()
         outcome = self.task(job.run_id)
         self.history.append(Execution(at, job.run_id, job.queue, outcome, self.clock.now()))
-        run = self.ledger.runs[job.run_id]
-        if run.status is RunStatus.WAITING and run.next_attempt_at is not None:
-            self.enqueue(job.run_id, run_at=run.next_attempt_at, queue=job.queue)
+        until = self.waiting_until(job.run_id)
+        if until is not None:
+            self.enqueue(job.run_id, run_at=until, queue=job.queue)
         elif outcome is Outcome.BUSY:
             self.enqueue(job.run_id, run_at=at + timedelta(seconds=self.busy_retry_s), queue=job.queue)
         return outcome

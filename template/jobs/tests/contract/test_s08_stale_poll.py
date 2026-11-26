@@ -5,13 +5,13 @@ Must observe: no stale overwrite."""
 from jobs.sync.contract import RunStatus, Trigger, Window
 from jobs.sync.testing import Fault, FaultPlan, FaultRule
 
-from .harness import DAY, START, A, Harness
+from .harness import DAY, START, Harness
 
 
 def test_a_stale_poll_never_overwrites_a_newer_webhook(implementations: Harness) -> None:
     h = implementations
     key = f"{START:%Y%m%d}-000"
-    newer = h.world.update(A.connection_id, "events", key, rev=2, data={"id": key, "amount": 999})
+    newer = h.world.update(h.a.connection_id, "events", key, rev=2, data={"id": key, "amount": 999})
 
     # The webhook for the change lands first (a narrow window inside the day).
     webhook = h.submit(h.spec(trigger=Trigger.WEBHOOK,

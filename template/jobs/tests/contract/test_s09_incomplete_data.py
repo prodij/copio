@@ -7,7 +7,7 @@ from jobs.sync.testing import Fault, FaultPlan, FaultRule
 from jobs.sync.testing.world import ACCOUNTS
 
 from . import thresholds as T
-from .harness import DAY, START, A, Harness
+from .harness import DAY, START, Harness
 
 
 def test_schema_change_keeps_the_raw_and_does_not_complete(implementations: Harness) -> None:
@@ -76,7 +76,7 @@ def test_a_transient_partial_snapshot_recovers_without_false_deletions(implement
 def test_only_a_complete_snapshot_infers_a_deletion(implementations: Harness) -> None:
     h = implementations
     _full_snapshot(h)
-    h.world.remove(A.connection_id, ACCOUNTS, "acct-0005")
+    h.world.remove(h.a.connection_id, ACCOUNTS, "acct-0005")
     run_id = h.submit(h.spec(dataset=ACCOUNTS, window=Window(START + DAY, START + 2 * DAY)))
     h.drain()
 

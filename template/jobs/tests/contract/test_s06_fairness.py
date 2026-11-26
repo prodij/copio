@@ -24,7 +24,7 @@ def test_incremental_finishes_while_a_backfill_runs(implementations: Harness) ->
     assert len(done) == 1
     assert (done[0].finished_at - submitted_at).total_seconds() <= T.MAX_INCREMENTAL_WALL_S_DURING_BACKFILL
     assert h.run(backfill).status is RunStatus.SUCCEEDED
-    assert "backfill_yield" in h.run_row(backfill).waits
+    assert "backfill_yield" in h.waits(backfill)
     assert h.coverage() == (backfill_window.start, START + DAY)  # contiguous, both pieces
     assert len(h.records()) == 31 * 3
     assert h.provider_calls <= T.MAX_PROVIDER_CALLS_PER_SCENARIO
