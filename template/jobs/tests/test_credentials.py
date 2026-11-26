@@ -3,7 +3,9 @@
 
 import base64
 import json
+import logging
 import threading
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -13,7 +15,7 @@ import pytest
 from moto import mock_aws
 from sqlalchemy import Engine, text
 
-from jobs.sync.contract import AuthRevoked, Credential
+from jobs.sync.contract import AuthRevoked, ConnectionState, Credential, TransientError
 from jobs.sync.credentials import (
     CredentialNotFound,
     KmsKeyWrapper,
@@ -23,6 +25,7 @@ from jobs.sync.credentials import (
     Vault,
     VaultError,
     VaultMisconfigured,
+    connection_state,
     vault_from_env,
 )
 
@@ -269,3 +272,128 @@ def test_rotate_refuses_a_revoked_connection(store: PgCredentialStore, two_works
     store.mark_revoked(cid, "provider_auth_revoked")
     with pytest.raises(AuthRevoked):
         store.rotate(cred, "synthetic-late", None)
+
+
+# ---- refresh (serialized provider call) and connection_state
+
+
+class CountingRefresher:
+    """A synthetic provider refresh. `delay_s` widens the race window; `error` is raised instead."""
+
+    def __init__(self, delay_s: float = 0.0, error: Exception | None = None) -> None:
+        self.calls: list[Credential] = []
+        self.delay_s = delay_s
+        self.error = error
+        self._lock = threading.Lock()
+
+    def refresh_token(self, cred: Credential) -> tuple[str, datetime | None]:
+        with self._lock:
+            self.calls.append(cred)
+            n = len(self.calls)
+        time.sleep(self.delay_s)
+        if self.error is not None:
+            raise self.error
+        return f"synthetic-refreshed-{n}", datetime(2031, 1, 1, tzinfo=UTC)
+
+
+def test_refresh_calls_the_provider_once_and_saves_a_new_version(
+        store: PgCredentialStore, two_workspaces: tuple[str, str]) -> None:
+    cid = seed(store.engine, store.vault, two_workspaces[0])
+    start = store.get(cid)
+    refresher = CountingRefresher()
+    new = store.refresh(start, refresher)
+    assert refresher.calls == [start]
+    assert (new.access_token, new.version, dict(new.extra)) == ("synthetic-refreshed-1", 2,
+                                                                 {"refresh_token": "synthetic-r"})
+    assert new.expires_at == datetime(2031, 1, 1, tzinfo=UTC)
+    assert store.get(cid) == new
+
+
+def test_refresh_with_a_stale_version_returns_the_newer_without_calling_the_provider(
+        store: PgCredentialStore, two_workspaces: tuple[str, str]) -> None:
+    cid = seed(store.engine, store.vault, two_workspaces[0])
+    old = store.get(cid)
+    newer = store.refresh(old, CountingRefresher())
+    refresher = CountingRefresher()
+    assert store.refresh(old, refresher) == newer
+    assert refresher.calls == []
+
+
+def test_two_workers_refreshing_at_once_call_the_provider_exactly_once(
+        store: PgCredentialStore, two_workspaces: tuple[str, str], caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)
+    cid = seed(store.engine, store.vault, two_workspaces[0])
+    start = store.get(cid)
+    refresher = CountingRefresher(delay_s=0.3)  # the winner holds the lock across a slow provider call
+    results: list[Credential] = []
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(2)
+
+    def worker() -> None:
+        barrier.wait()
+        try:
+            results.append(store.refresh(start, refresher))
+        except BaseException as exc:  # surfaced below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert len(refresher.calls) == 1
+    final = store.get(cid)
+    assert final.version == 2 and final.access_token == "synthetic-refreshed-1"
+    assert results == [final, final]
+    for token in ("synthetic-token-1", "synthetic-refreshed-1", "synthetic-r"):
+        assert token not in caplog.text
+
+
+def test_auth_revoked_from_the_provider_propagates_and_writes_nothing(
+        store: PgCredentialStore, two_workspaces: tuple[str, str], caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)
+    cid = seed(store.engine, store.vault, two_workspaces[0])
+    start = store.get(cid)
+    with pytest.raises(AuthRevoked) as info:
+        store.refresh(start, CountingRefresher(error=AuthRevoked("refresh rejected", request_ref="req-1")))
+    assert store.get(cid) == start  # nothing written
+    store.mark_revoked(cid, "provider_auth_revoked")  # what the caller does next
+    assert connection_state(store.engine, cid) is ConnectionState.RECONNECT_NEEDED
+    refresher = CountingRefresher()
+    with pytest.raises(AuthRevoked) as again:  # a revoked connection is never refreshed
+        store.refresh(start, refresher)
+    assert refresher.calls == []
+    for text_ in (str(info.value), repr(info.value), str(again.value), caplog.text):
+        assert "synthetic-token-1" not in text_ and "synthetic-r" not in text_
+
+
+def test_other_provider_errors_propagate_and_the_next_refresh_still_works(
+        store: PgCredentialStore, two_workspaces: tuple[str, str]) -> None:
+    cid = seed(store.engine, store.vault, two_workspaces[0])
+    start = store.get(cid)
+    with pytest.raises(TransientError):
+        store.refresh(start, CountingRefresher(error=TransientError("timeout")))
+    assert store.refresh(start, CountingRefresher()).version == 2  # the lock was released
+
+
+def test_refresh_holds_the_lock_only_per_connection(store: PgCredentialStore,
+                                                    two_workspaces: tuple[str, str]) -> None:
+    a = seed(store.engine, store.vault, two_workspaces[0])
+    b = seed(store.engine, store.vault, two_workspaces[1])
+    slow = CountingRefresher(delay_s=0.5)
+    t = threading.Thread(target=store.refresh, args=(store.get(a), slow))
+    t.start()
+    time.sleep(0.1)
+    began = time.monotonic()
+    store.refresh(store.get(b), CountingRefresher())
+    assert time.monotonic() - began < 0.4  # b didn't wait for a's provider call
+    t.join()
+
+
+def test_connection_state(store: PgCredentialStore, two_workspaces: tuple[str, str]) -> None:
+    ws = two_workspaces[0]
+    assert connection_state(store.engine, seed(store.engine, store.vault, ws)) is ConnectionState.HEALTHY
+    paused = seed(store.engine, store.vault, ws, state="paused")
+    assert connection_state(store.engine, paused) is ConnectionState.PAUSED
+    assert connection_state(store.engine, uuid.uuid4()) is ConnectionState.DISCONNECTED

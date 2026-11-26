@@ -29,7 +29,13 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import Connection, Engine, text
 
-from jobs.sync.contract import AuthRevoked, Credential, CredentialStore
+from jobs.sync.contract import (
+    AuthRevoked,
+    ConnectionState,
+    Credential,
+    CredentialStore,
+    TokenRefresher,
+)
 
 # --- shared format begin (identical in backend/app/connectors/vault.py) ---
 MAGIC = b"CV"
@@ -241,6 +247,20 @@ class PgCredentialStore(CredentialStore):
         with self.engine.connect() as conn:
             return self._read(conn, connection_id, for_update=False)
 
+    def _save(self, conn: Connection, current: Credential, access_token: str, expires_at: datetime | None,
+              extra: Mapping[str, str] | None) -> Credential:
+        """Write a new version over `current`, which the caller has read under the lock."""
+        new_extra = dict(current.extra if extra is None else extra)
+        blob = self.vault.seal(current.connection_id, Secret(access_token=access_token, extra=new_extra))
+        version = conn.execute(text(
+            "update credentials set ciphertext = :blob, key_id = :key_id, version = version + 1,"
+            " expires_at = :expires_at, refreshed_at = now(), updated_at = now()"
+            " where connection_id = :id and version = :version returning version"),
+            {"blob": blob, "key_id": self.vault.key_id, "expires_at": expires_at,
+             "id": current.connection_id, "version": current.version}).scalar_one()
+        return Credential(connection_id=current.connection_id, access_token=access_token,
+                          version=int(version), expires_at=expires_at, extra=new_extra)
+
     def rotate(self, cred: Credential, access_token: str, expires_at: datetime | None,
                extra: Mapping[str, str] | None = None) -> Credential:
         with self.engine.begin() as conn:
@@ -248,16 +268,24 @@ class PgCredentialStore(CredentialStore):
             current = self._read(conn, cred.connection_id, for_update=True)
             if current.version != cred.version:
                 return current  # lost the race: the winner's token stands, nothing is written
-            new_extra = dict(current.extra if extra is None else extra)
-            blob = self.vault.seal(cred.connection_id, Secret(access_token=access_token, extra=new_extra))
-            version = conn.execute(text(
-                "update credentials set ciphertext = :blob, key_id = :key_id, version = version + 1,"
-                " expires_at = :expires_at, refreshed_at = now(), updated_at = now()"
-                " where connection_id = :id and version = :version returning version"),
-                {"blob": blob, "key_id": self.vault.key_id, "expires_at": expires_at,
-                 "id": cred.connection_id, "version": cred.version}).scalar_one()
-        return Credential(connection_id=cred.connection_id, access_token=access_token, version=int(version),
-                          expires_at=expires_at, extra=new_extra)
+            return self._save(conn, current, access_token, expires_at, extra)
+
+    def refresh(self, cred: Credential, refresher: TokenRefresher) -> Credential:
+        """Refresh under the per-connection lock, so the provider is called at most once per version.
+
+        If `cred.version` is still current, `refresher.refresh_token` is called exactly once and its
+        result saved as version + 1. If another worker refreshed first, its credential comes back and the
+        provider is not called. The lock is a transaction lock, held across the provider call: a second
+        worker waits instead of spending a refresh token the first one is about to replace. Any error from
+        the provider (AuthRevoked included) propagates and nothing is written; on AuthRevoked the caller
+        then calls `mark_revoked`."""
+        with self.engine.begin() as conn:
+            _lock(conn, cred.connection_id)
+            current = self._read(conn, cred.connection_id, for_update=True)
+            if current.version != cred.version:
+                return current
+            access_token, expires_at = refresher.refresh_token(current)
+            return self._save(conn, current, access_token, expires_at, None)
 
     def mark_revoked(self, connection_id: uuid.UUID, reason: str) -> None:
         """The connection moves to reconnect_needed (unless it was disconnected) and a system audit event
@@ -281,3 +309,12 @@ class PgCredentialStore(CredentialStore):
                 " 'connection', :target, cast(:detail as jsonb))"),
                 {"ws": row.workspace_id, "target": str(connection_id),
                  "detail": json.dumps({"from_state": row.state, "reason": reason})})
+
+
+def connection_state(engine: Engine, connection_id: uuid.UUID) -> ConnectionState:
+    """The connection's current state, for the runner. A connection that no longer exists reads as
+    DISCONNECTED, so its runs stop instead of erroring."""
+    with engine.connect() as conn:
+        state = conn.execute(text("select state from connections where id = :id"),
+                             {"id": connection_id}).scalar_one_or_none()
+    return ConnectionState.DISCONNECTED if state is None else ConnectionState(state)
