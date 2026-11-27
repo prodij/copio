@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { type ConnectionSummary, type Run, replayRun, resumeRun, retryRun, runDetailQuery } from "./api";
 import { RunStatusBadge } from "./badges";
 import { ConfirmAction } from "./ConfirmAction";
+import { stack } from "./stack";
 import { ago, label, when } from "./format";
 import type { useSyncAction } from "./useSyncAction";
 
@@ -35,7 +36,7 @@ function RunDetailPanel({ runId }: { runId: string }) {
       {rows.filter(([, v]) => v).map(([k, v]) => (
         <Fragment key={k}>
           <dt className="text-muted-foreground">{k}</dt>
-          <dd className="break-all">{v}</dd>
+          <dd className="[overflow-wrap:anywhere]">{v}</dd>
         </Fragment>
       ))}
     </dl>
@@ -47,7 +48,7 @@ function RunActions({ run, connection, action }: { run: Run; connection: Connect
   const blocked = `The connection is ${connection.state.replaceAll("_", " ")}`;
   if (run.status === "failed") {
     return (
-      <span className="inline-flex flex-wrap justify-end gap-1.5">
+      <span className="inline-flex flex-wrap justify-end gap-1.5 max-sm:justify-start">
         <ConfirmAction label="Retry" question="Retry this run?" disabled={!healthy} disabledReason={blocked}
           pending={action.pendingKey === `retry:${run.id}`}
           onConfirm={() => action.act(`retry:${run.id}`, () => retryRun(run.id), "Retry queued.")} />
@@ -80,8 +81,8 @@ export function RunsTable({ runs, connection, action }: { runs: Run[]; connectio
   if (!runs.length) return <p className="text-sm text-muted-foreground">No runs match.</p>;
   return (
     <div className="relative overflow-x-auto">
-      <table className="w-full text-left text-sm">
-        <thead className="text-xs text-muted-foreground">
+      <table className={`w-full text-left text-sm ${stack.table}`}>
+        <thead className={`text-xs text-muted-foreground ${stack.head}`}>
           <tr className="border-b">
             <th className="py-2 pr-3 font-medium">Created</th>
             <th className="py-2 pr-3 font-medium">Dataset</th>
@@ -90,25 +91,25 @@ export function RunsTable({ runs, connection, action }: { runs: Run[]; connectio
             <th className="py-2 font-medium"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className={stack.body}>
           {runs.map((run) => (
             <Fragment key={run.id}>
-              <tr className="border-b align-top" data-status={run.status}>
-                <td className="py-2 pr-3 whitespace-nowrap" title={when(run.created_at)}>
+              <tr className={`border-b align-top ${stack.row}`} data-status={run.status}>
+                <td className={`py-2 pr-3 whitespace-nowrap ${stack.cell}`} title={when(run.created_at)}>
                   {ago(run.created_at)}
                   <div className="text-xs text-muted-foreground">{run.kind}, {run.trigger}</div>
                 </td>
-                <td className="py-2 pr-3">{run.dataset}</td>
-                <td className="py-2 pr-3">
+                <td data-label="Dataset" className={`py-2 pr-3 ${stack.cell} ${stack.labelled}`}>{run.dataset}</td>
+                <td className={`py-2 pr-3 ${stack.cell}`}>
                   <RunStatusBadge status={run.status} />
                   <div className="text-xs text-muted-foreground">
                     {label(run.stage)}{run.attempt > 1 ? `, attempt ${run.attempt}` : ""}
                     {run.error_code ? <span className="text-destructive">, {run.error_code}</span> : null}
                   </div>
                 </td>
-                <td className="py-2 pr-3 tabular-nums">{run.records_accepted.toLocaleString()}</td>
-                <td className="py-2">
-                  <div className="flex flex-wrap items-start justify-end gap-1.5">
+                <td data-label="Records" className={`py-2 pr-3 tabular-nums ${stack.cell} ${stack.labelled}`}>{run.records_accepted.toLocaleString()}</td>
+                <td className={`py-2 ${stack.cell} ${stack.wide}`}>
+                  <div className="flex flex-wrap items-start justify-end gap-1.5 max-sm:justify-start">
                     <RunActions run={run} connection={connection} action={action} />
                     <Button size="xs" variant="ghost" aria-expanded={open === run.id}
                       onClick={() => setOpen(open === run.id ? null : run.id)}>
@@ -118,8 +119,8 @@ export function RunsTable({ runs, connection, action }: { runs: Run[]; connectio
                 </td>
               </tr>
               {open === run.id && (
-                <tr className="border-b bg-muted/30">
-                  <td colSpan={5} className="p-3"><RunDetailPanel runId={run.id} /></td>
+                <tr className={`border-b bg-muted/30 ${stack.row}`}>
+                  <td colSpan={5} className={`p-3 ${stack.cell} ${stack.wide} max-sm:px-3`}><RunDetailPanel runId={run.id} /></td>
                 </tr>
               )}
             </Fragment>

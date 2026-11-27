@@ -1,5 +1,6 @@
 import { type ConnectionSummary, type DatasetHealth, refreshDataset } from "./api";
 import { FreshnessBadge, RunStatusBadge } from "./badges";
+import { stack } from "./stack";
 import { ConfirmAction } from "./ConfirmAction";
 import { ago, duration, short, when } from "./format";
 import type { useSyncAction } from "./useSyncAction";
@@ -37,8 +38,8 @@ export function DatasetHealthTable({ connection, datasets, action }: {
   const blocked = connection.state !== "healthy" ? `The connection is ${connection.state.replaceAll("_", " ")}` : undefined;
   return (
     <div className="relative overflow-x-auto">
-      <table className="w-full text-left text-sm">
-        <thead className="text-xs text-muted-foreground">
+      <table className={`w-full text-left text-sm ${stack.table}`}>
+        <thead className={`text-xs text-muted-foreground ${stack.head}`}>
           <tr className="border-b">
             <th className="py-2 pr-3 font-medium">Dataset</th>
             <th className="py-2 pr-3 font-medium">Freshness</th>
@@ -47,24 +48,24 @@ export function DatasetHealthTable({ connection, datasets, action }: {
             <th className="py-2 font-medium"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className={stack.body}>
           {datasets.map((d) => {
             const key = `refresh:${d.dataset}`;
             const extra = problems(d);
             return (
-              <tr key={d.dataset} className="border-b align-top last:border-0" data-freshness={d.freshness}>
-                <td className="py-2 pr-3 font-medium">{d.dataset}</td>
-                <td className="space-y-1 py-2 pr-3">
+              <tr key={d.dataset} className={`border-b align-top last:border-0 ${stack.row}`} data-freshness={d.freshness}>
+                <td className={`py-2 pr-3 font-medium ${stack.cell} ${stack.wide}`}>{d.dataset}</td>
+                <td className={`space-y-1 py-2 pr-3 ${stack.cell} ${stack.wide}`}>
                   <FreshnessBadge freshness={d.freshness} />
                   <div className="text-xs"><Lag d={d} /></div>
                   {extra.map((n) => <div key={n} className="text-xs text-destructive">{n}</div>)}
                   {d.schedule_paused && <div className="text-xs text-muted-foreground">Schedule paused</div>}
                 </td>
-                <td className="py-2 pr-3">
+                <td data-label="Complete through" className={`py-2 pr-3 ${stack.cell} ${stack.labelled}`}>
                   {d.covered_to ? <span className="whitespace-nowrap" title={when(d.covered_to)}>{short(d.covered_to)}</span> : <span className="text-muted-foreground">—</span>}
                   {d.last_publish_at && <div className="text-xs whitespace-nowrap text-muted-foreground">published {ago(d.last_publish_at)}</div>}
                 </td>
-                <td className="py-2 pr-3">
+                <td data-label="Last attempt" className={`py-2 pr-3 ${stack.cell} ${stack.labelled}`}>
                   {d.last_attempt ? (
                     <span className="inline-flex flex-col gap-1">
                       <RunStatusBadge status={d.last_attempt.status} />
@@ -74,7 +75,7 @@ export function DatasetHealthTable({ connection, datasets, action }: {
                     </span>
                   ) : <span className="text-muted-foreground">—</span>}
                 </td>
-                <td className="py-2 text-right">
+                <td className={`py-2 text-right ${stack.cell} ${stack.wide} max-sm:text-left`}>
                   <ConfirmAction
                     label="Refresh now"
                     question={`Sync ${d.dataset} now?`}

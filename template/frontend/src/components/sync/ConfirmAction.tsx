@@ -29,8 +29,8 @@ export function ConfirmAction({
     );
   }
   return (
-    <span role="group" aria-label={question} className="inline-flex max-w-56 flex-wrap items-center justify-end gap-1.5">
-      <span className="basis-full text-right text-xs text-muted-foreground">{question}</span>
+    <span role="group" aria-label={question} className="inline-flex max-w-56 flex-wrap items-center justify-end gap-1.5 max-sm:justify-start">
+      <span className="basis-full text-right text-xs max-sm:text-left text-muted-foreground">{question}</span>
       <Button size="xs" onClick={() => { setAsking(false); onConfirm(); }}>Confirm</Button>
       <Button size="xs" variant="ghost" onClick={() => setAsking(false)}>Cancel</Button>
     </span>

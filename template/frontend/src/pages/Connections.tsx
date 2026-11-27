@@ -7,6 +7,7 @@ import { connectionsQuery, operatorHealthQuery } from "@/components/sync/api";
 import { ConnectionStateBadge } from "@/components/sync/badges";
 import { ago, when } from "@/components/sync/format";
 import { OperatorHealthPanel } from "@/components/sync/OperatorHealthPanel";
+import { stack } from "@/components/sync/stack";
 
 export function Connections() {
   const connections = useQuery(connectionsQuery);
@@ -26,8 +27,8 @@ export function Connections() {
           {health.data && <OperatorHealthPanel health={health.data} />}
           {health.error && <ErrorState error={health.error as ApiError} />}
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs text-muted-foreground">
+            <table className={`w-full text-left text-sm ${stack.table}`}>
+              <thead className={`text-xs text-muted-foreground ${stack.head}`}>
                 <tr className="border-b">
                   <th className="py-2 pr-3 font-medium">Connection</th>
                   <th className="py-2 pr-3 font-medium">State</th>
@@ -35,18 +36,18 @@ export function Connections() {
                   <th className="py-2 font-medium">Last published</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className={stack.body}>
                 {connections.data.map((c) => (
-                  <tr key={c.id} className="border-b align-top last:border-0">
-                    <td className="py-2 pr-3">
+                  <tr key={c.id} className={`border-b align-top last:border-0 ${stack.row}`}>
+                    <td className={`py-2 pr-3 ${stack.cell} ${stack.wide}`}>
                       <Link to={`/connections/${c.id}`} className="font-medium text-primary hover:underline">{c.display_name}</Link>
                       <div className="text-xs text-muted-foreground">{c.provider} · {c.account_ref}</div>
                     </td>
-                    <td className="py-2 pr-3">
+                    <td className={`py-2 pr-3 ${stack.cell} ${stack.wide}`}>
                       <ConnectionStateBadge state={c.state} />
                       {c.state_reason && <div className="text-xs text-muted-foreground">{c.state_reason}</div>}
                     </td>
-                    <td className="py-2 pr-3">
+                    <td data-label="Datasets" className={`py-2 pr-3 ${stack.cell} ${stack.labelled}`}>
                       {c.datasets} {c.datasets === 1 ? "dataset" : "datasets"}
                       {c.stale_datasets > 0 && <div className="text-xs text-destructive">{c.stale_datasets} stale</div>}
                       {c.failed_runs_awaiting_action > 0 && (
@@ -55,7 +56,7 @@ export function Connections() {
                         </div>
                       )}
                     </td>
-                    <td className="py-2">
+                    <td data-label="Last published" className={`py-2 ${stack.cell} ${stack.labelled}`}>
                       {c.last_publish_at ? <span title={when(c.last_publish_at)}>{ago(c.last_publish_at)}</span> : <span className="text-muted-foreground">Never</span>}
                     </td>
                   </tr>
